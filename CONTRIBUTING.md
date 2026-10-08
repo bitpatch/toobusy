@@ -11,6 +11,10 @@ dotnet build
 dotnet test
 ```
 
+## Branches
+
+Development happens on `develop`: branch from it and open pull requests against it. `main` holds released code only and changes through release pull requests from `develop`.
+
 ## Before you open a pull request
 
 - `dotnet build` passes; warnings are errors.

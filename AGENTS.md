@@ -33,5 +33,5 @@ A change is ready when the build, the tests and the format check pass.
 
 - Work is planned as issues of `bitpatch/toobusy` on the organisation's `toobusy` project board.
 - Issue types are the labels `feature`, `bug`, `chore` and `docs`.
-- The default branch is `main`.
+- All development happens on `develop`, the default branch. `main` is protected and holds released code only: it changes through a release pull request from `develop`. Never commit or push to `main`.
 - The original script that toobusy grows out of is not in this repository. Ask the owner when its behaviour matters.
