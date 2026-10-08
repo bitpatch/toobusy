@@ -1,0 +1,14 @@
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+.DS_Store
+
+# Local assistant state
+.claude/settings.local.json
+.claude/.cc-writes

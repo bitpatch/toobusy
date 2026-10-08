@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TooBusy.Assistants.ClaudeCode/TooBusy.Assistants.ClaudeCode.csproj" />
+    <Project Path="src/TooBusy.Cli/TooBusy.Cli.csproj" />
+    <Project Path="src/TooBusy.Core/TooBusy.Core.csproj" />
+    <Project Path="src/TooBusy.Infrastructure/TooBusy.Infrastructure.csproj" />
+    <Project Path="src/TooBusy.Trackers.GitHub/TooBusy.Trackers.GitHub.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TooBusy.Architecture.Tests/TooBusy.Architecture.Tests.csproj" />
+    <Project Path="tests/TooBusy.Cli.Tests/TooBusy.Cli.Tests.csproj" />
+  </Folder>
+</Solution>

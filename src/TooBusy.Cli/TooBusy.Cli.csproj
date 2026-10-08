@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>toobusy</AssemblyName>
+    <RootNamespace>TooBusy.Cli</RootNamespace>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../TooBusy.Assistants.ClaudeCode/TooBusy.Assistants.ClaudeCode.csproj" />
+    <ProjectReference Include="../TooBusy.Core/TooBusy.Core.csproj" />
+    <ProjectReference Include="../TooBusy.Infrastructure/TooBusy.Infrastructure.csproj" />
+    <ProjectReference Include="../TooBusy.Trackers.GitHub/TooBusy.Trackers.GitHub.csproj" />
+  </ItemGroup>
+
+</Project>
