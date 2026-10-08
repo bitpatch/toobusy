@@ -15,6 +15,7 @@ dotnet build                          # build everything; warnings are errors
 dotnet test                           # run all tests
 dotnet format --verify-no-changes     # check formatting; `dotnet format` fixes it
 dotnet run --project src/TooBusy.Cli -- --help
+dotnet run --project src/TooBusy.Cli -- run --dry-run     # imitated run; changes nothing
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
 ```
 

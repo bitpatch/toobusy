@@ -29,6 +29,24 @@ public class CliAppTests
         Assert.Contains("--no-such-option", error, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task DryRunSaysThatNothingIsChanged()
+    {
+        var (exit, output, _) = await RunAsync("run", "--dry-run");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Dry run", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RealRunIsRefusedUntilItExists()
+    {
+        var (exit, _, error) = await RunAsync("run");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("--dry-run", error, StringComparison.Ordinal);
+    }
+
     static async Task<(int Exit, string Output, string Error)> RunAsync(params string[] args)
     {
         using var output = new StringWriter();
