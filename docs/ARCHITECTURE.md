@@ -1,6 +1,6 @@
 # Architecture
 
-This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, later, in the specification. Only the solution skeleton exists so far; the ports named here are planned and get their final shape with the specification.
+This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). Only the solution skeleton exists so far; the ports named here are planned and get their final shape with the specification.
 
 ## Projects
 

@@ -1,6 +1,6 @@
 # Instructions for AI assistants
 
-toobusy is a command-line tool that works through the tasks of a project's tracker with AI coding assistants. Read [docs/IDEA.md](docs/IDEA.md) for what it is meant to be and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is laid out before changing anything.
+toobusy is a command-line tool that works through the tasks of a project's tracker with AI coding assistants. Read [docs/IDEA.md](docs/IDEA.md) for what it is meant to be, [docs/SPEC.md](docs/SPEC.md) for what it does in detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is laid out before changing anything.
 
 ## Language
 

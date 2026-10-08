@@ -2,7 +2,7 @@
 
 A command-line tool that works through the tasks of your project while you are too busy to do it yourself. It reads the task queue from your tracker, takes the tasks one after another according to your rules, and has an AI coding assistant do each of them in your working copy.
 
-> **Status: early development.** Nothing is usable yet. The repository holds the project skeleton; the specification comes next.
+> **Status: early development.** Nothing is usable yet. The repository holds the project skeleton and the first part of the specification.
 
 ## The idea
 
@@ -13,7 +13,7 @@ A command-line tool that works through the tasks of your project while you are t
 
 The first version targets GitHub Issues with GitHub Projects, and Claude Code. Other trackers and assistants (Codex, OpenCode) are planned behind the same interfaces.
 
-Read more in [docs/IDEA.md](docs/IDEA.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Read more in [docs/IDEA.md](docs/IDEA.md), [docs/SPEC.md](docs/SPEC.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Building from source
 
