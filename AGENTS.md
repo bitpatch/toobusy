@@ -45,6 +45,6 @@ A change is ready when the build, the tests and the format check pass.
 Every reply to the owner ends with a separate last line that says what is expected of them:
 
 - `✅ Completed` — the task is fully finished: the work is done, committed and pushed, and nothing more is required from the owner. For a request that changes nothing in the repository, such as a question, it means the request is fully answered.
-- `🟡 Your answer is needed` — the work cannot go on, or cannot be finished, without the owner: a question, a choice, an approval or a step only they can do. State what exactly is needed right above this line.
+- `❓ Your answer is needed` — the work cannot go on, or cannot be finished, without the owner: a question, a choice, an approval or a step only they can do. State what exactly is needed right above this line.
 
 Never write `✅ Completed` while anything is left: an unpushed commit, a failing check, an open question.
