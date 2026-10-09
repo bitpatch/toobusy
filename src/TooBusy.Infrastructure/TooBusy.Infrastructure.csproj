@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../TooBusy.Core/TooBusy.Core.csproj" />
   </ItemGroup>
 

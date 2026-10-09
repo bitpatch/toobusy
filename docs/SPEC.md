@@ -25,7 +25,7 @@ Out of scope, each a later part of this specification:
 
 ### The project and its settings
 
-A project is a git repository. toobusy finds it by walking up from the current folder to the root of the working copy; the settings live in `.toobusy/settings.toml` at that root. Outside a git working copy every command but `--help` and `--version` fails with `toobusy: not inside a git repository`.
+A project is a git repository. toobusy finds it by walking up from the current folder to the root of the working copy; the settings live in `.toobusy/settings.toml` at that root. Outside a git working copy every command but `--help` and `--version` fails with `toobusy: not inside a git repository` and exit code 2.
 
 The settings are committed, so that everyone who clones the repository gets them. They hold nothing personal: no tokens, no paths of one machine.
 
@@ -87,7 +87,23 @@ toobusy: this project is not set up yet.
 Run `toobusy init` to set it up.
 ```
 
+The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
+
 `toobusy` without a command in a project that is set up shows the help, as it does now. `--help` and `--version` work everywhere.
+
+### Colours
+
+Every command takes its colours from one palette, defined in one place. Each role has a value for a dark terminal and one for a light terminal:
+
+| Role | Dark | Light | Marks |
+|---|---|---|---|
+| accent | `#D4503F` | `#B03A2E` | the `?` of a question, the selected line, step headings, a command in a message |
+| error | `#F0647E` | `#C2255C` | `✘` and the text of a failure, removed lines of a diff |
+| success | `#4EC97A` | `#1A7F37` | `✔`, added lines of a diff |
+| warning | `#E5C07B` | `#9A6700` | `!` and the text of a warning |
+| muted | `#808080` | `#767676` | `○` and skipped checks, `fix:`, explanations, `toobusy:` in a message |
+
+The accent is Claude's clay shifted toward red; the error is pinker than the accent, so that the two are told apart. The palette is provisional: the brand colours are a later design decision. There is no colour when `NO_COLOR` is set or the output is not a terminal.
 
 ### `toobusy init`
 
@@ -95,7 +111,7 @@ Run `toobusy init` to set it up.
 
 The steps, in order:
 
-1. **Environment.** The checks of `doctor` that need no settings. Problems are shown with their fixes and do not stop the setup. Without a working `gh` the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
+1. **Environment.** The checks of `doctor` that need no settings. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh` the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
 2. **Tracker.** GitHub is the only one; it is shown, not asked.
 3. **Repository.** Proposed from the `origin` remote; accepts `owner/name` or a GitHub URL. The answer is checked for access.
 4. **Board.** An optional URL of a GitHub Projects board; empty skips it. The answer is checked for access and for the token scope the board needs.
@@ -103,7 +119,7 @@ The steps, in order:
 6. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first.
 7. **Labels to take.** A multiple choice over the remaining labels; nothing chosen means any task.
 8. **Assistant.** Claude Code is the only one; it is shown, not asked.
-9. **Summary.** The settings as they will be written and where, with a confirmation. Declining writes nothing and exits with code 1.
+9. **Summary.** What will change in the settings file and where, as a diff: a first setup shows the whole file as added lines, an existing setup only the keys whose values change. A confirmation follows. Declining writes nothing and exits with code 1. When nothing changes, `init` says `Nothing to change`, asks no confirmation, leaves the file as it is and exits with code 0.
 
 After writing, `init` says that the file is to be committed and that `toobusy doctor` checks the setup.
 
@@ -123,11 +139,13 @@ After writing, `init` says that the file is to be committed and that `toobusy do
 
 Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a repository that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
 
-**The interface.** The interactive setup uses a selection with the arrow keys, a multiple choice with the space bar, and a text prompt with a proposed value, in the manner of the Claude Code setup. Colours come from one palette defined in one place; the palette itself is a design decision that is still open, and the first version ships with a provisional one. Output has no colour when `NO_COLOR` is set or the output is not a terminal. The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
+**The interface.** The interactive setup uses a selection with the arrow keys, a multiple choice with the space bar, and a text prompt with a proposed value, in the manner of the Claude Code setup. Once a question is answered, its prompt is replaced by one line, `✔ Repository     bitpatch/toobusy`, so that the screen reads as a short history with the current question at the bottom. Colours come from the palette above. The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
 
 ### `toobusy doctor`
 
 `doctor` checks everything a run needs and prints one line per check: passed, failed or skipped, and for a failed one what is wrong and the command that fixes it. It exits with 0 when nothing failed and with 1 otherwise. It changes nothing.
+
+In a terminal the check that is running shows a spinner on its line, and the line is replaced by the result when the check finishes. Without a terminal each line is printed when its check finishes.
 
 | Check | Fails when | Needs |
 |---|---|---|
@@ -165,7 +183,7 @@ A command of a package manager is proposed only when that manager is on the path
 |---|---|
 | 0 | done |
 | 1 | failed: a check did not pass, a value was refused, the setup was declined |
-| 2 | the project is not set up, or the command line is wrong |
+| 2 | there is no project, the project is not set up, or the command line is wrong |
 
 ### Tests
 
@@ -177,7 +195,5 @@ A command of a package manager is proposed only when that manager is on the path
 
 ### To be settled while building
 
-- **The TOML library.** It must publish as a native binary without warnings and let a rewrite keep comments. Tomlyn is the first candidate; if it does not fit, the settings are read and written by a small parser of our own for the subset of TOML they use.
 - **The terminal library.** Spectre.Console is the first candidate for the prompts, under the same condition; otherwise the three prompts are written by hand.
 - **How to tell that Claude Code is logged in** without starting a session.
-- **The palette.**
