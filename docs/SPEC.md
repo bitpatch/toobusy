@@ -199,5 +199,4 @@ A command of a package manager is proposed only when that manager is on the path
 
 ### To be settled while building
 
-- **The terminal library.** Spectre.Console is the first candidate for the prompts, under the same condition; otherwise the three prompts are written by hand.
 - **How to tell that Claude Code is logged in** without starting a session.
