@@ -21,6 +21,7 @@ public sealed class SettingsFileTests : IDisposable
 
         Assert.Equal(Path.Combine(folder.FullName, ".toobusy", "settings.toml"), file.Path);
         Assert.False(file.Exists);
+        Assert.Null(file.Load());
     }
 
     [Fact]
@@ -31,7 +32,7 @@ public sealed class SettingsFileTests : IDisposable
         file.Save(Settings);
 
         Assert.True(file.Exists);
-        Assert.Equal(Settings.Tracker, file.Load().Settings!.Tracker);
+        Assert.Equal(Settings.Tracker, file.Load()!.Settings!.Tracker);
     }
 
     [Fact]
@@ -55,7 +56,7 @@ public sealed class SettingsFileTests : IDisposable
         file.Save(Settings);
         File.AppendAllText(file.Path, "model = \"opus\"\n");
 
-        var result = file.Load();
+        var result = file.Load()!;
 
         Assert.Null(result.Settings);
         Assert.Equal("assistant.model", Assert.Single(result.Errors).Key);

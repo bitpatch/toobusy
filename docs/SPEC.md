@@ -141,6 +141,8 @@ After writing, `init` says that the file is to be committed and that `toobusy do
 
 Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a repository that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
 
+**A dry run.** `init --dry-run` goes through the interactive setup without touching anything: the machine and the tracker are imitated, with made-up labels and milestones, the settings that exist are read, and nothing is written. It is there to try the setup and to see what it looks like.
+
 **The interface.** The interactive setup uses a selection with the arrow keys, a multiple choice with the space bar, and a text prompt with a proposed value, in the manner of the Claude Code setup. Once a question is answered, its prompt is replaced by one line, `✔ Repository     bitpatch/toobusy`, so that the screen reads as a short history with the current question at the bottom. Colours come from the palette above. The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
 
 ### `toobusy doctor`

@@ -1,6 +1,6 @@
 # Architecture
 
-This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings are the first part that exists; the ports named here are planned and get their final shape with the specification.
+This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings and the setup are the parts that exist; the ports named here are planned and get their final shape with the specification.
 
 ## Projects
 
@@ -53,6 +53,29 @@ The settings of a project live in three places:
 - `TooBusy.Cli` asks for the project and its settings before a command runs, prints the "not set up" message, and maps the outcomes to the exit codes in `ExitCode`.
 
 TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its syntax tree only (`SyntaxParser`): the tree keeps the place of every value, and nothing of it needs reflection. The object serializer of Tomlyn is not used. Writing does not print the tree: `SettingsToml.Write` edits the existing text at the places the tree names, replacing a value that differs, adding a missing key at the end of its section and a missing section, with its comment, at the end of the file. Everything else, comments and unknown keys included, stays character for character, and a new file is the same edit of an empty text. The result is parsed again before it is returned; a layout that cannot be edited this way, such as a section written as an inline table, is refused with a `FormatException` instead of being written wrong.
+
+## Setup
+
+`TooBusy.Core/Setup` holds the steps of `toobusy init` (`ProjectSetup`) and the ports they are written against:
+
+| Port | What it hides | Implementations |
+|---|---|---|
+| `ISetupDialog` | asking: a selection, a multiple choice, a text prompt, a confirmation; and saying | `TerminalDialog` in `TooBusy.Cli`; a scripted one in the tests |
+| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | imitated only, until `doctor` brings the real checks |
+| `ISetupTracker` | whether a repository and a board can be read, the labels, the open milestones | imitated only, until `doctor` brings the reading of GitHub |
+| `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
+
+`TooBusy.Core/Queue` holds the milestone rules (`MilestoneRules`), which the setup uses to show what each rule would choose now.
+
+`init --dry-run` is the real steps and the real terminal over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels and milestones, and a settings file that is read and never written.
+
+## Terminal
+
+`TooBusy.Cli/Terminal` is everything that knows it talks to a terminal.
+
+- `Palette` is the one place that defines colours: the accent, the error, success, the warning and muted text, each for a dark and a light terminal in truecolor, and as one of the sixteen colours for a terminal that does not announce truecolor. `Palette.Detect` gives the palette without colours when `NO_COLOR` is set or the stream is not a terminal. Commands never write an escape sequence of a colour themselves.
+- `TerminalDialog` draws the three prompts by hand: a prompt is redrawn in place by moving the cursor up and clearing to the end of the screen, and an answered one is replaced by a single line. Spectre.Console was the first candidate and was not taken: its prompts leave their own lines behind, and the setup needs every answered question to collapse into the same `✔ label value` line.
+- `CliContext` carries the folder, the streams, their palettes and the reading of keys into the commands, so that tests run them with string writers and scripted keys.
 
 ## Adding a tracker or an assistant
 
