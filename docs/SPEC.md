@@ -105,6 +105,8 @@ Every command takes its colours from one palette, defined in one place. Each rol
 
 The accent is Claude's clay shifted toward red; the error is pinker than the accent, so that the two are told apart. The palette is provisional: the brand colours are a later design decision. There is no colour when `NO_COLOR` is set or the output is not a terminal.
 
+**Which value is used.** The terminal says what it can show; toobusy does not ask it for its background. A terminal with truecolor (`COLORTERM` is `truecolor` or `24bit`) gets the dark values, unless `COLORFGBG` names a light background (its last field is `7` or `15`), and then the light ones. A terminal without truecolor gets the nearest of the sixteen colours: red for the accent, bright magenta for the error, green, yellow and bright black for muted. Dark is the default; a light terminal that does not say so gets the dark values, and some of them, the warning above all, are hard to read on it.
+
 ### `toobusy init`
 
 `init` asks what it needs, shows what it is about to write, and writes `.toobusy/settings.toml`. It changes nothing else: not the tracker, not the working copy, not git.
