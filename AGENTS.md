@@ -39,3 +39,12 @@ A change is ready when the build, the tests and the format check pass.
 - All development happens on `develop`, the default branch. `main` is protected and holds released code only: it changes through a release pull request from `develop`. Never commit or push to `main`.
 - CI runs only for release pull requests into `main`, not for `develop`. Run the build, the tests and the format check locally before pushing.
 - The original script that toobusy grows out of is not in this repository. Ask the owner when its behaviour matters.
+
+## Reporting
+
+Every reply to the owner ends with a separate last line that says what is expected of them:
+
+- `✅ Completed` — the task is fully finished: the work is done, committed and pushed, and nothing more is required from the owner. For a request that changes nothing in the repository, such as a question, it means the request is fully answered.
+- `❓ Your answer is needed` — the work cannot go on, or cannot be finished, without the owner: a question, a choice, an approval or a step only they can do. State what exactly is needed right above this line.
+
+Never write `✅ Completed` while anything is left: an unpushed commit, a failing check, an open question.
