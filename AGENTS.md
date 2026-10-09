@@ -35,7 +35,7 @@ A change is ready when the build, the tests and the format check pass.
 
 - Work is planned as issues of `bitpatch/toobusy` on the organisation's `toobusy` project board.
 - Issue types are the labels `feature`, `bug`, `chore` and `docs`.
-- When an issue is taken into work, move it to `In Progress` on the board. When the work is finished, commit the result, push it to `develop` and close the issue.
+- When an issue is taken into work, move it to `In Progress` on the board. When the work is finished, commit the result, push it to `develop` and close the issue. In a conversation with the owner, ask before committing, as described in Reporting.
 - All development happens on `develop`, the default branch. `main` is protected and holds released code only: it changes through a release pull request from `develop`. Never commit or push to `main`.
 - CI runs only for release pull requests into `main`, not for `develop`. Run the build, the tests and the format check locally before pushing.
 - The original script that toobusy grows out of is not in this repository. Ask the owner when its behaviour matters.
@@ -45,6 +45,7 @@ A change is ready when the build, the tests and the format check pass.
 Every reply to the owner ends with a separate last line that says what is expected of them:
 
 - `✅ Completed` — the task is fully finished: the work is done, committed and pushed, and nothing more is required from the owner. For a request that changes nothing in the repository, such as a question, it means the request is fully answered.
+- `📦 Ready — commit and push?` — the work is fully done and checked, and only the commit and the push are left. In a conversation with the owner, stop here instead of committing. When the owner agrees, commit, push and end that reply with `✅ Completed`.
 - `❓ Your answer is needed` — the work cannot go on, or cannot be finished, without the owner: a question, a choice, an approval or a step only they can do. State what exactly is needed right above this line.
 
 Never write `✅ Completed` while anything is left: an unpushed commit, a failing check, an open question.
