@@ -32,6 +32,10 @@ public sealed record Workbench(
     IProcessRunner Processes,
     string Home)
 {
+    // The made-up tasks of a demo that an abort left an interrupted one among: the menu and the next run see it.
+    // They are kept in memory for as long as the demo goes on, and nowhere else.
+    ImitatedTasks? kept;
+
     // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
     // reading changes nothing: the `origin` remote, the boards and the milestones; what it would make, link, write
     // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,
@@ -90,7 +94,7 @@ public sealed record Workbench(
     {
         var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort, Personal.LoadShare() ?? UsageShare.Proposed);
         if (Demo)
-            return ImitatedRun.Open(plan, Clock);
+            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules));
         if (Repository is null)
             return null;
 
@@ -106,13 +110,22 @@ public sealed record Workbench(
             RunPolicy.Default);
     }
 
-    // How many tasks a run over these settings and this milestone would take as things are: those that are ready
-    // and those that open after them. Null when the tasks cannot be read. A demo counts its made-up tasks, and takes
-    // a moment over it, as a tracker does.
-    public async Task<int?> CountTasksAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    // The made-up tasks of a demo: those that were kept while one of them is interrupted, and otherwise tasks that
+    // are made up anew, so that a demo can be run again and again.
+    ImitatedTasks DemoTasks(QueueRules rules)
+    {
+        if (kept is null || !kept.HasInterrupted(rules.Interrupted))
+            kept = new ImitatedTasks(rules);
+        return kept;
+    }
+
+    // What a run over these settings and this milestone would take as things are: how many tasks, those that are
+    // ready and those that open after them, and the one that was interrupted before, which comes first. Null when
+    // the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
+    public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
     {
         var rules = QueueRules.Of(settings);
-        ITaskTracker? tasks = Demo ? new ImitatedTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
+        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
         if (tasks is null)
             return null;
 
@@ -121,8 +134,7 @@ public sealed record Workbench(
             if (Demo)
                 await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
 
-            var lineup = TaskLineup.Arrange(await tasks.ReadOpenAsync(milestone, cancellationToken), rules);
-            return lineup.Ready.Count + lineup.Later.Count;
+            return TaskLineup.Arrange(await tasks.ReadOpenAsync(milestone, cancellationToken), rules).Outlook(rules);
         }
         catch (Exception refused) when (refused is TrackerException or OperationCanceledException)
         {

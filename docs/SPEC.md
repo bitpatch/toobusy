@@ -285,6 +285,8 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 
 After `Run` stands the number of tasks a run would take as things are: those that are ready and those that open after them. It is counted when the menu opens, and again after a run, after a change of the milestone and after the settings. While the tracker is read, the dots of a wait run in its place, the row is muted, and Enter does nothing on it. A run that would take no task is not opened either: the row says `no tasks`, and Enter counts again, for what has changed meanwhile. When the tasks cannot be read the row says so, and the run is opened all the same: it says why it stops.
 
+When the task that a run would take first is one that an earlier run had to stop, a task with the label of interrupted tasks, the row says so instead of the number, in the colour of a warning: `Run  interrupted: #71 Paint the windows yellow`. It is the task the next run goes on with, and Enter opens that run as it does on a count; the number of the tasks comes back when no task is interrupted any more. A title that does not fit is cut, and the number is not. A task that is interrupted and held, or that waits for another one, is not taken first, so the row does not name it.
+
 After `Assistant` stand the model and the effort that are chosen; the assistant's own model is `own model` there. It opens a list of the three choices of the user, each with what is chosen after its name:
 
 ```
@@ -577,10 +579,10 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
 ```
   toobusy · ~/Projects/rocket                                             Running the queue
 
- ✔ Show the total of an order in its header  12:04
- ◐ Fix the rounding of a discount  7:31
+ ✔ #101 Show the total of an order in its header  12:04
+ ◐ #103 Fix the rounding of a discount  7:31
 
- ⣾ Export the orders as a file
+ ⣾ #102 Export the orders as a file
    1:24 · Edit src/Export/CsvExport.cs
  ────────────────────────────────────────────────────────────
  ❯ press / to show the menu
@@ -588,8 +590,8 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
  ctrl+c stop the session and exit                5-hour 41% · weekly 12%
 ```
 
-- **What stays.** A task that is over is one line: the mark of how it went in its colour, `✔` done, `◐` done in part, `◇` waits for the owner, `■` interrupted or killed, `✖` failed, `‖` paused by a usage limit; its title; and, muted, the time it took. A title that does not fit gives way to the time. Nothing is said of a task that starts. What a run warns of, `▲`, stays as a line too. These lines are written for good: as they grow in number the bar scrolls up with them into the history of the terminal, and the terminal scrolls back to them.
-- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark turns in the accent: a cell full of dots with a gap that runs around it clockwise, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽`, a turn in two thirds of a second; without colours a `●` stands there still. Under the title, muted, stand the time the task has been worked on and what its session is doing. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, and a run that was told to stop that this is its last task. Between tasks the first line says what the run is doing.
+- **What stays.** A task that is over is one line: the mark of how it went in its colour, `✔` done, `◐` done in part, `◇` waits for the owner, `■` interrupted or killed, `✖` failed, `‖` paused by a usage limit; its number and its title, `#71 Paint the windows yellow`, the number being what finds the task in the tracker; and, muted, the time it took. A title that does not fit gives way to the time, and the number is never the part that is cut. Nothing is said of a task that starts. What a run warns of, `▲`, stays as a line too. These lines are written for good: as they grow in number the bar scrolls up with them into the history of the terminal, and the terminal scrolls back to them.
+- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark turns in the accent: a cell full of dots with a gap that runs around it clockwise, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽`, a turn in two thirds of a second; without colours a `●` stands there still. After it stand the number and the title of the task, as they do on its line when it is over. Under the title, muted, stand the time the task has been worked on and what its session is doing. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, and a run that was told to stop that this is its last task. Between tasks the first line says what the run is doing.
 - **A session that waits for the owner** shows, under these two lines, what it said last, eight lines of it at most, and how its session is opened to answer it. When it goes on, there is the title, the time and the step again, and nothing else.
 - **The commands** have their place between two rules. Nothing is typed there: the line says `press / to show the menu` after the pointer of a menu, `❯`, which blinks there as it does on the chosen line of the menu that opens in its place. `/` opens the menu of the commands that mean something at the moment, each with what it does; Up and Down move, Enter runs one, Escape closes the menu. They are `hold` and `send now` while a session waits for the owner, then `stop`, `continue` and `abort`. A session that waits for the owner brings `hold` and `send now` without being asked; Escape puts them away, and `/` opens the whole menu.
 - **Under the second rule** stand the keys and, at the right edge, how much of the two limits is used, when it is known. After the first Ctrl+C the line says `press ctrl+c again to stop the session and exit`.
@@ -601,12 +603,12 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 
 ### A demo of a run
 
-`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run.
+`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first, with the report of the session before it. When that task is taken again, the made-up tasks start over, as they do after any other run.
 
 ### Tests
 
-- The queue: every reason a task is held for, the order, tasks that wait for others.
+- The queue: every reason a task is held for, the order, tasks that wait for others, and the interrupted task a run takes first.
 - The line for toobusy in a reply, and the messages a session gets.
 - The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it.
 - What is asked of `gh` and of `claude`, argument by argument, and what is made of their answers; a conversation of Claude Code read from a file of the test.
-- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one.
+- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first.

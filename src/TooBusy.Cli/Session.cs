@@ -60,7 +60,7 @@ public sealed class Session(Page page, Workbench bench)
         // The tasks are counted for the menu over what is set and chosen at the moment, and anew after everything
         // that may have changed their number.
         var tasks = new TaskCount(async () => bench.Settings.Load()?.Settings is { } settings && standing.Choice is { } choice
-            ? await bench.CountTasksAsync(settings, choice.Title, cancellationToken)
+            ? await bench.OutlookAsync(settings, choice.Title, cancellationToken)
             : null);
         string? note = null;
         while (true)

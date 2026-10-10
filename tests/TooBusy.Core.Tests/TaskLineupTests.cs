@@ -25,6 +25,36 @@ public class TaskLineupTests
     }
 
     [Fact]
+    public void TheInterruptedTaskARunTakesFirstIsTheOutlookOfTheQueue()
+    {
+        var lineup = TaskLineup.Arrange([Task(3), Task(9, labels: ["bug", "Interrupted"]), Task(5, blockedBy: [3])], Rules);
+
+        var outlook = lineup.Outlook(Rules);
+
+        Assert.Equal(9, outlook.Interrupted?.Number);
+        Assert.Equal(3, outlook.Tasks);
+    }
+
+    [Fact]
+    public void WhereNothingWasInterruptedTheOutlookOnlyCounts()
+    {
+        var outlook = TaskLineup.Arrange([Task(3), Task(5)], Rules).Outlook(Rules);
+
+        Assert.Null(outlook.Interrupted);
+        Assert.Equal(2, outlook.Tasks);
+    }
+
+    [Fact]
+    public void AnInterruptedTaskThatIsHeldOrWaitsIsNotTheOneARunTakesFirst()
+    {
+        var lineup = TaskLineup.Arrange(
+            [Task(3), Task(9, labels: ["bug", "interrupted", "draft"]), Task(11, labels: ["bug", "interrupted"], blockedBy: [3])],
+            Rules);
+
+        Assert.Null(lineup.Interrupted(Rules));
+    }
+
+    [Fact]
     public void ATaskWithABlockingLabelIsHeld()
     {
         var lineup = TaskLineup.Arrange([Task(3, labels: ["feature", "Draft"]), Task(5)], Rules);

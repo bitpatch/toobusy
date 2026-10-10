@@ -75,13 +75,13 @@ public sealed class RunScreenTests : IDisposable
         Assert.Equal(result, screen.Result);
         Assert.Equal([new TaskEnd(Total, RunMark.Done, TimeSpan.FromSeconds(84))], screen.Ends);
         var bar = "  toobusy · ~/rocket" + new string(' ', 61) + "Running the queue";
-        terminal.AssertTaped(bar + "\n ✔ Show the total  1:24\n ● Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu\n"
+        terminal.AssertTaped(bar + "\n ✔ #2 Show the total  1:24\n ● #3 Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu\n"
             + " ctrl+c stop the session and exit" + new string(' ', 43) + "5-hour 41% · weekly 12%");
 
         // Nothing is said of a task that starts, and the page is left with how the run went under its tasks.
         Assert.DoesNotContain("started", terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(
-            [bar, " ✔ Show the total  1:24", " 1 task in 0 s · 1 done", " ‖ Stopped, as you asked"],
+            [bar, " ✔ #2 Show the total  1:24", " 1 task in 0 s · 1 done", " ‖ Stopped, as you asked"],
             terminal.Tape.Text.Split('\n'));
         Assert.Equal("1 task in 0 s · 1 done · Stopped, as you asked", screen.Summary);
         Assert.True(terminal.Tape.Wraps);
@@ -110,9 +110,9 @@ public sealed class RunScreenTests : IDisposable
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
         Assert.Equal(RunCommand.Abort, sent);
-        Assert.False(terminal.Saw("#"));
+        Assert.False(terminal.Saw("❯ #"));
         terminal.AssertTaped("""
-              ● Export the data
+              ● #3 Export the data
                 1:24 · Edit src/Export.cs
               ❯ stop   finish the current task, then stop
                 abort  stop as soon as possible: nothing committed, a report in the task
@@ -146,7 +146,7 @@ public sealed class RunScreenTests : IDisposable
 
         Assert.Equal([RunCommand.Hold, RunCommand.Nudge, RunCommand.Stop], sent);
         terminal.AssertTaped("""
-              ● Export the data
+              ● #3 Export the data
                 0:10 · waits for you · goes on alone in 0:07
                 │ CSV or JSON?
                 answer it in its session: claude attach 1a2b
@@ -157,7 +157,7 @@ public sealed class RunScreenTests : IDisposable
         terminal.AssertTaped("   0:10 · waits for you · gets no message\n   │ CSV or JSON?\n   answer it in its session: claude attach 1a2b\n ❯ send now  it is told to go on alone at once");
 
         // Once the session goes on there is the task again, the time and what it does, and nothing else.
-        terminal.AssertTaped(" ● Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu");
+        terminal.AssertTaped(" ● #3 Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu");
     }
 
     [Fact]
@@ -228,16 +228,16 @@ public sealed class RunScreenTests : IDisposable
         using var page = terminal.Open();
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
-        terminal.AssertTaped(" ● Export the data\n   2:05 · Edit src/Export.cs");
+        terminal.AssertTaped(" ● #3 Export the data\n   2:05 · Edit src/Export.cs");
     }
 
     [Theory]
     [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, false, " ● Reading the queue…\n ❯ press /")]
-    [InlineData(RunPhase.Preparing, true, "Starting #3…", 0, false, false, " ● Export the data\n   1:24 · starting\n")]
-    [InlineData(RunPhase.Working, true, "", 0, true, false, " ● Export the data\n   1:24 · Edit src/Export.cs · the last task of this run\n")]
-    [InlineData(RunPhase.Working, true, "", 0, false, true, " ● Export the data\n   1:24 · Edit src/Export.cs · wrapping up\n")]
-    [InlineData(RunPhase.WaitingForOwner, true, "", 0, false, false, " ● Export the data\n   1:24 · waits for you · gets no message\n")]
-    [InlineData(RunPhase.WaitingForLimit, true, "", 3725, false, false, " ● Export the data\n   1:24 · waits for a usage limit · goes on in 1:02:05\n")]
+    [InlineData(RunPhase.Preparing, true, "Starting #3…", 0, false, false, " ● #3 Export the data\n   1:24 · starting\n")]
+    [InlineData(RunPhase.Working, true, "", 0, true, false, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · the last task of this run\n")]
+    [InlineData(RunPhase.Working, true, "", 0, false, true, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · wrapping up\n")]
+    [InlineData(RunPhase.WaitingForOwner, true, "", 0, false, false, " ● #3 Export the data\n   1:24 · waits for you · gets no message\n")]
+    [InlineData(RunPhase.WaitingForLimit, true, "", 3725, false, false, " ● #3 Export the data\n   1:24 · waits for a usage limit · goes on in 1:02:05\n")]
     [InlineData(RunPhase.WaitingForLimit, false, "Waiting for the 5-hour limit to reset", 125, false, false, " ● Waiting for the 5-hour limit to reset\n   goes on in 2:05\n")]
     public async Task WhatTheRunIsDoingIsSaidInTwoLines(RunPhase phase, bool task, string text, int until, bool stopping, bool aborting, string expected)
     {
@@ -283,7 +283,7 @@ public sealed class RunScreenTests : IDisposable
         await screen.RunAsync(run, TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            [" ✔ Show the total  1:24", " ◐ Export the data  1:02:05", " ◇ Ship it  0:07", " " + tasks, .. reason is null ? (string[])[] : [reason]],
+            [" ✔ #2 Show the total  1:24", " ◐ #3 Export the data  1:02:05", " ◇ #5 Ship it  0:07", " " + tasks, .. reason is null ? (string[])[] : [reason]],
             terminal.Tape.Text.Split('\n').Skip(1));
         Assert.Equal(tasks + (why is null ? "" : $" · Stopped: {why}"), screen.Summary);
 
@@ -313,7 +313,7 @@ public sealed class RunScreenTests : IDisposable
             [
                 " ▲ The pause of #3 is not whole: its",
                 "   session cannot be gone on with",
-                " ‖ Export the data of every order of…  1:05",
+                " ‖ #3 Export the data of every order…  1:05",
                 " 1 task in 0 s · 1 paused",
                 " ‖ Stopped: the weekly limit is spent",
             ],
@@ -336,7 +336,7 @@ public sealed class RunScreenTests : IDisposable
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
         low.AssertTaped("""
-              ● Export the data
+              ● #3 Export the data
                 0:10 · waits for you · goes on alone in 0:07
                 │ line 1
                 │ line 2

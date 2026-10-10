@@ -212,5 +212,8 @@ public static class Spoken
 
     public static string Tasks(int count) => count == 1 ? "1 task" : string.Create(CultureInfo.InvariantCulture, $"{count} tasks");
 
+    // A task as it is named wherever it is shown: its number, which finds it in the tracker, and its title.
+    public static string Task(QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"#{task.Number} {task.Title}");
+
     public static string Percent(double used) => string.Create(CultureInfo.InvariantCulture, $"{Math.Floor(used):0}%");
 }

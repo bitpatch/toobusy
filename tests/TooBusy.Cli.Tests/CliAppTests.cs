@@ -1,5 +1,7 @@
+using System.Text.RegularExpressions;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Processes;
+using TooBusy.Core.Run;
 
 namespace TooBusy.Cli.Tests;
 
@@ -170,11 +172,11 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             [
                 "",
-                " ✔ Show the total of an order in its header  0:09",
-                " ✔ Export the orders as a file  0:21",
-                " ◐ Fix the rounding of a discount  0:10",
-                " ✔ Update the dependencies  0:16",
-                " ✔ Describe the export in the manual  0:07",
+                " ✔ #101 Show the total of an order in its header  0:09",
+                " ✔ #102 Export the orders as a file  0:21",
+                " ◐ #103 Fix the rounding of a discount  0:10",
+                " ✔ #104 Update the dependencies  0:16",
+                " ✔ #105 Describe the export in the manual  0:07",
                 "",
                 " 5 tasks in 63 s · 4 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
@@ -217,7 +219,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.Equal(130, exit);
         var rows = Scroll.Read(output).Rows.Where(row => row.Length > 0).ToList();
-        Assert.Matches(@"^ ■ Export the data  [\d:]+$", rows[1]);
+        Assert.Matches(@"^ ■ #12 Export the data  [\d:]+$", rows[1]);
         Assert.Matches(@"^ 1 task in .+ · 1 interrupted$", rows[2]);
         Assert.Equal(" ■ Killed: #12 stays In Progress · claude attach abc12345 goes on with it", rows[3]);
         Assert.Equal(4, rows.Count);
@@ -872,15 +874,48 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(2, output.Split("\u001b[?1049h").Length - 1);
         Assert.Equal(
             [
-                " ✔ Show the total of an order in its header  0:09",
-                " ✔ Export the orders as a file  0:21",
-                " ◐ Fix the rounding of a discount  0:10",
-                " ✔ Update the dependencies  0:16",
-                " ✔ Describe the export in the manual  0:07",
+                " ✔ #101 Show the total of an order in its header  0:09",
+                " ✔ #102 Export the orders as a file  0:21",
+                " ◐ #103 Fix the rounding of a discount  0:10",
+                " ✔ #104 Update the dependencies  0:16",
+                " ✔ #105 Describe the export in the manual  0:07",
                 " 5 tasks in 63 s · 4 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             Scroll.Read(output).Rows.Where(row => row.Length > 0).Skip(1));
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+        Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
+    }
+
+    [Fact]
+    public async Task ADemoRemembersAnAbortAndTheMenuAndTheNextRunStartWithTheInterruptedTask()
+    {
+        GitRepository();
+
+        // The run is aborted while the first task is worked on. The menu it comes back to says which task was
+        // interrupted instead of the number of tasks; Run takes that task first, and when the run is over the tasks
+        // are counted as they were.
+        var keys = new Keys()
+            .Hold(() => Shown("5 tasks")).Press(Keys.Enter)
+            .Hold(() => Shown("Read src/Orders/Order.cs")).Type("/")
+            .Hold(() => Shown("❯ stop")).Press(Keys.Down, Keys.Enter)
+            .Hold(() => Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
+            .Hold(() => Shown("5 tasks", times: 2)).Press(Keys.Up, Keys.Enter);
+        var context = Context(null) with
+        {
+            Clock = new PacedClock(),
+            Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting },
+        };
+
+        var (exit, output, error) = await RunAsync(context, ["--demo"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        // The tape has the task twice: interrupted by the first run, and done by the second, which took it first.
+        var rows = Scroll.Read(output).Rows;
+        Assert.Contains(rows, row => Regex.IsMatch(row, @"^ ■ #101 Show the total of an order in its header  [\d:]+$"));
+        Assert.Contains(rows, row => Regex.IsMatch(row, @"^ ✔ #101 Show the total of an order in its header  [\d:]+$"));
+        Assert.Contains(rows, row => row.StartsWith(" ✔ #102 ", StringComparison.Ordinal));
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
@@ -1258,6 +1293,21 @@ public sealed class CliAppTests : IDisposable
 
     // Whether the page has shown the text by now, so many times: what keys that are held back wait for.
     bool Shown(string text, int times = 1) => shown is not null && shown.ToString().Split(text).Length > times;
+
+    // A clock whose time passes as the run asks for it but twenty times faster than the real one: a demo is over in
+    // seconds, and a key that is held back for a moment of it still finds the run where it waits for it.
+    sealed class PacedClock : IClock
+    {
+        long ticks = InstantClock.Start.UtcTicks;
+
+        public DateTimeOffset Now => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+
+        public async Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
+        {
+            await Task.Delay(time / 20, cancellationToken);
+            Interlocked.Add(ref ticks, time.Ticks);
+        }
+    }
 
     // Answers every command as it is told to and remembers what it was asked.
     sealed class FakeProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer) : IProcessRunner

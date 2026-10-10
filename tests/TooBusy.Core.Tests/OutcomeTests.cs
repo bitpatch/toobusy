@@ -1,3 +1,4 @@
+using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 
 namespace TooBusy.Core.Tests;
@@ -115,5 +116,13 @@ public class OutcomeTests
         Assert.Equal("1 task", Spoken.Tasks(1));
         Assert.Equal("12 tasks", Spoken.Tasks(12));
         Assert.Equal("96%", Spoken.Percent(96.7));
+    }
+
+    [Fact]
+    public void ATaskIsNamedByItsNumberAndItsTitle()
+    {
+        var task = new QueueTask(71, "Paint the windows yellow", "https://github.com/acme/rocket/issues/71", [], BoardStatus.Todo, "Todo", [], []);
+
+        Assert.Equal("#71 Paint the windows yellow", Spoken.Task(task));
     }
 }

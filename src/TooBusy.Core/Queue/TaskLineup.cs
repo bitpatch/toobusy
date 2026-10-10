@@ -16,6 +16,10 @@ public sealed record LaterTask(QueueTask Task, IReadOnlyList<int> After);
 // A task that no run takes as things are, and why.
 public sealed record HeldTask(QueueTask Task, string Reason);
 
+// What a run would take as things are: the number of the tasks, and the task that was interrupted before, which it
+// takes first; null when there is none.
+public sealed record QueueOutlook(int Tasks, QueueTask? Interrupted);
+
 // The open tasks as a run sees them. Ready can be taken now, in this order: those that were interrupted first, then
 // by their numbers. Later open as the tasks before them are closed, in the order they will. Held are the rest.
 public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<LaterTask> Later, IReadOnlyList<HeldTask> Held)
@@ -50,6 +54,13 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
 
         return new TaskLineup([.. taken.Where(task => Before(task).Count == 0)], later, [.. held]);
     }
+
+    // The task a run takes first because it was interrupted before; null when there is none. A task that is held or
+    // waits is not taken first, so it does not count.
+    public QueueTask? Interrupted(QueueRules rules) => Ready is [var first, ..] && first.Has(rules.Interrupted) ? first : null;
+
+    // What a run would take as things are: how many tasks, and the interrupted one it goes on with first.
+    public QueueOutlook Outlook(QueueRules rules) => new(Ready.Count + Later.Count, Interrupted(rules));
 
     static List<int> Before(QueueTask task) => [.. task.BlockedBy.Concat(task.Parts).Distinct().Order()];
 

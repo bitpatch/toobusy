@@ -44,13 +44,14 @@ public static class RunLook
         }
     }
 
-    // A task that is over, in one line: the mark of how it went, its title, and the time it took. A title that does
-    // not fit gives way, so that the time is always there.
+    // A task that is over, in one line: the mark of how it went, its number and title, and the time it took. A title
+    // that does not fit gives way, so that the time is always there.
     public static Line Ended(TaskEnd ended, int width)
     {
         var took = "  " + Clock(ended.Took);
         var room = Math.Max(4, width - 2 - took.Length);
-        var title = ended.Task.Title.Length > room ? ended.Task.Title[..(room - 1)] + "…" : ended.Task.Title;
+        var task = Spoken.Task(ended.Task);
+        var title = task.Length > room ? task[..(room - 1)] + "…" : task;
         return new Line(new Part(new RunLine(ended.Mark, "").Symbol + " ", Mark(ended.Mark)), new Part(title), new Part(took, Tone.Muted));
     }
 

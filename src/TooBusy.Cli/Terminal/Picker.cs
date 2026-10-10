@@ -2,8 +2,8 @@ namespace TooBusy.Cli.Terminal;
 
 // A choice of a list: what it is called, what explains it, and what is to be noticed about it. A choice that is off
 // cannot be chosen: it is muted, and Enter does nothing on it. One that waits has the dots of a wait where what is
-// to be noticed about it will stand.
-public sealed record Choice(string Name, string Detail = "", string Note = "", bool Off = false, bool Waits = false);
+// to be noticed about it will stand. The note is in the colour of success unless it has one of its own.
+public sealed record Choice(string Name, string Detail = "", string Note = "", bool Off = false, bool Waits = false, Tone? NoteTone = null);
 
 // The lists of every screen: a pointer on the chosen row, the name of a row with what explains it after it, and
 // marks above and below a list that does not fit. One look for the setup, the milestones and the menu.
@@ -96,7 +96,7 @@ public static class Picker
     static Line Row(bool pointed, Choice choice, string name) => new(
         new Part((pointed ? "❯ " : "  ") + name, choice.Off ? Tone.Muted : pointed ? Tone.Accent : Tone.Plain),
         new Part(choice.Detail.Length == 0 ? "" : "  " + choice.Detail, Tone.Muted),
-        new Part(choice.Note.Length == 0 ? "" : "  " + choice.Note, choice.Off ? Tone.Muted : Tone.Success),
+        new Part(choice.Note.Length == 0 ? "" : "  " + choice.Note, choice.Off ? Tone.Muted : choice.NoteTone ?? Tone.Success),
         new Part(choice.Waits ? "  " + new string(Screen.Dot, Screen.Dots) : "", Tone.Muted));
 
     // Whether something stands after the name of the choice.

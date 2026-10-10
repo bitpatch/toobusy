@@ -20,8 +20,9 @@ public static class ImitatedRun
         UnknownLimitWait = TimeSpan.FromSeconds(5),
     };
 
-    public static IQueueRun Open(RunPlan plan, IClock clock) =>
-        new Supervisor(new ImitatedTasks(plan.Rules), new ImitatedAssistant(clock), new CleanWorkspace(), new ForgottenState(), new QuietMachine(), clock, plan, Pace);
+    // The tracker is the one the demo keeps for the menu and for the runs after this one.
+    public static IQueueRun Open(RunPlan plan, IClock clock, ITaskTracker tasks) =>
+        new Supervisor(tasks, new ImitatedAssistant(clock), new CleanWorkspace(), new ForgottenState(), new QuietMachine(), clock, plan, Pace);
 
     sealed class CleanWorkspace : IWorkspace
     {
@@ -87,6 +88,9 @@ public sealed class ImitatedTasks : ITaskTracker
         if (rules.Board)
             Add(107, "Add a dark theme", "Follow the setting of the system.", [Type(0)], BoardStatus.InProgress);
     }
+
+    // Whether a task carries the label that a run puts on one it had to stop.
+    public bool HasInterrupted(string label) => open.Any(task => task.Has(label));
 
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);

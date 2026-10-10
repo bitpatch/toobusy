@@ -4,11 +4,11 @@ namespace TooBusy.Cli.Terminal;
 
 // The page of a run: a tape on the terminal's own screen, so that what a run has done scrolls up into the history
 // of the terminal and can be scrolled back to. A task that is over is one line that stays: the mark of how it went,
-// its title and the time it took. Nothing is said of a task that starts. What a run warns of stays too.
+// its number and title and the time it took. Nothing is said of a task that starts. What a run warns of stays too.
 //
-// Under these lines stands the task that is worked on: a mark that turns, its title and, under the title, how long
-// it has been worked on and what its session is doing. While the session waits for the owner, what it said last and
-// how it is opened stand there too, and are gone when it goes on.
+// Under these lines stands the task that is worked on: a mark that turns, its number and title and, under them, how
+// long it has been worked on and what its session is doing. While the session waits for the owner, what it said last
+// and how it is opened stand there too, and are gone when it goes on.
 //
 // Under the task is the place of the commands, between two rules. Nothing is typed there: a pointer blinks where
 // the menu opens, and `/` opens the menu of the commands that mean something at the moment, the arrows move, Enter
@@ -210,7 +210,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
             yield break;
         }
 
-        yield return new Line(new Part("● ", Tone.Accent), new Part(task.Title));
+        yield return new Line(new Part("● ", Tone.Accent), new Part(Spoken.Task(task)));
 
         var parts = new List<Part> { new("  " + (status.Since is { } since ? RunLook.Clock(now() - since) : ""), Tone.Muted) };
         switch (status.Phase)
