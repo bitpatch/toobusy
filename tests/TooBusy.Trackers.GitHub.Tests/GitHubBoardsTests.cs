@@ -13,7 +13,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task TheLinesOfTheAnswerAreTheOwnersAndTheBoardsWithTheLinkedOnesFirst()
     {
-        processes.Answers.Enqueue(Answered($"owner\tuser\tdenis\nowner\torg\tbitpatch\nboard\t{Fatgard}\tFatgard\nboard\t{Toobusy}\tToobusy\r\nlinked\t{Toobusy}\tToobusy\n\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nowner\torg\tbitpatch\nboard\t{Fatgard}\tFatgard\nboard\t{Toobusy}\tToobusy\r\nlinked\t{Toobusy}\tToobusy\n\n"));
 
         var read = await ReadAsync("bitpatch/toobusy");
 
@@ -24,7 +24,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task TheToolIsAskedOnceForItAll()
     {
-        processes.Answers.Enqueue(Answered(""));
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
 
         await ReadAsync("bitpatch/toobusy");
 
@@ -41,7 +41,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task WithoutARepositoryOnlyTheBoardsOfTheUserAreAskedFor()
     {
-        processes.Answers.Enqueue(Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
 
         var read = await ReadAsync(null);
 
@@ -53,7 +53,7 @@ public class GitHubBoardsTests
     public async Task ARepositoryThatCannotBeReadDoesNotHideTheBoardsOfTheUser()
     {
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.Exited, 1, "{\"data\":{\"repository\":null}}", "gh: Could not resolve to a Repository"));
-        processes.Answers.Enqueue(Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
 
         var read = await ReadAsync("example/project");
 
@@ -64,7 +64,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task ATitleMayHaveTabsAndALineThatIsNoneOfTheKindsIsLeftOut()
     {
-        processes.Answers.Enqueue(Answered($"A new release of gh is available\nboard\tnot-an-address\tBroken\nowner\trobot\thal\nboard\t{Fatgard}\tFat\tgard\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"A new release of gh is available\nboard\tnot-an-address\tBroken\nowner\trobot\thal\nboard\t{Fatgard}\tFat\tgard\n"));
 
         var read = await ReadAsync(null);
 
@@ -84,20 +84,4 @@ public class GitHubBoardsTests
     }
 
     Task<SetupBoards> ReadAsync(string? repository) => new GitHubBoards(processes).ReadAsync(repository, TestContext.Current.CancellationToken);
-
-    static ProcessResult Answered(string output) => new(ProcessStatus.Exited, 0, output, "");
-
-    // Gives the answers it is told to, one for each command, and remembers what it was asked to run.
-    sealed class FakeProcesses : IProcessRunner
-    {
-        public Queue<ProcessResult> Answers { get; } = new();
-
-        public List<(string Command, IReadOnlyList<string> Arguments)> Asked { get; } = [];
-
-        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            Asked.Add((command, arguments));
-            return Task.FromResult(Answers.Count > 0 ? Answers.Dequeue() : new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
-        }
-    }
 }

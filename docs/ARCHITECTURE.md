@@ -62,18 +62,27 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 | Port | What it hides | Implementations |
 |---|---|---|
 | `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation. Every question can be gone back from | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests |
-| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | imitated only, until `doctor` brings the real checks; the `origin` it gives is the real one, read by `GitOrigin` in `TooBusy.Infrastructure` |
-| `ISetupTracker` | whether a board can be read, the labels; making a board and linking one to the repository | imitated only, until `doctor` brings the reading of GitHub |
+| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which puts together `GitHubCli` of `TooBusy.Trackers.GitHub` and the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
+| `ISetupTracker` | whether a board can be read, the labels; making a board and linking one to the repository, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
 | `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
 | `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
 
-`TooBusy.Core/Queue` holds the milestone rules (`MilestoneRules`): which of the open milestones is the current one. The setup does not ask for the rule and the settings do not hold it; a run will choose it.
+`TooBusy.Core/Queue` holds the milestone to work on. It is the choice of the user, not a setting of the project, and it has two ports:
+
+| Port | What it hides | Implementations |
+|---|---|---|
+| `IMilestones` | the open milestones of a repository | `GitHubMilestones` in `TooBusy.Trackers.GitHub`; in a demo `ImitatedMilestones`, which adds made-up ones to them |
+| `IPersonalSettings` | where the choice of the user is kept | `PersonalSettingsFile` in `TooBusy.Infrastructure`: `projects.toml` of the user's own toobusy folder, a table for each project; in a demo `UnsavedChoice`, which forgets |
+
+`MilestoneStanding` says where a choice stands against the open milestones: not made, open, no milestone, gone, or not checked because the milestones cannot be read. `MilestoneOrder` is the order milestones are offered in.
 
 `ProjectSetup` is a walk over its steps: an answer moves it forward, going back from a question moves it to the step before, and going back from the first one leaves the setup. It keeps the answers, so that a step that is asked again proposes what was answered. Nothing is changed before the last step is confirmed; a new board is an answer like any other until then.
 
 The setup never asks for the repository: `ISetupEnvironment` gives the one of the `origin` remote, and the labels are read from it. `BoardSuggestions` is what the question about the board does with a typed text: it finds the boards that fit it and turns the address of any page of a project into the address of its board.
 
-`init --demo` is the real steps and the real screen over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels that makes and links nothing, and a settings file that is read and never written. The `origin` remote and the boards are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards and owners are added after the real ones until there are enough to scroll.
+`Workbench` in `TooBusy.Cli` is where these ports are put together for a project, in one place: the real adapters, or, for `--demo`, the imitations of `TooBusy.Cli/Imitation`. A demo is the real steps and the real screens over a machine where everything is installed, a tracker with made-up labels that makes and links nothing, settings that are read from the file, made up where there is none, and remembered instead of written, and a choice of the milestone that is forgotten when the demo ends. The `origin` remote, the boards and the milestones are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards, owners and milestones are added after the real ones until there are enough to scroll.
+
+`Session` is what happens on the page from the moment it is opened: the setup when the project needs it, the choice of the milestone when the user has none, the menu and the run, each a screen that takes the page for a while. It remembers what was done for the report that `CliApp` leaves in the terminal.
 
 ## Terminal
 
@@ -81,10 +90,10 @@ The setup never asks for the repository: `ISetupEnvironment` gives the one of th
 
 - `Palette` is the one place that defines colours: the accent, the error, success, the warning and muted text, each for a dark and a light terminal in truecolor, and as one of the sixteen colours for a terminal that does not announce truecolor. `Palette.Detect` gives the palette without colours when `NO_COLOR` is set or the stream is not a terminal. Commands never write an escape sequence of a colour themselves.
 - `TerminalDevice` is the terminal as a screen needs it: its keys, its size, taking Ctrl+C as a key, watching the size of the window, and a timer.
-- `Screen` is the alternate screen. It draws a frame whole every time: the bar with the title and the status, the body, the question, the choice and the keys with a rule between them, and the foot, each line cut to the width. What waits for the user is drawn by the screen and blinks: the chosen line of the choice and the block where a text is typed. `Pulse` counts the beats, eighty milliseconds each, and rewrites only that line and that cell in the shade of the moment; drawing a frame does not start the count again. The foot is wrapped to the width, never cut. `TerminalDevice.Every` is the timer behind it, so that tests move the pulse by hand. It keeps the last frame to draw it again when the size changes.
+- `Screen` is the alternate screen. It draws a frame whole every time: the bar with the title and the status, the body, the question, the choice and the keys with a rule between them, and the foot, each line cut to the width. What waits for the user is drawn by the screen and blinks: the name on the chosen line of the choice, which is the first piece of that line, and the block where a text is typed. `Pulse` counts the beats, eighty milliseconds each, and rewrites only that line and that cell in the shade of the moment; drawing a frame does not start the count again. The foot is wrapped to the width, never cut. `TerminalDevice.Every` is the timer behind it, so that tests move the pulse by hand. It keeps the last frame to draw it again when the size changes.
 - `Page` is what every screen of the tool shares: it opens and closes the screen, puts the body, the status and the foot it is given around the question of the moment, and reads the keys. Ctrl+C twice in a row throws `OperationCanceledException`, which the command that opened the page catches. While more keys are waiting, as in a paste, it does not draw.
-- `SetupScreen` is the setup on a page and `RunScreen` the run with its commands. Every list of the setup is made of the same row: a pointer, a name, what explains it and what is to be noticed about it. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
-- `CliContext` carries the folder, the streams, their palettes, the terminal device and the process runner into the commands, so that tests run them with string writers, scripted keys and a faked `git` and `gh`.
+- `SetupScreen` is the setup on a page, `MilestoneScreen` the list of the milestones, `HomeScreen` the menu and `RunScreen` the run with its commands. `Picker` is the list they all share: a row is a pointer, a name, what explains it and what is to be noticed about it, and a list that does not fit scrolls between marks. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
+- `CliContext` carries the folder, the streams, their palettes, the terminal device, the process runner and the folder of the user's own settings into the commands, so that tests run them with string writers, scripted keys and a faked `git` and `gh`.
 
 The screens are drawn by hand with the escape sequences every terminal knows. Spectre.Console was the first candidate and was not taken: the setup needs the whole window, with a panel that stays at its bottom, and its prompts write below one another.
 

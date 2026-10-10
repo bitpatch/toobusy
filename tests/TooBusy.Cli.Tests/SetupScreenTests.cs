@@ -361,7 +361,7 @@ public sealed class SetupScreenTests : IDisposable
 
         // The place of the tab is six lines under the tabs and an empty line: the owners from its top, the title at its bottom.
         Assert.EndsWith(
-            "\u001b[14;2H" + palette.Glow("❯ acme ", 1) + palette.Glow("  organisation", 1) + "\u001b[17;11H" + palette.Cursor(" ", 1),
+            "\u001b[14;2H" + palette.Glow("❯ acme ", 1) + "\u001b[17;11H" + palette.Cursor(" ", 1),
             coloured.Output.ToString().Split(Screen.Leave)[0],
             StringComparison.Ordinal);
     }

@@ -131,6 +131,33 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task ABoardThatCannotBeMadeFailsTheSetupAndWritesNothing()
+    {
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
+        tracker.RefuseToMake = "acme does not let you make projects.";
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("acme does not let you make projects.", result.Failure);
+        Assert.Empty(tracker.Linked);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task ABoardThatIsMadeButCannotBeLinkedIsNamedInTheFailure()
+    {
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
+        tracker.RefuseToLink = "The repository cannot be changed.";
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("The project was made at https://github.com/orgs/acme/projects/42, but then: The repository cannot be changed.", result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
     public async Task DecliningMakesNothingAndWritesNothing()
     {
         dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
@@ -496,6 +523,10 @@ public class ProjectSetupTests
 
         public Action? OnConfirm { get; set; }
 
+        public string? RefuseToMake { get; set; }
+
+        public string? RefuseToLink { get; set; }
+
         public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken)
         {
             Calls++;
@@ -510,12 +541,16 @@ public class ProjectSetupTests
 
         public Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)
         {
+            if (RefuseToMake is not null)
+                throw new TrackerException(RefuseToMake);
             Made.Add((owner, title));
             return Task.FromResult($"https://github.com/orgs/{owner.Login}/projects/42");
         }
 
         public Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken)
         {
+            if (RefuseToLink is not null)
+                throw new TrackerException(RefuseToLink);
             Linked.Add((board, repository));
             return Task.CompletedTask;
         }

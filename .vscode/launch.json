@@ -2,12 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "toobusy run --demo",
+      "name": "toobusy --demo",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
       "program": "${workspaceFolder}/src/TooBusy.Cli/bin/Debug/net10.0/toobusy.dll",
-      "args": ["run", "--demo"],
+      "args": ["--demo"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "stopAtEntry": false

@@ -10,10 +10,14 @@ public enum SetupOutcome
 
     // The user went back from the first step: the setup is left as if it never started.
     Left,
+
+    // The tracker refused what a yes asked of it: the settings are not written.
+    Failed,
 }
 
-// Answers are those the setup ended with, as the screen showed them.
-public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer> Answers);
+// Answers are those the setup ended with, as the screen showed them; Failure says what went wrong when it failed.
+// SettingsWritten tells a setup that wrote the file from one that only linked the board.
+public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer> Answers, string? Failure = null, bool SettingsWritten = false);
 
 // The steps of `toobusy init`: it asks what the settings need, shows what would change, and on a yes makes it so.
 // With settings that exist every question proposes the current value, so that accepting them all changes nothing.
@@ -35,6 +39,9 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
     BoardAnswer? board;
     List<string>? blocking;
     List<string>? take;
+
+    string? failure;
+    bool written;
 
     public async Task<SetupResult> RunAsync(CancellationToken cancellationToken = default)
     {
@@ -89,7 +96,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
                     break;
                 default:
                     if (await ConcludeAsync(cancellationToken) is { } outcome)
-                        return new SetupResult(outcome, Answers(Steps.Length));
+                        return new SetupResult(outcome, Answers(Steps.Length), failure, written);
                     answered = false;
                     break;
             }
@@ -236,13 +243,23 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         if (!yes)
             return SetupOutcome.Declined;
 
-        if (made is not null)
-            address = await tracker.CreateBoardAsync(made.Owner, made.Title, cancellationToken);
+        // The settings are written last, so that they never name a board that could not be made.
+        try
+        {
+            if (made is not null)
+                address = await tracker.CreateBoardAsync(made.Owner, made.Title, cancellationToken);
+            if (linking)
+                await tracker.LinkBoardAsync(address!, repository, cancellationToken);
+        }
+        catch (TrackerException refused)
+        {
+            failure = made is not null && address != unmade ? $"The project was made at {address}, but then: {refused.Message}" : refused.Message;
+            return SetupOutcome.Failed;
+        }
 
-        if (linking)
-            await tracker.LinkBoardAsync(address!, repository, cancellationToken);
         if (writing)
             store.Save(Settings(address));
+        written = writing;
         return SetupOutcome.Written;
     }
 

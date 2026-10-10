@@ -99,6 +99,7 @@ public interface ISetupBoards
 }
 
 // What the setup reads from the tracker, and the two things it changes there when the user confirms them.
+// Making and linking throw TrackerException when the tracker refuses.
 public interface ISetupTracker
 {
     // Null when the board can be read with the scope it needs; otherwise why it cannot.
@@ -111,3 +112,6 @@ public interface ISetupTracker
 
     Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken);
 }
+
+// The tracker refused to do what it was asked; the message says why, in words for the user.
+public sealed class TrackerException(string message) : Exception(message);

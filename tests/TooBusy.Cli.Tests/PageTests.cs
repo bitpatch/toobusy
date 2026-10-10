@@ -118,19 +118,20 @@ public sealed class PageTests : IDisposable
     }
 
     [Fact]
-    public void TheChosenLineFadesWholeBetweenTheAccentAndTheColourOfAnyText()
+    public void TheNameOfTheChosenLineFadesBetweenTheAccentAndTheColourOfAnyTextAndTheRestStays()
     {
         var palette = Palette.Dark;
         using var page = terminal.Open(palette: palette);
 
         page.Draw([], [Line.Of("  Keep"), new Line(new Part("❯ Change", Tone.Accent), new Part("  to another", Tone.Muted))], "", chosen: 1);
 
-        Assert.EndsWith("\u001b[10;2H" + palette.Accent("❯ Change") + palette.Accent("  to another"), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Contains(palette.Muted("  to another"), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("\u001b[10;2H" + palette.Accent("❯ Change"), terminal.Output.ToString(), StringComparison.Ordinal);
 
         Tick(5);
-        Assert.EndsWith("\u001b[10;2H" + palette.Glow("❯ Change", 0.5) + palette.Glow("  to another", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("\u001b[10;2H" + palette.Glow("❯ Change", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
         Tick(5);
-        Assert.EndsWith("\u001b[10;2H❯ Change  to another", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("\u001b[10;2H❯ Change", terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
     }
 

@@ -171,16 +171,13 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 
         var glow = (1 + Math.Cos(2 * Math.PI * beat / Beats)) / 2;
         var text = new StringBuilder();
-        if (chosen is { } pointed)
+        // Of the chosen line only its first piece blinks, the pointer with the name: what explains the name after
+        // it stays as the frame drew it.
+        if (chosen is { Line.Parts: [var name, ..] } pointed)
         {
             var room = pointed.Width - 1;
-            text.Append(At(pointed.Row, 2));
-            foreach (var part in pointed.Line.Parts)
-            {
-                var piece = part.Text.Length <= room ? part.Text : room > 0 ? part.Text[..(room - 1)] + "…" : "";
-                room -= piece.Length;
-                text.Append(palette.Glow(piece, glow));
-            }
+            var piece = name.Text.Length <= room ? name.Text : room > 0 ? name.Text[..(room - 1)] + "…" : "";
+            text.Append(At(pointed.Row, 2)).Append(palette.Glow(piece, glow));
         }
 
         if (cursor is { } typed)

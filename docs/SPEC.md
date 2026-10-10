@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. So far it covers setting a project up: the settings file, `toobusy init`, `toobusy doctor`, and what the tool says in a project that is not set up.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. So far it covers setting a project up and choosing what to work on: the settings file, `toobusy init`, the milestone of the user, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. Running the tasks is not described yet, and `doctor` and the options of `init` that answer without questions are described but not built.
 
 ## Setting a project up
 
@@ -10,6 +10,8 @@ In scope:
 
 - the settings file in `.toobusy/`: its format, its first sections, reading and validating it;
 - `toobusy init`: an interactive setup, and the same setup driven by options alone;
+- the milestone to work on: the choice of the user, kept on their machine, and `toobusy milestone`;
+- `toobusy` without a command: the page with the menu;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
 - the message of `toobusy` and `toobusy run` in a project that is not set up.
 
@@ -59,22 +61,34 @@ An unknown key, a missing required key and a value of the wrong type are errors 
 
 The file that `init` writes carries a short comment over each section. `init` on an existing file changes the values it asks about and keeps every other key and comment as it is.
 
-#### The current milestone
+#### The milestone to work on
 
-Only the tasks of the current milestone are taken. Which milestone that is, is not a setting of the project: it is decided when a run starts, by one of the rules below. How a run is told the rule is to be settled with the run itself.
+Only the tasks of one milestone are taken, and the user says which: one of the open milestones of the repository, or none, and then tasks are taken whatever their milestone. toobusy never chooses a milestone on its own.
 
-| Rule | The current milestone is |
+The choice is personal. It is not a setting of the project and is not committed: it is kept on the machine of the user, for each project apart, in `projects.toml` of the user's own toobusy folder. That folder is `$XDG_CONFIG_HOME/toobusy` when the variable is set, `%APPDATA%\toobusy` on Windows, and `~/.config/toobusy` otherwise.
+
+```toml
+["/Users/ann/Projects/rocket"]
+milestone = "v0.3.0"    # an empty title means working without a milestone
+```
+
+A project is known by the path of its root, so a second clone and a worktree have choices of their own. The milestone is kept by its title. toobusy writes the file whole; a file it cannot read counts as one that says nothing.
+
+A choice is checked against the open milestones whenever it is used:
+
+| The choice | Means |
 |---|---|
-| `lowest-version` | the open milestone with the lowest version in its title. The version is the first run of dot-separated numbers in the title (`v.0.2.0`, `v1.4`, `Release 2.0`), compared number by number. Open milestones without a version are ignored. |
-| `earliest-due` | the open milestone with the earliest due date. Open milestones without a due date are ignored. |
-| `fixed` | the open milestone that is named. |
-| `none` | none: milestones play no role and tasks are taken from the whole repository. |
+| not made | nothing can be run: the user is asked to choose |
+| a milestone that is open | its tasks are taken |
+| no milestone | tasks are taken whatever their milestone |
+| a milestone that is not open any more: closed, renamed or deleted | nothing can be run: toobusy says so, and the user is asked to choose again |
+| a milestone, while the milestones cannot be read | the choice stands, and the page says that it was not checked |
 
-When a rule other than `none` finds no milestone, no task is ready, and the tool says which rule found nothing. `lowest-version` is what the original script does.
+Where milestones are listed, those with a version in the title come first, the lowest version first, and the rest follow by their titles. The version is the first run of dot-separated numbers in the title (`v.0.2.0`, `v1.4`, `Release 2.0`), compared number by number. Each is shown with its due date, when it has one, and the number of its open tasks. `No milestone` is the last of the list.
 
 ### Not set up
 
-In a git repository without `.toobusy/settings.toml`, `toobusy` and `toobusy run` (with any options) print to the error stream and exit with code 2:
+In a git repository without `.toobusy/settings.toml`, `toobusy run` (with any options) and, without a terminal, `toobusy` print to the error stream and exit with code 2:
 
 ```
 toobusy: this project is not set up yet.
@@ -83,11 +97,11 @@ Run `toobusy init` to set it up.
 
 The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
 
-`toobusy` without a command in a project that is set up shows the help, as it does now. `--help` and `--version` work everywhere.
+In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. `--help` and `--version` work everywhere.
 
 ### The screen
 
-In a terminal `init` and `run` open a screen of their own, the alternate screen that editors use. What the terminal showed before stays untouched under it. When the command ends, however it ends, the screen is closed, the terminal is back as it was, and under its old lines the command leaves a short report of what was done.
+In a terminal `toobusy`, `init`, `milestone` and `run` open a screen of their own, the alternate screen that editors use. What the terminal showed before stays untouched under it. When the command ends, however it ends, the screen is closed, the terminal is back as it was, and under its old lines the command leaves a short report of what was done.
 
 From top to bottom the screen is:
 
@@ -111,7 +125,7 @@ From top to bottom the screen is:
 
 - The bar names the tool and the folder of the project, shown from `~` when it is under the home folder, and says at its right what the command is doing. It is three lines on a grey ground: an empty one, the text, an empty one.
 - The question, the choice and the keys are three parts with a rule between them. The question is its name and a line that says what to do. The choice is the only part the user acts in, and what waits for the user there blinks, smoothly, once in a second and a half. The rule is the same on every screen:
-  - A line that is chosen, the one the pointer `❯` stands on, blinks whole: its text glows in the accent and fades to the colour of any text, never to a grey. The pointer stays where it is, and the line is read as well at every moment.
+  - On the line that is chosen, the one the pointer `❯` stands on, the pointer and the name blink: they glow in the accent and fade to the colour of any text, never to a grey. What explains the name at its right does not blink. The pointer stays where it is, and the line is read as well at every moment.
   - Where a text is typed there is a cursor of the classic shape, a block in the accent with the character it stands on drawn over it, that fades away to nothing and comes back. A line where a text is typed has no pointer.
   - A screen may have both, as the list of the boards has under its filter.
   - The blink keeps its time: a key or a change of the chosen line does not start it again.
@@ -124,7 +138,7 @@ From top to bottom the screen is:
 
 **Leaving.** Ctrl+C leaves the screen, but only when it is pressed twice in a row: after the first one the line of the keys says `press ctrl+c again to exit`, and any other key takes the question back.
 
-Without a terminal there is no screen: `init` fails, as described below, and `run` prints plain lines.
+Without a terminal there is no screen: `init` fails, as described below, and the other commands print plain lines.
 
 ### Colours
 
@@ -149,21 +163,21 @@ The bar and the steps of a screen stand on a grey a little off the background, `
 
 The steps, in order:
 
-1. **Environment.** The checks of `doctor` that need no settings. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh`, or when the `origin` remote is not a GitHub repository, the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
+1. **Environment.** Whether `gh` is installed and logged in to github.com, and whether the `origin` remote is a GitHub repository; the other checks of `doctor` come with `doctor`. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh`, or when the `origin` remote is not a GitHub repository, the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
 2. **Tracker.** GitHub is the only one; it is shown, not asked.
 3. **Project.** The GitHub Projects board of the tasks, optional. A project that has one already, the board of the settings or one that is linked to the repository, shows it as the first of two choices, as it stands in the list of the boards, with `Choose another project` under it; one Enter keeps it. That choice, and a project without a board, open four ways to answer, as tabs that Tab goes through: one of the boards the user can reach, the address of a board, a new board with its owner and title, or no board. The address of any page of a project is taken as its board. A chosen board is checked for access and for the token scope it needs.
 4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first.
 5. **Labels to take.** A multiple choice over the remaining labels; nothing chosen means any task.
 6. **Assistant.** Claude Code is the only one; it is shown, not asked.
-7. **Confirmation.** What a yes will do, in the words of the questions and not as the text of the file. A first setup shows the answers and says that they will be written. A setup that exists says what changes in it, each setting as it was and as it will be: `Project: Rocket → none`. Under it stand the things to be done on GitHub: a new board to make, a board to link to the repository. A board that is not linked to the repository yet is linked; one that is linked is left alone, and no link of another board is ever taken away. A no does nothing and exits with code 1. On a yes the board is made, the board is linked and the file is written, in that order. When there is nothing to write and nothing to link, `init` asks no confirmation, says `Nothing to change: the settings already say this.` and exits with code 0.
+7. **Confirmation.** What a yes will do, in the words of the questions and not as the text of the file. A first setup shows the answers and says that they will be written. A setup that exists says what changes in it, each setting as it was and as it will be: `Project: Rocket → none`. Under it stand the things to be done on GitHub: a new board to make, a board to link to the repository. A board that is not linked to the repository yet is linked; one that is linked is left alone, and no link of another board is ever taken away. A no does nothing and exits with code 1. On a yes the board is made, the board is linked and the file is written, in that order. When GitHub refuses to make or to link the board, the file is not written, and `init` says what was refused, naming the board when it was made already, and exits with code 1. When there is nothing to write and nothing to link, `init` asks no confirmation, says `Nothing to change: the settings already say this.` and exits with code 0.
 
 **Going back.** Escape goes back from every question to the one before, which proposes what was answered there. Escape from the first question leaves the setup with nothing changed and exit code 1, as leaving with Ctrl+C does, and it is asked about in the same way: the keys say `esc exit` there, the first Escape gives `press esc again to exit`, and the second one leaves.
 
-After writing, `init` says that the file is to be committed and that `toobusy doctor` checks the setup.
+After writing, `init` says that the file is to be committed.
 
 **An existing setup.** When the settings exist, `init` runs the same steps with the current values proposed, so pressing Enter through it changes nothing. A settings file that does not validate is reported with its errors, and `init` proposes whatever it could read.
 
-**Without questions.** Every answer has an option, and `--yes` accepts the proposed value of every question the options leave open, the confirmation included:
+**Without questions.** This part is not built yet. Every answer has an option, and `--yes` accepts the proposed value of every question the options leave open, the confirmation included:
 
 | Option | Answer |
 |---|---|
@@ -174,7 +188,7 @@ After writing, `init` says that the file is to be committed and that `toobusy do
 
 Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a board that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
 
-**A demo.** `init --demo` goes through the interactive setup without touching anything. What it reads for the question about the project is real: the `origin` remote and, through `gh`, the boards of the user. When there are fewer than ten of them, made-up boards follow the real ones, so that there is a list to scroll; the owners a new project can be made for are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, and nothing is made, linked or written. It is there to try the setup and to see what it looks like.
+**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, and the settings and the milestone that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, and the first of the milestones is the chosen one, so that the menu opens at once; the setup and the choice of the milestone are tried from the menu, or with `init --demo` and `milestone --demo`. The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
 
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
 
@@ -208,19 +222,86 @@ Escape from these tabs comes back to those two choices when the project has a bo
 
 The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
 
+### `toobusy`
+
+In a terminal `toobusy` without a command opens its page and goes on from wherever the project is:
+
+1. **A project that is not set up** is set up: the steps of `init`, on the same page. Leaving them, or declining at the end, leaves the page.
+2. **A user without a milestone to work on**, one who has not chosen or whose milestone is not open any more, chooses one from the list. Leaving the list leaves the page.
+3. **The menu.** Above it stand the settings and the milestone as they are; the milestone stands again, in the colour of success, after the choice that changes it.
+
+```
+ ✔ Project          https://github.com/orgs/bitpatch/projects/4
+ ✔ Blocking labels  manual, draft
+ ✔ Labels to take   any task
+ ✔ Milestone        v0.3.0 · due 2030-01-15 · 12 open tasks
+
+ What to do
+ ────────────────────────────────────────────────────────────
+ ❯ Run               take the tasks one after another
+   Change milestone  v0.3.0
+   Settings
+   Exit
+ ────────────────────────────────────────────────────────────
+ ↑↓ move · enter choose · esc exit · ctrl+c exit
+```
+
+| Choice | Opens |
+|---|---|
+| `Run` | the run, as `toobusy run` does |
+| `Change milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
+| `Settings` | the steps of `init` with the current values proposed; Escape from the first of them goes back to the menu, and so does the end of the setup, whose last line is shown above the menu |
+| `Exit` | nothing: it leaves the page, as Escape twice and Ctrl+C twice do |
+
+When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone when one was chosen. The exit code is 0, and 1 when a setup failed on GitHub.
+
+Without a terminal there is nobody to ask: `toobusy` prints its help in a project that is set up and the "not set up" message in one that is not.
+
+### `toobusy milestone`
+
+`milestone` chooses the milestone to work on, or shows the one that is chosen. It needs no settings: only a project.
+
+| Command | Does |
+|---|---|
+| `toobusy milestone <title>` | chooses the open milestone with that title and prints it with its due date and its open tasks. The title is taken whatever the case of its letters, unless two milestones differ only in it |
+| `toobusy milestone --none` | chooses to work without a milestone |
+| `toobusy milestone` in a terminal | opens the list of the milestones on a page; Escape leaves the choice as it was |
+| `toobusy milestone` without a terminal | prints the choice: `Milestone: v0.3.0`, `Milestone: no milestone` or `Milestone: not chosen`, and after a milestone that is not open any more, `(not open any more)` |
+
+A title that no open milestone has fails with exit code 1 and names the open ones:
+
+```
+toobusy: there is no open milestone “v0.1.0”.
+The open ones: v0.2.0, v0.3.0
+```
+
+It fails in the same way when the milestones cannot be read. A title together with `--none` is a wrong command line.
+
 ### `toobusy run`
 
-Only the demo exists so far, and it has nothing to imitate yet. In a terminal `run --demo` opens the screen of a run. Its choice is a line where commands are typed:
+The tasks are not run yet; `run` is the entry point that the run grows from.
+
+`run` does not start without a milestone to work on. When the user has not chosen one, or the chosen one is not open any more, it exits with code 1:
+
+```
+toobusy: the milestone to work on is not chosen.
+Run `toobusy milestone` to choose it.
+```
+
+In a terminal `run` opens the page of `toobusy` on the run, with the menu behind it. The run says `Running the tasks is not built yet.`, and its choice is a line where commands are typed:
 
 ```
  ────────────────────────────────────────────────────
- /ex
- ❯ /exit  leave toobusy
+ /
+ ❯ /menu  go back to the menu
+   /exit  leave toobusy
  ────────────────────────────────────────────────────
  tab complete · enter run · ctrl+c exit
 ```
 
-An empty line says `Type / for commands.` A slash lists the commands that fit what is typed after it, those that start with it first; Tab completes the first of them and Enter runs it. A text that is not a command is not run. `/exit` is the one command so far: it closes the screen, as Ctrl+C twice does.
+An empty line says `Type / for commands.` A slash lists the commands that fit what is typed after it, those that start with it first; Tab completes the first of them and Enter runs it. A text that is not a command is not run. `/menu` goes to the menu and `/exit` closes the page, as Ctrl+C twice does.
+
+Without a terminal `run` says that running the tasks is not built yet and exits with code 1.
 
 ### `toobusy doctor`
 
@@ -262,13 +343,14 @@ A command of a package manager is proposed only when that manager is on the path
 | Code | Meaning |
 |---|---|
 | 0 | done |
-| 1 | failed: a check did not pass, a value was refused, the setup was declined or left |
+| 1 | failed: a check did not pass, a value was refused, the setup was declined or left, the milestone to work on is not chosen |
 | 2 | there is no project, the project is not set up, or the command line is wrong |
 
 ### Tests
 
 - The settings: reading, every validation rule, writing, and that a rewrite keeps unknown comments.
-- The milestone rules, over made-up lists of milestones.
+- The choice of the milestone against made-up lists of open milestones, the order of the milestones, and the file the choice is kept in.
+- What is asked of `gh`, argument by argument, and what is made of its answers and its failures, with the commands of the machine faked.
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn.
 - `doctor`: each check passed, failed and skipped, and the fix for each platform with and without its package manager.
@@ -276,5 +358,4 @@ A command of a package manager is proposed only when that manager is on the path
 
 ### To be settled while building
 
-- **How a run is told the milestone rule.** The rule left the settings and the setup; it comes back with `run`.
 - **How to tell that Claude Code is logged in** without starting a session.

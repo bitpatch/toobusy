@@ -22,8 +22,8 @@ public sealed class RunScreenTests : IDisposable
         terminal.Keys.Type("/e");
         Run(Keys.ControlC, Keys.ControlC);
 
-        terminal.AssertSaw(" /e\n ❯ /exit  leave toobusy\n tab complete · enter run");
-        Assert.Equal((7, 4), terminal.Caret);
+        terminal.AssertSaw(" /e\n ❯ /exit  leave toobusy\n   /menu  go back to the menu\n tab complete · enter run");
+        Assert.Equal((6, 4), terminal.Caret);
     }
 
     [Fact]
@@ -32,7 +32,17 @@ public sealed class RunScreenTests : IDisposable
         terminal.Keys.Type("/exit").Press(Keys.Enter);
 
         using var page = terminal.Open();
-        new RunScreen(page).Run();
+        Assert.Equal(RunEnd.Exit, new RunScreen(page).Run());
+    }
+
+    [Fact]
+    public void MenuGoesBackToTheMenuAndIsTheFirstCommand()
+    {
+        terminal.Keys.Type("/").Press(Keys.Enter);
+
+        using var page = terminal.Open();
+        Assert.Equal(RunEnd.Menu, new RunScreen(page).Run());
+        terminal.AssertSaw(" /\n ❯ /menu  go back to the menu\n   /exit  leave toobusy");
     }
 
     [Fact]

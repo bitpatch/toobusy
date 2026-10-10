@@ -5,13 +5,11 @@ namespace TooBusy.Cli.Terminal;
 // The questions of the setup on a page: the notes and the answers so far in its body, the question of the moment
 // under them, and the steps of the setup, done and to come, in its foot. A question is its name and what to do, then
 // the lines where the user acts, one choice under another. The choice under the pointer is the chosen line of the
-// page, and a text is typed at its cursor. Escape goes back from every question.
-public sealed class SetupScreen(Page page) : ISetupDialog
+// page, and a text is typed at its cursor. Escape goes back from every question; from the first one it leaves the
+// page, unless the setup was opened from somewhere to go back to.
+public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialog
 {
-    const int LabelWidth = 16;
-
-    // A list longer than this scrolls; the boards are shown fewer at a time, because other things share their place.
-    const int ListRows = 8;
+    // The boards are shown fewer at a time than other lists, because other things share their place.
     const int BoardRows = 5;
 
     // Whether the step that is asked is the first one: going back from it leaves the setup.
@@ -31,7 +29,7 @@ public sealed class SetupScreen(Page page) : ISetupDialog
         // The answers come first; what is said about them, and what is about to change, follows.
         page.Body =
         [
-            .. progress.Answers.Select(answer => new Line(new Part("✔ ", Tone.Success), new Part(answer.Label.PadRight(LabelWidth) + " ", Tone.Muted), new Part(answer.Value))),
+            .. progress.Answers.Select(answer => Picker.Answer(answer.Label, answer.Value)),
             .. body.Count > 0 ? (Line[])[Line.Empty] : [],
             .. body,
         ];
@@ -41,7 +39,7 @@ public sealed class SetupScreen(Page page) : ISetupDialog
             step < progress.Step ? new Part(step == 0 ? "●" : "──●", Tone.Success)
             : step == progress.Step ? new Part(step == 0 ? "◉" : "──◉", Tone.Accent)
             : new Part(step == 0 ? "○" : "──○", Tone.Muted))]);
-        first = progress.Step == 0;
+        first = progress.Step == 0 && leavesPage;
         Leaves(first);
     }
 
@@ -54,28 +52,8 @@ public sealed class SetupScreen(Page page) : ISetupDialog
 
     public void Wait(string text) => page.Draw([], [Line.Of(text, Tone.Muted)], "");
 
-    public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed)
-    {
-        var at = Math.Clamp(proposed, 0, options.Count - 1);
-        var top = 0;
-        var widest = options.Max(option => option.Name.Length);
-        while (true)
-        {
-            var lines = new List<Line>();
-            top = Window(lines, options.Count, at, top, ListRows, out var pointer, index => Row(index == at, options[index].Name.PadRight(widest), options[index].Detail));
-            page.Draw(Head(label, hint), lines, "↑↓ move · enter choose", chosen: pointer);
-
-            var key = page.Read();
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
-                at = (at + options.Count - 1) % options.Count;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
-                at = (at + 1) % options.Count;
-            else if (key.Key == ConsoleKey.Enter)
-                return at;
-            else if (key.Key == ConsoleKey.Escape)
-                return null;
-        }
-    }
+    public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
+        Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);
 
     public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
     {
@@ -88,7 +66,7 @@ public sealed class SetupScreen(Page page) : ISetupDialog
             var lines = new List<Line>();
             if (options.Count == 0)
                 lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
-            top = Window(lines, options.Count, at, top, ListRows, out var pointer, index => Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
+            top = Window(lines, options.Count, at, top, Picker.Rows, out var pointer, index => Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
             page.Draw(Head(label, hint), lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer);
 
             var key = page.Read();
@@ -127,7 +105,7 @@ public sealed class SetupScreen(Page page) : ISetupDialog
         }
     }
 
-    public bool? Confirm(string question) => Pick([Line.Of(question, Tone.Strong)], [("Yes", "", ""), ("No", "", "")], "y yes · n no", key => key switch
+    public bool? Confirm(string question) => Picker.Pick(page, [Line.Of(question, Tone.Strong)], [new Choice("Yes"), new Choice("No")], "y yes · n no", shortcut: key => key switch
     {
         ConsoleKey.Y => 0,
         ConsoleKey.N => 1,
@@ -143,14 +121,14 @@ public sealed class SetupScreen(Page page) : ISetupDialog
             return PickBoard(question);
 
         // The board that is stands first among the choices, as it stands in the list of the boards: Enter keeps it.
-        (string, string, string)[] choices =
+        Choice[] choices =
         [
-            (current.Title.Length == 0 ? current.Address : current.Title, current.Title.Length == 0 ? "" : current.Address, current.Linked ? "linked to this repository" : ""),
-            ("Choose another project", "", ""),
+            new(current.Title.Length == 0 ? current.Address : current.Title, current.Title.Length == 0 ? "" : current.Address, current.Linked ? "linked to this repository" : ""),
+            new("Choose another project"),
         ];
         while (true)
         {
-            switch (Pick(Head(question.Label, question.Hint), choices, "", _ => null))
+            switch (Picker.Pick(page, Head(question.Label, question.Hint), choices))
             {
                 case null:
                     return null;
@@ -165,33 +143,6 @@ public sealed class SetupScreen(Page page) : ISetupDialog
                         return picked;
                     break;
             }
-        }
-    }
-
-    // A few choices, one under another. Gives the index of the chosen one. `shortcut` lets a key choose at once.
-    int? Pick(IReadOnlyList<Line> question, (string Name, string Detail, string Note)[] choices, string keys, Func<ConsoleKey, int?> shortcut)
-    {
-        var at = 0;
-        var widest = choices.Where(choice => choice.Detail.Length > 0).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
-        while (true)
-        {
-            page.Draw(
-                question,
-                [.. choices.Select((choice, index) => Row(index == at, choice.Detail.Length > 0 ? choice.Name.PadRight(widest) : choice.Name, choice.Detail, choice.Note))],
-                keys.Length == 0 ? "↑↓ move · enter choose" : $"↑↓ move · enter choose · {keys}",
-                chosen: at);
-
-            var key = page.Read();
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
-                at = (at + choices.Length - 1) % choices.Length;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J or ConsoleKey.Tab)
-                at = (at + 1) % choices.Length;
-            else if (key.Key == ConsoleKey.Enter)
-                return at;
-            else if (key.Key == ConsoleKey.Escape)
-                return null;
-            else if (shortcut(key.Key) is { } chosen)
-                return chosen;
         }
     }
 
@@ -365,33 +316,12 @@ public sealed class SetupScreen(Page page) : ISetupDialog
         }
     }
 
-    // A row of any list of the setup: the pointer when it is on the row, the name, and after it what explains the
-    // name and what is to be noticed about it.
-    static Line Row(bool pointed, string name, string detail = "", string note = "") => new(
-        new Part((pointed ? "❯ " : "  ") + name, pointed ? Tone.Accent : Tone.Plain),
-        new Part(detail.Length == 0 ? "" : "  " + detail, Tone.Muted),
-        new Part(note.Length == 0 ? "" : "  " + note, Tone.Success));
+    static Line Row(bool pointed, string name, string detail = "", string note = "") => Picker.Row(pointed, name, detail, note);
 
-    // The name of the question and, under it, what to do, or why the answer was refused.
-    static List<Line> Head(string label, string hint, string? reason = null) =>
-        [Line.Of(label, Tone.Strong), .. reason is not null ? [Line.Of(reason, Tone.Error)] : hint.Length > 0 ? [Line.Of(hint, Tone.Muted)] : (Line[])[]];
+    static List<Line> Head(string label, string hint, string? reason = null) => Picker.Head(label, hint, reason);
 
-    // The rows of a list around the one the pointer is on, as many as fit; gives the row the window starts at, and
-    // in `pointer` the line the pointer is on. A list that does not fit says above and below how many rows there are
-    // beyond the window.
-    static int Window(List<Line> lines, int count, int at, int top, int rows, out int pointer, Func<int, Line> row)
-    {
-        top = Math.Clamp(top, Math.Max(0, at - rows + 1), Math.Max(0, at));
-        var below = count - top - rows;
-        if (count > rows)
-            lines.Add(top > 0 ? Line.Of($"  ↑ {top} more", Tone.Muted) : Line.Empty);
-        pointer = lines.Count + Math.Max(0, at - top);
-        for (var index = top; index < Math.Min(count, top + rows); index++)
-            lines.Add(row(index));
-        if (count > rows)
-            lines.Add(below > 0 ? Line.Of($"  ↓ {below} more", Tone.Muted) : Line.Empty);
-        return top;
-    }
+    static int Window(List<Line> lines, int count, int at, int top, int rows, out int pointer, Func<int, Line> row) =>
+        Picker.Window(lines, count, at, top, rows, out pointer, row);
 
     // The line where a text is typed, and the column of the caret in it.
     (Line Line, int Column) Field(LineEditor editor, string prompt)

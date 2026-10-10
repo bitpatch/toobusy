@@ -15,10 +15,10 @@ dotnet build                          # build everything; warnings are errors
 dotnet test                           # run all tests
 dotnet format --verify-no-changes     # check formatting; `dotnet format` fixes it
 dotnet run --project src/TooBusy.Cli -- --help
-dotnet run --project src/TooBusy.Cli -- run --demo     # imitated run; changes nothing
-dotnet run --project src/TooBusy.Cli -- init --demo    # imitated setup; writes nothing
+dotnet run --project src/TooBusy.Cli -- --demo            # the whole tool over made-up data; changes nothing
+dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup; writes nothing
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
-tools/screenshot.py init --demo -- shot tab shot blink     # pictures of the screen in artifacts/screens
+tools/screenshot.py init --demo -- shot tab shot blink    # pictures of the screen in artifacts/screens
 ```
 
 A change is ready when the build, the tests and the format check pass.

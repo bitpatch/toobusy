@@ -145,7 +145,7 @@ public static class SettingsToml
         _ => throw new ArgumentOutOfRangeException(nameof(value)),
     };
 
-    static string Quoted(string text)
+    internal static string Quoted(string text)
     {
         var quoted = new StringBuilder("\"");
         foreach (var character in text)

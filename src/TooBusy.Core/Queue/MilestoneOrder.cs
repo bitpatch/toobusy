@@ -3,32 +3,19 @@ using System.Text.RegularExpressions;
 
 namespace TooBusy.Core.Queue;
 
-public enum MilestoneRule
+// The order milestones are offered in: those with a version in the title first, the lowest version first, and the
+// rest after them by their titles.
+public static partial class MilestoneOrder
 {
-    LowestVersion,
-    EarliestDue,
-    Fixed,
-    None,
-}
-
-// A rule and, for the fixed one, the title of its milestone.
-public sealed record MilestoneSettings(MilestoneRule Rule, string? Title);
-
-// Which of the open milestones is the current one under each rule.
-public static partial class MilestoneRules
-{
-    public static Milestone? Choose(MilestoneSettings settings, IReadOnlyList<Milestone> open) => settings.Rule switch
-    {
-        MilestoneRule.LowestVersion => open
+    public static IReadOnlyList<Milestone> Sorted(IEnumerable<Milestone> milestones) =>
+    [
+        .. milestones
             .Select(milestone => (Milestone: milestone, Version: VersionOf(milestone.Title)))
-            .Where(candidate => candidate.Version is not null)
-            .OrderBy(candidate => candidate.Version!, VersionOrder.Instance)
-            .Select(candidate => candidate.Milestone)
-            .FirstOrDefault(),
-        MilestoneRule.EarliestDue => open.Where(milestone => milestone.Due is not null).OrderBy(milestone => milestone.Due).FirstOrDefault(),
-        MilestoneRule.Fixed => open.FirstOrDefault(milestone => milestone.Title == settings.Title),
-        _ => null,
-    };
+            .OrderBy(candidate => candidate.Version is null)
+            .ThenBy(candidate => candidate.Version ?? [], VersionOrder.Instance)
+            .ThenBy(candidate => candidate.Milestone.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(candidate => candidate.Milestone),
+    ];
 
     // The first run of dot-separated numbers in the title: `v.0.2.0`, `v1.4`, `Release 2.0`.
     public static IReadOnlyList<long>? VersionOf(string title)
