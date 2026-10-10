@@ -31,20 +31,20 @@ public static class CliApp
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
     }
 
-    // Only the dry run exists so far: the real steps and the real screen over an imitated machine and tracker.
+    // Only the demo exists so far: the real steps and the real screen over an imitated machine and tracker.
     // What it reads for the question about the project is real, the `origin` remote and the boards of the user:
     // reading them changes nothing. What the setup would make, link and write is imitated.
     static Command CreateInitCommand(CliContext context)
     {
-        var dryRun = new Option<bool>("--dry-run") { Description = "Go through the setup with an imitated tracker and write nothing." };
+        var demo = new Option<bool>("--demo") { Description = "Go through the setup with an imitated tracker and write nothing." };
         var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.");
-        command.Options.Add(dryRun);
+        command.Options.Add(demo);
         command.SetAction(async (result, cancellationToken) =>
         {
             if (FindProject(context) is not { } root)
                 return ExitCode.NotReady;
-            if (!result.GetValue(dryRun))
-                return Fail(context, "toobusy: a real setup is not implemented yet; use `--dry-run`");
+            if (!result.GetValue(demo))
+                return Fail(context, "toobusy: a real setup is not implemented yet; use `--demo`");
             if (context.Terminal is not { } terminal)
                 return Fail(context, "toobusy: `init` asks questions and needs a terminal");
 
@@ -53,7 +53,7 @@ public static class CliApp
             var boards = new ImitatedBoards(context.Processes is null ? null : new GitHubBoards(context.Processes));
 
             SetupResult? ended = null;
-            using (var page = OpenPage(context, terminal, root, "Setting up this project · dry run"))
+            using (var page = OpenPage(context, terminal, root, "Setting up this project · demo"))
             {
                 try
                 {
@@ -72,7 +72,7 @@ public static class CliApp
             switch (ended?.Outcome)
             {
                 case SetupOutcome.Written:
-                    context.Output.WriteLine(palette.Muted($"Dry run: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."));
+                    context.Output.WriteLine(palette.Muted($"Demo: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."));
                     return ExitCode.Done;
                 case SetupOutcome.NothingToChange:
                     context.Output.WriteLine("Nothing to change: the settings already say this.");
@@ -88,13 +88,13 @@ public static class CliApp
         return command;
     }
 
-    // Only the dry run exists so far, and it has nothing to imitate: it is the entry point that the run grows from.
+    // Only the demo exists so far, and it has nothing to imitate: it is the entry point that the run grows from.
     // In a terminal it is the page of a run with its commands; elsewhere it says the same in two lines.
     static Command CreateRunCommand(CliContext context)
     {
-        var dryRun = new Option<bool>("--dry-run") { Description = "Imitate the run without changing anything." };
+        var demo = new Option<bool>("--demo") { Description = "Imitate the run without changing anything." };
         var command = new Command("run", "Takes the tasks of the queue one after another.");
-        command.Options.Add(dryRun);
+        command.Options.Add(demo);
         command.SetAction(result =>
         {
             if (FindSettings(context) is not { } file)
@@ -109,13 +109,13 @@ public static class CliApp
                 return ExitCode.Failed;
             }
 
-            if (!result.GetValue(dryRun))
-                return Fail(context, "toobusy: a real run is not implemented yet; use `--dry-run`");
+            if (!result.GetValue(demo))
+                return Fail(context, "toobusy: a real run is not implemented yet; use `--demo`");
 
             if (context.Terminal is { } terminal)
             {
                 var root = ProjectLocator.FindRoot(context.Folder)!;
-                using (var page = OpenPage(context, terminal, root, "Running the queue · dry run"))
+                using (var page = OpenPage(context, terminal, root, "Running the queue · demo"))
                 {
                     try
                     {
@@ -129,7 +129,7 @@ public static class CliApp
                 context.Output.WriteLine($"toobusy · Running the queue · {context.Shorten(root)}");
             }
 
-            context.Output.WriteLine("Dry run: nothing is changed.");
+            context.Output.WriteLine("Demo: nothing is changed.");
             context.Output.WriteLine("There is nothing to imitate yet.");
             return ExitCode.Done;
         });

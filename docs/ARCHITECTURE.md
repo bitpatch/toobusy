@@ -41,7 +41,7 @@ A test project is added together with the first code of the project it tests.
 | Process runner | running a command with a timeout and cancellation; retries when something needs them | `ProcessRunner` in `TooBusy.Infrastructure`, behind `IProcessRunner` |
 | System services | keeping the machine awake, notifications, the clock | `TooBusy.Infrastructure` |
 
-Core is tested with hand-written fakes of these ports. A dry run is such a fake offered to the user: imitated tracker and sessions behind the same ports.
+Core is tested with hand-written fakes of these ports. A demo is such a fake offered to the user: imitated tracker and sessions behind the same ports.
 
 Sessions are identified by the task they belong to, and nothing in Core assumes that only one runs at a time. The first version runs one; parallel sessions in git worktrees must fit the same ports.
 
@@ -73,7 +73,7 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 
 The setup never asks for the repository: `ISetupEnvironment` gives the one of the `origin` remote, and the labels are read from it. `BoardSuggestions` is what the question about the board does with a typed text: it finds the boards that fit it and turns the address of any page of a project into the address of its board.
 
-`init --dry-run` is the real steps and the real screen over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels that makes and links nothing, and a settings file that is read and never written. The `origin` remote and the boards are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards are added after the real ones until there are enough to scroll.
+`init --demo` is the real steps and the real screen over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels that makes and links nothing, and a settings file that is read and never written. The `origin` remote and the boards are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards and owners are added after the real ones until there are enough to scroll.
 
 ## Terminal
 

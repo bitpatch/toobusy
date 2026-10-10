@@ -2,23 +2,23 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "toobusy run --dry-run",
+      "name": "toobusy run --demo",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
       "program": "${workspaceFolder}/src/TooBusy.Cli/bin/Debug/net10.0/toobusy.dll",
-      "args": ["run", "--dry-run"],
+      "args": ["run", "--demo"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "stopAtEntry": false
     },
     {
-      "name": "toobusy init --dry-run",
+      "name": "toobusy init --demo",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
       "program": "${workspaceFolder}/src/TooBusy.Cli/bin/Debug/net10.0/toobusy.dll",
-      "args": ["init", "--dry-run"],
+      "args": ["init", "--demo"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "stopAtEntry": false

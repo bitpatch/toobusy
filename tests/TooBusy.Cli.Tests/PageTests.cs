@@ -43,7 +43,7 @@ public sealed class PageTests : IDisposable
     {
         using var page = terminal.Open();
         page.Body = [Line.Of("✔ Tracker GitHub")];
-        page.Status = "Setting up · dry run";
+        page.Status = "Setting up · demo";
         page.Keys = "esc back";
         page.Foot = Line.Of("● Project ─ ○ Write");
 
@@ -52,7 +52,7 @@ public sealed class PageTests : IDisposable
         Assert.Equal(
             [
                 "",
-                "  toobusy · ~/rocket                  Setting up · dry run",
+                "  toobusy · ~/rocket                     Setting up · demo",
                 "",
                 "",
                 " Project",
@@ -218,7 +218,7 @@ public sealed class PageTests : IDisposable
     public void WhenTheStatusDoesNotFitTheTitleStays()
     {
         using var page = terminal.Open();
-        page.Status = "Setting up this project · dry run · and a few words";
+        page.Status = "Setting up this project · demo · and a few words";
 
         page.Draw([], [], "");
 

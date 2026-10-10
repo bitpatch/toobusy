@@ -47,13 +47,13 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--help");
 
         Assert.Equal(0, exit);
-        Assert.Contains("--dry-run", output, StringComparison.Ordinal);
+        Assert.Contains("--demo", output, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData]
     [InlineData("run")]
-    [InlineData("run", "--dry-run")]
+    [InlineData("run", "--demo")]
     public async Task OutsideAGitRepositoryACommandFails(params string[] args)
     {
         var (exit, output, error) = await RunAsync(args);
@@ -66,7 +66,7 @@ public sealed class CliAppTests : IDisposable
     [Theory]
     [InlineData]
     [InlineData("run")]
-    [InlineData("run", "--dry-run")]
+    [InlineData("run", "--demo")]
     public async Task WithoutSettingsTheProjectIsNotSetUp(params string[] args)
     {
         GitRepository();
@@ -87,10 +87,10 @@ public sealed class CliAppTests : IDisposable
         WriteSettings(Settings);
         var inside = folder.CreateSubdirectory("src").CreateSubdirectory("deep");
 
-        var (exit, output, _) = await RunFromAsync(inside.FullName, "run", "--dry-run");
+        var (exit, output, _) = await RunFromAsync(inside.FullName, "run", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.Contains("Dry run", output, StringComparison.Ordinal);
+        Assert.Contains("Demo", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -128,15 +128,15 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task DryRunSaysThatNothingIsChanged()
+    public async Task DemoSaysThatNothingIsChanged()
     {
         GitRepository();
         WriteSettings(Settings);
 
-        var (exit, output, _) = await RunAsync("run", "--dry-run");
+        var (exit, output, _) = await RunAsync("run", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.Equal("Dry run: nothing is changed." + Environment.NewLine + "There is nothing to imitate yet." + Environment.NewLine, output);
+        Assert.Equal("Demo: nothing is changed." + Environment.NewLine + "There is nothing to imitate yet." + Environment.NewLine, output);
     }
 
     [Fact]
@@ -146,13 +146,13 @@ public sealed class CliAppTests : IDisposable
         WriteSettings(Settings);
         var keys = new Keys().Type("/exit").Press(Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "run", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "run", "--demo");
 
         Assert.Equal(0, exit);
         Assert.StartsWith("\u001b[?1049h", output, StringComparison.Ordinal);
-        Assert.Contains("Running the queue · dry run", output, StringComparison.Ordinal);
+        Assert.Contains("Running the queue · demo", output, StringComparison.Ordinal);
         Assert.Equal(
-            $"toobusy · Running the queue · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}Dry run: nothing is changed.{Environment.NewLine}There is nothing to imitate yet.{Environment.NewLine}",
+            $"toobusy · Running the queue · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}Demo: nothing is changed.{Environment.NewLine}There is nothing to imitate yet.{Environment.NewLine}",
             Report(output));
     }
 
@@ -162,7 +162,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         WriteSettings(Settings);
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.ControlC, Keys.ControlC), "run", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.ControlC, Keys.ControlC), "run", "--demo");
 
         Assert.Equal(0, exit);
         Assert.StartsWith("toobusy · Running the queue", Report(output), StringComparison.Ordinal);
@@ -177,7 +177,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, _, error) = await RunAsync("run");
 
         Assert.Equal(1, exit);
-        Assert.Contains("--dry-run", error, StringComparison.Ordinal);
+        Assert.Contains("--demo", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         WriteSettings(Settings.Replace("blocking = [\"manual\"]", "blocking = \"manual\"", StringComparison.Ordinal));
 
-        var (exit, output, error) = await RunAsync("run", "--dry-run");
+        var (exit, output, error) = await RunAsync("run", "--demo");
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
@@ -211,7 +211,7 @@ public sealed class CliAppTests : IDisposable
     [Fact]
     public async Task InitNeedsAGitRepository()
     {
-        var (exit, _, error) = await RunAsync("init", "--dry-run");
+        var (exit, _, error) = await RunAsync("init", "--demo");
 
         Assert.Equal(2, exit);
         Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
@@ -225,7 +225,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, _, error) = await RunAsync("init");
 
         Assert.Equal(1, exit);
-        Assert.Contains("--dry-run", error, StringComparison.Ordinal);
+        Assert.Contains("--demo", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -233,24 +233,24 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
 
-        var (exit, _, error) = await RunAsync("init", "--dry-run");
+        var (exit, _, error) = await RunAsync("init", "--demo");
 
         Assert.Equal(1, exit);
         Assert.Contains("needs a terminal", error, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ADryRunOfTheSetupGoesThroughTheStepsAndWritesNothing()
+    public async Task ADemoOfTheSetupGoesThroughTheStepsAndWritesNothing()
     {
         GitRepository();
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--dry-run");
+        var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         Assert.StartsWith("\u001b[?1049h", output, StringComparison.Ordinal);
-        Assert.Contains("Setting up this project · dry run", output, StringComparison.Ordinal);
+        Assert.Contains("Setting up this project · demo", output, StringComparison.Ordinal);
         Assert.Contains("The answers above will be written to .toobusy/settings.toml.", output, StringComparison.Ordinal);
         Assert.DoesNotContain("[tracker]", output, StringComparison.Ordinal);
         Assert.Equal(
@@ -261,7 +261,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
                 "✔ Assistant        Claude Code",
-                "Dry run: nothing was made, linked or written; .toobusy/settings.toml is left as it was.",
+                "Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was.",
                 "",
             ],
             Report(output).Split(Environment.NewLine));
@@ -270,13 +270,13 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ADryRunOfTheSetupStartsFromTheSettingsThatExist()
+    public async Task ADemoOfTheSetupStartsFromTheSettingsThatExist()
     {
         GitRepository();
         WriteSettings(Settings);
         var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
@@ -285,7 +285,7 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ADryRunOfTheSetupReadsTheOriginAndTheBoardsOfTheUser()
+    public async Task ADemoOfTheSetupReadsTheOriginAndTheBoardsOfTheUser()
     {
         GitRepository();
         var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
@@ -293,7 +293,7 @@ public sealed class CliAppTests : IDisposable
             : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Contains(processes.Asked, asked => asked.Command == "git" && asked.Arguments.SequenceEqual(["-C", folder.FullName, "remote", "get-url", "origin"]));
@@ -303,17 +303,33 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ADryRunOfTheSetupGoesWithMadeUpBoardsWhenTheRealOnesCannotBeRead()
+    public async Task ADemoOfTheSetupGoesWithMadeUpBoardsWhenTheRealOnesCannotBeRead()
     {
         GitRepository();
         var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
         var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Contains("The `origin` remote is not a GitHub repository", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          Moon base (made up)  https://github.com/users/example/projects/2", Report(output), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoOfTheSetupOffersEnoughOwnersToScroll()
+    {
+        GitRepository();
+        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
+            ? "https://github.com/bitpatch/toobusy.git\n"
+            : "owner\torg\tbitpatch\nowner\tuser\tdenis\n", ""));
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("↓ 5 more", output, StringComparison.Ordinal);
+        Assert.Contains("The project “Rocket” will be made for example.", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -322,7 +338,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.No);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(1, exit);
         Assert.EndsWith("✘ The setup was declined: nothing was changed." + Environment.NewLine, Report(output), StringComparison.Ordinal);
@@ -336,7 +352,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var keys = new Keys().Press(Keys.Enter).Press(controlC ? [Keys.ControlC, Keys.ControlC] : [Keys.Escape, Keys.Escape, Keys.Escape]);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--dry-run");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(1, exit);
         Assert.Equal(

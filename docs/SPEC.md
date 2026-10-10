@@ -93,7 +93,7 @@ From top to bottom the screen is:
 
 ```
                                                                          the bar: three lines on grey
-  toobusy · ~/Projects/toobusy              Setting up this project · dry run
+  toobusy · ~/Projects/toobusy                 Setting up this project · demo
 
  ✔ Tracker          GitHub                                what is answered or done already
  ✔ Project          Toobusy  https://github.com/orgs/…
@@ -174,7 +174,7 @@ After writing, `init` says that the file is to be committed and that `toobusy do
 
 Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a board that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
 
-**A dry run.** `init --dry-run` goes through the interactive setup without touching anything. What it reads for the question about the project is real: the `origin` remote and, through `gh`, the boards of the user. When there are fewer than eight of them, made-up boards follow the real ones, so that there is a list to scroll. The rest is imitated: the labels are made up, the settings that exist are read, and nothing is made, linked or written. It is there to try the setup and to see what it looks like.
+**A demo.** `init --demo` goes through the interactive setup without touching anything. What it reads for the question about the project is real: the `origin` remote and, through `gh`, the boards of the user. When there are fewer than ten of them, made-up boards follow the real ones, so that there is a list to scroll; the owners a new project can be made for are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, and nothing is made, linked or written. It is there to try the setup and to see what it looks like.
 
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
 
@@ -210,7 +210,7 @@ The setup is written against an interface for asking questions, so that tests an
 
 ### `toobusy run`
 
-Only the dry run exists so far, and it has nothing to imitate yet. In a terminal `run --dry-run` opens the screen of a run. Its choice is a line where commands are typed:
+Only the demo exists so far, and it has nothing to imitate yet. In a terminal `run --demo` opens the screen of a run. Its choice is a line where commands are typed:
 
 ```
  ────────────────────────────────────────────────────
