@@ -14,12 +14,17 @@ public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret?
 // A tape: the terminal's own screen, written from the top down under a bar that is printed once. What is settled is
 // written for good and scrolls up into the history of the terminal, the bar with it, so that the terminal scrolls
 // back to it. Under the settled lines stands the foot, which is drawn over itself: the cursor goes up to its first
-// line, every line is written again, and what is left of a longer foot is erased. Nothing is ever erased above it.
+// line, every line is written again, and what is left of a longer foot is erased. Nothing is erased above it while
+// the window keeps its size.
 //
 // No line is let wrap: a line the terminal broke would make the foot taller than it is counted, and every drawing
 // would leave a line of it behind. Lines are cut a column short of the window, and the terminal is told not to wrap
-// for as long as the tape is unrolled. A foot taller than the window loses its first lines. When the window gets
-// narrower the terminal may fold what is on it already; what a fold leaves of the old foot stays where it is.
+// for as long as the tape is unrolled. A foot taller than the window loses its first lines.
+//
+// A window that changes its size is not drawn over: a terminal folds or cuts what is on it as it likes, and the
+// foot is not found again. The tape remembers what it has settled instead, not as lines but as what lays them out
+// to a width. It then erases the terminal, its history too, and writes all of it anew to the new width: the bar,
+// every settled line and the foot. What the terminal had in its history before the tape is gone with it.
 //
 // What blinks is written a beat at a time where it stands, counted from the line the cursor rests on, and the cursor
 // comes back there. Without colours nothing blinks: the mark is as it is drawn, and the terminal's own cursor stands
@@ -37,6 +42,11 @@ public sealed class Tape
     readonly Palette palette;
     readonly Func<(int Width, int Height)> size;
     readonly Lock drawing;
+    readonly string title;
+    readonly string status;
+
+    // What is settled, in its order: each piece gives its lines for a width.
+    readonly List<Func<int, IReadOnlyList<Line>>> said = [];
 
     Strip foot = Strip.Empty;
     (int Width, int Height) drawn;
@@ -47,16 +57,19 @@ public sealed class Tape
 
     internal Tape(TextWriter output, Palette palette, Func<(int Width, int Height)> size, Lock drawing, string before, string title, string status)
     {
-        (this.output, this.palette, this.size, this.drawing) = (output, palette, size, drawing);
+        (this.output, this.palette, this.size, this.drawing, this.title, this.status) = (output, palette, size, drawing, title, status);
         drawn = size();
-        var width = Math.Max(20, drawn.Width);
+        output.Write($"{Screen.HideCursor}{before}\u001b[?7l\u001b[1 q{Bar(Math.Max(20, drawn.Width))}");
+        output.Flush();
+    }
 
-        // The bar is three lines of its ground and an empty one, as on a screen. The ground is not written cell by
-        // cell: what the terminal erases of a line it fills with it, and nothing is there to fold in a narrower window.
+    // The bar: three lines of its ground and an empty one, as on a screen. The ground is not written cell by cell:
+    // what the terminal erases of a line it fills with it.
+    string Bar(int width)
+    {
         var fill = palette.Erase(Ground.Bar);
         var bar = Screen.Row(palette, Screen.Bar(title, status, width), width - 1, Ground.Bar, fill: false);
-        output.Write($"{Screen.HideCursor}{before}\u001b[?7l\u001b[1 q{fill}\r\n{bar}{fill}\r\n{fill}\r\n\r\n");
-        output.Flush();
+        return $"{fill}\r\n{bar}{fill}\r\n{fill}\r\n\r\n";
     }
 
     public bool Closed { get; private set; }
@@ -67,13 +80,19 @@ public sealed class Tape
     public int Width => Math.Max(20, size().Width);
 
     // Writes the lines that are settled, for good, and the foot under them in the place of the one before.
-    public void Draw(IReadOnlyList<Line> settled, Strip foot)
+    public void Draw(IReadOnlyList<Line> settled, Strip foot) => DrawFitted(settled.Count == 0 ? [] : [_ => settled], foot);
+
+    // The same for what is settled as pieces that lay their lines out to a width: a window that changes its size
+    // gets them laid out anew.
+    public void DrawFitted(IReadOnlyList<Func<int, IReadOnlyList<Line>>> settled, Strip foot)
     {
         lock (drawing)
         {
             if (Closed)
                 return;
 
+            // In a window of another size all is written anew, on a terminal that is erased with its history.
+            var anew = size() != drawn;
             drawn = size();
             var width = Math.Max(20, drawn.Width);
 
@@ -82,9 +101,11 @@ public sealed class Tape
             Caret? Moved(Caret? at) => at is var (line, column) && line >= cut ? new Caret(line - cut, column) : null;
             this.foot = cut == 0 ? foot : new Strip([.. foot.Lines.Skip(cut)], Moved(foot.Mark), Moved(foot.Caret), foot.Chosen >= cut ? foot.Chosen - cut : null);
 
-            var text = new StringBuilder(Screen.HideCursor).Append('\r').Append(Up(above));
-            foreach (var line in settled)
+            var text = new StringBuilder(Screen.HideCursor);
+            text.Append(anew ? "\u001b[H\u001b[2J\u001b[3J" + Bar(width) : "\r" + Up(above));
+            foreach (var line in (anew ? said.Concat(settled) : settled).SelectMany(piece => piece(width)))
                 text.Append(Row(line, width)).Append("\u001b[K\r\n");
+            said.AddRange(settled);
             for (var row = 0; row < this.foot.Lines.Count; row++)
                 text.Append(Row(this.foot.Lines[row], width)).Append(row < this.foot.Lines.Count - 1 ? "\u001b[K\r\n" : "");
             text.Append("\u001b[J");
@@ -112,8 +133,8 @@ public sealed class Tape
         }
     }
 
-    // Draws the foot again: the size of the window has changed.
-    internal void Redraw() => Draw([], foot);
+    // Draws the tape again: the size of the window has changed.
+    internal void Redraw() => DrawFitted([], foot);
 
     // Draws what blinks in the shade of the beat. A window that has changed its size meanwhile is drawn anew.
     internal void Pulse(double glow)

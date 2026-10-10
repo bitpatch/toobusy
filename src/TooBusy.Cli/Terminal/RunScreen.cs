@@ -71,7 +71,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         {
             while (!working.IsCompleted)
             {
-                var settled = Settled(feed.Take(), tape.Width);
+                var settled = Settled(feed.Take());
                 any |= settled.Count > 0;
                 var status = feed.Status;
                 var waits = status.Phase == RunPhase.WaitingForOwner;
@@ -85,7 +85,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                 var showing = string.Join('\n', foot.Lines.Select(Told).Append($"{foot.Chosen}"));
                 if (settled.Count > 0 || showing != drawn)
                 {
-                    tape.Draw(settled, foot);
+                    tape.DrawFitted(settled, foot);
                     drawn = showing;
                 }
 
@@ -123,10 +123,11 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
             // However the page is left, what the run did stays on the tape, with how it went under it.
             if (Result is { } result)
             {
-                var settled = Settled(feed.Take(), tape.Width);
+                var settled = Settled(feed.Take());
                 var (tasks, why) = RunLook.Summary(result, ends, now() - started);
+                var spaced = any || settled.Count > 0;
                 Summary = Told(tasks) + (why is null ? "" : $" · {why.Text}");
-                tape.Draw([.. settled, .. any || settled.Count > 0 ? [Line.Empty] : (Line[])[], tasks, .. why is null ? [] : RunLook.Wrapped(why, tape.Width - 2)], Strip.Empty);
+                tape.DrawFitted([.. settled, width => [.. spaced ? [Line.Empty] : (Line[])[], tasks, .. why is null ? [] : RunLook.Wrapped(why, width - 2)]], Strip.Empty);
             }
 
             tape.Close();
@@ -142,24 +143,24 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     }
 
     // What of what the run told stays on the tape: the tasks that are over, which are remembered, and what the run
-    // warns of.
-    List<Line> Settled(IReadOnlyList<object> told, int width)
+    // warns of. Each is laid out to the width the tape has, and again when the window gets another one.
+    List<Func<int, IReadOnlyList<Line>>> Settled(IReadOnlyList<object> told)
     {
-        var lines = new List<Line>();
+        var pieces = new List<Func<int, IReadOnlyList<Line>>>();
         foreach (var said in told)
         {
             if (said is TaskEnd ended)
             {
                 ends.Add(ended);
-                lines.Add(RunLook.Ended(ended, width - 2));
+                pieces.Add(width => [RunLook.Ended(ended, width - 2)]);
             }
             else if (said is RunLine { Mark: RunMark.Attention } warned)
             {
-                lines.AddRange(RunLook.Wrapped(warned, width - 2));
+                pieces.Add(width => [.. RunLook.Wrapped(warned, width - 2)]);
             }
         }
 
-        return lines;
+        return pieces;
     }
 
     // The foot of the tape: what the run is doing, the place of the commands between its rules, and the keys.

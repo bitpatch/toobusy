@@ -189,6 +189,39 @@ public sealed class TapeTests : IDisposable
     }
 
     [Fact]
+    public void AWindowOfAnotherSizeGetsAllThatWasSettledLaidOutAnewUnderTheBar()
+    {
+        var size = (Width: 40, Height: 8);
+        terminal.Device = terminal.Device with { Size = () => size };
+        using var page = terminal.Open();
+        var tape = Unroll(page);
+        Func<int, IReadOnlyList<Line>> Ended(string title) => width => [Line.Of(title.PadRight(width - 8) + "0:09")];
+        tape.DrawFitted([Ended("✔ Export")], Strip.Empty);
+        tape.Draw(Settled("▲ A warning"), Strip.Empty);
+        tape.DrawFitted([Ended("✔ Ship it")], new Strip([Line.Of("● Describe it"), Line.Of(new string('─', 38))], Mark: new Caret(0, 0)));
+
+        // The terminal folds what is on it; the tape erases it, the history too, and writes all of it to the width.
+        size = (30, 8);
+        terminal.Tape.Resize(30, 8);
+        terminal.Resize!();
+
+        Assert.Equal(
+            ["", "  toobusy · ~/rocket", "", "", " ✔ Export              0:09", " ▲ A warning", " ✔ Ship it             0:09", " ● Describe it", " " + new string('─', 27) + "…"],
+            terminal.Tape.Rows);
+        Assert.Contains("\u001b[H\u001b[2J\u001b[3J", terminal.Output.ToString(), StringComparison.Ordinal);
+
+        // What is settled next goes under it as before, and a wider window gets all of it again.
+        tape.DrawFitted([Ended("✔ Describe it")], Strip.Empty);
+        size = (44, 8);
+        terminal.Tape.Resize(44, 8);
+        tape.Draw([], Foot("● Reading the queue…"));
+
+        Assert.Equal(
+            [" ✔ Export                            0:09", " ▲ A warning", " ✔ Ship it                           0:09", " ✔ Describe it                       0:09", " ● Reading the queue…"],
+            terminal.Tape.Rows.Skip(4));
+    }
+
+    [Fact]
     public void ClosingErasesTheFootAndWhatIsWrittenNextStandsUnderTheLastLine()
     {
         var page = terminal.Open();

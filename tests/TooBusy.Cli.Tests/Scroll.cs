@@ -13,6 +13,8 @@ namespace TooBusy.Cli.Tests;
 public sealed partial class Scroll(int width = 120, int height = 30)
 {
     readonly List<StringBuilder> rows = [new()];
+    int width = width;
+    int height = height;
 
     // The row at the top of the window, and where the cursor is; rows are counted from the first one ever written.
     int top;
@@ -36,6 +38,32 @@ public sealed partial class Scroll(int width = 120, int height = 30)
 
     // The rows without the empty ones and the rules, as one text.
     public string Text => string.Join('\n', Rows.Where(line => line.Trim(' ', '─').Length > 0));
+
+    // The window gets another size, as the terminals of today take it: a row longer than the new width is folded
+    // over as many rows as it needs, and the cursor stays on the cell it stood on. The bottom of the window stays
+    // where it is, so that what is above it goes into the history.
+    public void Resize(int columns, int lines)
+    {
+        var bottom = Math.Min(top + height - 1, rows.Count - 1);
+        var folded = new List<StringBuilder>();
+        var (cursor, end) = (row, bottom);
+        for (var at = 0; at < rows.Count; at++)
+        {
+            var text = rows[at].ToString();
+            var pieces = Math.Max(1, (text.Length + columns - 1) / columns);
+            if (at == row)
+                (cursor, column) = (folded.Count + column / columns, column % columns);
+            if (at == bottom)
+                end = folded.Count + pieces - 1;
+            for (var piece = 0; piece < pieces; piece++)
+                folded.Add(new StringBuilder(text.Substring(piece * columns, Math.Min(columns, text.Length - piece * columns))));
+        }
+
+        rows.Clear();
+        rows.AddRange(folded);
+        (width, height, row) = (columns, lines, cursor);
+        top = Math.Max(0, Math.Max(end, row) - lines + 1);
+    }
 
     public static Scroll Read(string output, int width = 120, int height = 30)
     {
@@ -93,6 +121,20 @@ public sealed partial class Scroll(int width = 120, int height = 30)
                 return;
             case ("G", _):
                 column = count - 1;
+                return;
+            case ("H", ""):
+                (row, column) = (top, 0);
+                return;
+
+            // The window is erased, and then the history: a tape that draws itself anew starts on an empty terminal.
+            case ("J", "2"):
+                for (var below = top; below < rows.Count; below++)
+                    rows[below].Clear();
+                return;
+            case ("J", "3"):
+                rows.RemoveRange(0, top);
+                (row, top) = (row - top, 0);
+                rows.RemoveRange(row + 1, rows.Count - row - 1);
                 return;
             case ("K", ""):
                 Erase(row);
