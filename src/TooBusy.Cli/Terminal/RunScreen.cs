@@ -6,14 +6,15 @@ namespace TooBusy.Cli.Terminal;
 // of the terminal and can be scrolled back to. A task that is over is one line that stays: the mark of how it went,
 // its title and the time it took. Nothing is said of a task that starts. What a run warns of stays too.
 //
-// Under these lines stands the task that is worked on: a mark that pulses, its title and, under the title, how long
+// Under these lines stands the task that is worked on: a mark that turns, its title and, under the title, how long
 // it has been worked on and what its session is doing. While the session waits for the owner, what it said last and
 // how it is opened stand there too, and are gone when it goes on.
 //
-// Under the task is the place of the commands, between two rules. Nothing is typed there: `/` opens the menu of the
-// commands that mean something at the moment, the arrows move, Enter runs one and Escape closes the menu. A session
-// that waits for the owner brings the two commands that are for it without being asked. Under the second rule stand
-// the keys and, at their right, how much of the usage limits is used.
+// Under the task is the place of the commands, between two rules. Nothing is typed there: a pointer blinks where
+// the menu opens, and `/` opens the menu of the commands that mean something at the moment, the arrows move, Enter
+// runs one and Escape closes the menu. A session that waits for the owner brings the two commands that are for it
+// without being asked. Under the second rule stand the keys and, at their right, how much of the usage limits is
+// used.
 //
 // The run goes on by itself while the page waits for a key: the page looks for one again and again and draws what
 // has changed. When the run is over the page writes how it went, rolls the tape up and gives the result: it does
@@ -179,13 +180,12 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         lines.AddRange(Asked(status, width, Math.Min(Quoted, tape.Room - lines.Count - 3 - Math.Max(1, listed.Count))));
         lines.Add(rule);
 
-        Caret? caret = null;
-        int? chosen = null;
+        int chosen;
         if (listed.Count == 0)
         {
-            // Nothing is typed here: the cursor only shows where the menu opens.
-            caret = new Caret(lines.Count, 0);
-            lines.Add(new Line(new Part(" "), new Part(" press / to show the menu", Tone.Muted)));
+            // Nothing is typed here: the pointer only shows where the menu opens, and blinks as it does in it.
+            chosen = lines.Count;
+            lines.Add(new Line(new Part("❯", Tone.Accent), new Part(" press / to show the menu", Tone.Muted)));
         }
         else
         {
@@ -196,7 +196,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
         lines.Add(rule);
         lines.Add(Keys(status, listed.Count > 0, width));
-        return new Strip(lines, mark, caret, chosen);
+        return new Strip(lines, mark, Chosen: chosen);
     }
 
     // What the run is doing, in two lines: the task under the mark, and under it the time and what goes on.

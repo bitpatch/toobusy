@@ -75,7 +75,7 @@ public sealed class RunScreenTests : IDisposable
         Assert.Equal(result, screen.Result);
         Assert.Equal([new TaskEnd(Total, RunMark.Done, TimeSpan.FromSeconds(84))], screen.Ends);
         var bar = "  toobusy · ~/rocket" + new string(' ', 61) + "Running the queue";
-        terminal.AssertTaped(bar + "\n ✔ Show the total  1:24\n ● Export the data\n   1:24 · Edit src/Export.cs\n   press / to show the menu\n"
+        terminal.AssertTaped(bar + "\n ✔ Show the total  1:24\n ● Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu\n"
             + " ctrl+c stop the session and exit" + new string(' ', 43) + "5-hour 41% · weekly 12%");
 
         // Nothing is said of a task that starts, and the page is left with how the run went under its tasks.
@@ -157,7 +157,7 @@ public sealed class RunScreenTests : IDisposable
         terminal.AssertTaped("   0:10 · waits for you · gets no message\n   │ CSV or JSON?\n   answer it in its session: claude attach 1a2b\n ❯ send now  it is told to go on alone at once");
 
         // Once the session goes on there is the task again, the time and what it does, and nothing else.
-        terminal.AssertTaped(" ● Export the data\n   1:24 · Edit src/Export.cs\n   press / to show the menu");
+        terminal.AssertTaped(" ● Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu");
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Theory]
-    [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, false, " ● Reading the queue…\n   press /")]
+    [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, false, " ● Reading the queue…\n ❯ press /")]
     [InlineData(RunPhase.Preparing, true, "Starting #3…", 0, false, false, " ● Export the data\n   1:24 · starting\n")]
     [InlineData(RunPhase.Working, true, "", 0, true, false, " ● Export the data\n   1:24 · Edit src/Export.cs · the last task of this run\n")]
     [InlineData(RunPhase.Working, true, "", 0, false, true, " ● Export the data\n   1:24 · Edit src/Export.cs · wrapping up\n")]

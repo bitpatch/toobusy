@@ -116,7 +116,7 @@ public sealed class TapeTests : IDisposable
     }
 
     [Fact]
-    public void TheMarkPulsesFromAPointToACircleWhereItStandsAndTheCursorComesBack()
+    public void TheMarkTurnsWhereItStandsAndTheCursorComesBack()
     {
         var palette = Palette.Dark;
         using var page = terminal.Open(palette: palette);
@@ -132,10 +132,10 @@ public sealed class TapeTests : IDisposable
             Assert.Equal(rests, terminal.Tape.Cursor.Row);
         }
 
-        // One blink: from the circle down to the point and up again.
-        Assert.Equal("●●●•••·······•••●●●●", new string([.. signs]));
-        Assert.Contains(palette.Accent("·"), terminal.Output.ToString(), StringComparison.Ordinal);
-        Assert.Equal([" ✔ Export the data  1:24", "", " ● Ship it", "   0:03 · Read a.cs"], terminal.Tape.Rows.Skip(4));
+        // The gap goes around the cell clockwise, a dot in a beat: a turn takes eight of them.
+        Assert.Equal("⣷⣯⣟⡿⢿⣻⣽⣾⣷⣯⣟⡿⢿⣻⣽⣾⣷⣯⣟⡿", new string([.. signs]));
+        Assert.Contains(palette.Accent("⣾"), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Equal([" ✔ Export the data  1:24", "", " ⡿ Ship it", "   0:03 · Read a.cs"], terminal.Tape.Rows.Skip(4));
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public sealed class TapeTests : IDisposable
         size = (30, 8);
         terminal.Tick!();
 
-        Assert.Equal(" ● " + new string('a', 25) + "…", terminal.Tape.Rows[4]);
+        Assert.Equal(" ⣷ " + new string('a', 25) + "…", terminal.Tape.Rows[4]);
     }
 
     [Fact]

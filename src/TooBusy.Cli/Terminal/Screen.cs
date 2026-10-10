@@ -155,7 +155,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
             step++;
             if (tape is { Closed: false })
             {
-                tape.Pulse(Glow);
+                tape.Pulse(Glow, step);
                 return;
             }
 

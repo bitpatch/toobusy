@@ -5,7 +5,7 @@ namespace TooBusy.Cli.Terminal;
 
 // The foot of a tape: the lines under what the tape has said for good, drawn again and again. Like a frame of a
 // screen it may have a cursor at a caret and a chosen line, which blink. Its mark is where something goes on: the
-// line and the column of a sign that pulses, from a point to a full circle and back.
+// line and the column of a sign that turns: a full cell of dots with a gap that runs around it.
 public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret? Caret = null, int? Chosen = null)
 {
     public static Strip Empty { get; } = new([]);
@@ -35,8 +35,8 @@ public sealed class Tape
     // as it was, and a line of its own for what the terminal writes next.
     public const string Rescue = "\u001b[?7h" + Screen.Shown + "\r\n";
 
-    // The sign of the mark from its least to its most.
-    static readonly string[] Signs = ["·", "•", "●"];
+    // The sign of the mark as the gap goes around it, a beat at a time.
+    static readonly string[] Signs = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"];
 
     readonly TextWriter output;
     readonly Palette palette;
@@ -54,6 +54,7 @@ public sealed class Tape
     // How many lines the cursor rests under the first line of the foot.
     int above;
     double glow = 1;
+    int step;
 
     internal Tape(TextWriter output, Palette palette, Func<(int Width, int Height)> size, Lock drawing, string before, string title, string status)
     {
@@ -136,10 +137,11 @@ public sealed class Tape
     // Draws the tape again: the size of the window has changed.
     internal void Redraw() => DrawFitted([], foot);
 
-    // Draws what blinks in the shade of the beat. A window that has changed its size meanwhile is drawn anew.
-    internal void Pulse(double glow)
+    // Draws what blinks in the shade of the beat, and the mark as the step has it. A window that has changed its
+    // size meanwhile is drawn anew.
+    internal void Pulse(double glow, int step)
     {
-        this.glow = glow;
+        (this.glow, this.step) = (glow, step);
         if (size() != drawn)
         {
             Redraw();
@@ -154,8 +156,8 @@ public sealed class Tape
         output.Flush();
     }
 
-    // The sign of the mark at a moment of the blink: a full circle at its brightest, a point at nothing.
-    public static string Sign(double glow) => Signs[glow >= 0.75 ? 2 : glow >= 0.25 ? 1 : 0];
+    // The sign of the mark at a step: the gap is a dot further around the cell with every one.
+    public static string Sign(int step) => Signs[((step % Signs.Length) + Signs.Length) % Signs.Length];
 
     // What blinks as the blink has it at the moment. Without colours it is the terminal's cursor, which stays where
     // it is put: the cursor then rests on that line, and not on the last one.
@@ -180,7 +182,7 @@ public sealed class Tape
         }
 
         if (foot.Mark is var (marked, sign))
-            Put(marked, sign, palette.Accent(Sign(glow)));
+            Put(marked, sign, palette.Accent(Sign(step)));
 
         // Of the chosen line only its first piece blinks, the pointer with the name, as on a screen.
         if (foot.Chosen is { } chosen && chosen < foot.Lines.Count && foot.Lines[chosen].Parts is [var name, ..])

@@ -580,18 +580,18 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
  ✔ Show the total of an order in its header  12:04
  ◐ Fix the rounding of a discount  7:31
 
- ● Export the orders as a file
+ ⣾ Export the orders as a file
    1:24 · Edit src/Export/CsvExport.cs
  ────────────────────────────────────────────────────────────
-   press / to show the menu
+ ❯ press / to show the menu
  ────────────────────────────────────────────────────────────
  ctrl+c stop the session and exit                5-hour 41% · weekly 12%
 ```
 
 - **What stays.** A task that is over is one line: the mark of how it went in its colour, `✔` done, `◐` done in part, `◇` waits for the owner, `■` interrupted or killed, `✖` failed, `‖` paused by a usage limit; its title; and, muted, the time it took. A title that does not fit gives way to the time. Nothing is said of a task that starts. What a run warns of, `▲`, stays as a line too. These lines are written for good: as they grow in number the bar scrolls up with them into the history of the terminal, and the terminal scrolls back to them.
-- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark pulses in the accent, from a point to a full circle and back, once in a second and a half; without colours it stands still. Under the title, muted, stand the time the task has been worked on and what its session is doing. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, and a run that was told to stop that this is its last task. Between tasks the first line says what the run is doing.
+- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark turns in the accent: a cell full of dots with a gap that runs around it clockwise, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽`, a turn in two thirds of a second; without colours a `●` stands there still. Under the title, muted, stand the time the task has been worked on and what its session is doing. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, and a run that was told to stop that this is its last task. Between tasks the first line says what the run is doing.
 - **A session that waits for the owner** shows, under these two lines, what it said last, eight lines of it at most, and how its session is opened to answer it. When it goes on, there is the title, the time and the step again, and nothing else.
-- **The commands** have their place between two rules. Nothing is typed there: the line says `press / to show the menu`, with the cursor before it. `/` opens the menu of the commands that mean something at the moment, each with what it does; Up and Down move, Enter runs one, Escape closes the menu. They are `hold` and `send now` while a session waits for the owner, then `stop`, `continue` and `abort`. A session that waits for the owner brings `hold` and `send now` without being asked; Escape puts them away, and `/` opens the whole menu.
+- **The commands** have their place between two rules. Nothing is typed there: the line says `press / to show the menu` after the pointer of a menu, `❯`, which blinks there as it does on the chosen line of the menu that opens in its place. `/` opens the menu of the commands that mean something at the moment, each with what it does; Up and Down move, Enter runs one, Escape closes the menu. They are `hold` and `send now` while a session waits for the owner, then `stop`, `continue` and `abort`. A session that waits for the owner brings `hold` and `send now` without being asked; Escape puts them away, and `/` opens the whole menu.
 - **Under the second rule** stand the keys and, at the right edge, how much of the two limits is used, when it is known. After the first Ctrl+C the line says `press ctrl+c again to stop the session and exit`.
 - **The end.** When the run is over, what was redrawn is erased, and under the tasks the tape says how the run went: `5 tasks in 1 h 12 min · 4 done · 1 done in part`, and under that, for a run that did not simply run out of tasks, what ended it: `‖ Stopped: the weekly limit is at 80%`. The page does not wait to be left: a run that was opened from the menu goes back to it, with this said above the menu, and `toobusy run` leaves the tool.
 
