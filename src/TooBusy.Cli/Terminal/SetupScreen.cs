@@ -65,16 +65,17 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         var widest = options.Select(option => option.Length).DefaultIfEmpty().Max();
 
         // After the options stands `Back`, where there is somewhere to go back to: Enter on it goes back.
-        var rows = options.Count + (options.Count > 0 && Picker.GoesBack(page) ? 1 : 0);
+        var back = options.Count > 0 && Picker.GoesBack(page);
+        var rows = options.Count + (back ? 1 : 0);
         while (true)
         {
             var lines = new List<Line>();
             if (options.Count == 0)
                 lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
             top = Window(lines, rows, at, top, Picker.Rows, out var pointer, index => index == options.Count
-                ? Row(index == at, Picker.Back)
+                ? Picker.BackRow(index == at)
                 : Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
-            page.Draw(Head(label, hint), lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer);
+            page.Draw(Head(label, hint), lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer, back: back);
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Enter)
@@ -95,12 +96,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
 
     public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse);
 
-    public bool? Confirm(string question) => Picker.Pick(page, [Line.Of(question, Tone.Strong)], [new Choice("Yes"), new Choice("No")], "y yes · n no", shortcut: key => key switch
-    {
-        ConsoleKey.Y => 0,
-        ConsoleKey.N => 1,
-        _ => null,
-    }) is { } picked ? picked == 0 : null;
+    // The last question of the setup: what was answered is saved, or the setup is left as if nothing was answered.
+    public bool? Confirm(string question) =>
+        Picker.Pick(page, [Line.Of(question, Tone.Strong)], [new Choice("Save and exit"), new Choice("Exit without saving")]) is { } picked ? picked == 0 : null;
 
     // A project that has a board keeps it with one Enter; `Change` opens the ways to name another one, and going back
     // from them leaves the board as it is.
@@ -191,6 +189,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             IReadOnlyList<SetupBoard> fitting = [];
             Caret? caret = null;
             int? pointed = null;
+
+            // Whether the tab has a `Back` that names its key.
+            var named = false;
             string keys;
             switch (ways[way].Way)
             {
@@ -207,11 +208,12 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                     var widest = Math.Min(30, fitting.Select(board => board.Title.Length).DefaultIfEmpty().Max());
                     var shown = fitting;
                     top = Window(lines, listed, at, top, BoardRows, out var pointer, index => index == shown.Count
-                        ? Row(index == at, Picker.Back)
+                        ? Picker.BackRow(index == at)
                         : shown[index].Title.Length == 0
                             ? Row(index == at, shown[index].Address, "", shown[index].Linked ? "linked" : "")
                             : Row(index == at, shown[index].Title.PadRight(widest), shown[index].Address, shown[index].Linked ? "linked" : ""));
                     pointed = listed > 0 ? pointer : null;
+                    named = listed > 0 && back > 0;
                     keys = "type to filter · ↑↓ move · enter choose";
                     break;
 
@@ -231,9 +233,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                         Row(index == owner, question.Owners[index].Login.PadRight(logins), question.Owners[index].Organisation ? "organisation" : "your account"));
                     pointed = chosenOwner;
                     lines.AddRange(Enumerable.Repeat(Line.Empty, Math.Max(1, height - lines.Count - 2)));
-                    var (named, here) = Field(title, "Title   ");
+                    var (titled, here) = Field(title, "Title   ");
                     caret = new Caret(lines.Count, here);
-                    lines.Add(named);
+                    lines.Add(titled);
                     lines.Add(reason is null ? Line.Of("It is made when the setup is confirmed, and linked to the repository.", Tone.Muted) : Line.Of(reason, Tone.Error));
                     keys = (question.Owners.Count > 1 ? "↑↓ owner · " : "") + "enter confirm";
                     break;
@@ -243,7 +245,8 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                     pointed = 1 + without;
                     lines.Add(Row(without == 0, "Go on without a project"));
                     if (back > 0)
-                        lines.Add(Row(without == 1, Picker.Back));
+                        lines.Add(Picker.BackRow(without == 1));
+                    named = back > 0;
                     keys = back > 0 ? "↑↓ move · enter confirm" : "enter confirm";
                     break;
             }
@@ -257,7 +260,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             if (pointed is { } row)
                 pointed = row + 2 + above.Count;
 
-            page.Draw(Head(question.Label, question.Hint), lines, keys, caret, pointed);
+            page.Draw(Head(question.Label, question.Hint), lines, keys, caret, pointed, back: named);
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Escape)

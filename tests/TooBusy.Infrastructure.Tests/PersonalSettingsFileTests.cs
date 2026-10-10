@@ -16,6 +16,30 @@ public sealed class PersonalSettingsFileTests : IDisposable
         Assert.Null(Of("/work/rocket").LoadMilestone());
         Assert.Null(Of("/work/rocket").LoadModel());
         Assert.Null(Of("/work/rocket").LoadEffort());
+        Assert.Null(Of("/work/rocket").LoadShare());
+    }
+
+    [Fact]
+    public void TheShareOfTheWeeklyLimitIsANumber()
+    {
+        Of("/work/rocket").SaveMilestone(new MilestoneChoice("v1"));
+        Of("/work/rocket").SaveShare(80);
+
+        Assert.Equal(80, Of("/work/rocket").LoadShare());
+        Assert.EndsWith("[\"/work/rocket\"]\nmilestone = \"v1\"\nlimit = 80\n", File.ReadAllText(Of("/work/rocket").Path), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("limit = \"80\"")]
+    [InlineData("limit = 0")]
+    [InlineData("limit = 101")]
+    [InlineData("limit = -5")]
+    public void AShareThatIsNotAShareCountsAsNotChosen(string line)
+    {
+        File.WriteAllText(Of("/work/rocket").Path, $"[\"/work/rocket\"]\nmilestone = \"v1\"\n{line}\n");
+
+        Assert.Null(Of("/work/rocket").LoadShare());
+        Assert.Equal("v1", Of("/work/rocket").LoadMilestone()?.Title);
     }
 
     [Fact]
@@ -50,6 +74,7 @@ public sealed class PersonalSettingsFileTests : IDisposable
     public void TheFileIsTomlThatAPersonCanRead()
     {
         Of("/work/rocket").SaveEffort("high");
+        Of("/work/rocket").SaveShare(80);
         Of("/work/rocket").SaveModel(new ModelChoice("opus"));
         Of("/work/rocket").SaveMilestone(new MilestoneChoice("v0.3.0"));
 
@@ -57,11 +82,13 @@ public sealed class PersonalSettingsFileTests : IDisposable
             """
             # What you chose for each project you run toobusy in. toobusy writes this file.
             # An empty milestone means working without one; an empty model means the assistant's own.
+            # The limit is how much of the weekly limit of usage a run may use, in percent.
 
             ["/work/rocket"]
             milestone = "v0.3.0"
             model = "opus"
             effort = "high"
+            limit = 80
 
             """.ReplaceLineEndings("\n"),
             File.ReadAllText(Of("/work/rocket").Path));

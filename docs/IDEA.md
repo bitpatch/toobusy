@@ -26,7 +26,7 @@ The folder lives in the project's repository and holds everything that is specif
 - the checks of the working copy before a task and after it: branch, clean tree, sync with the remote, project-specific commands;
 - local state of a run, which is not committed.
 
-What is one person's own is not in the folder: the milestone to work on, and the model and the effort the tasks are done with by default, are chosen by each user and kept on their machine.
+What is one person's own is not in the folder: the milestone to work on, the model and the effort the tasks are done with by default, and how much of the weekly limit of usage a run may use, are chosen by each user and kept on their machine.
 
 ## What it does during a run
 

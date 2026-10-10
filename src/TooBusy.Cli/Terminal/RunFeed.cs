@@ -7,7 +7,8 @@ namespace TooBusy.Cli.Terminal;
 // said when it draws. `Changed` is done when there is something new since the page took last.
 public sealed class RunFeed : IRunView
 {
-    readonly ConcurrentQueue<RunLine> lines = new();
+    // The lines of the log and the tasks that are over, in the order the run told them.
+    readonly ConcurrentQueue<object> told = new();
     volatile RunStatus status = new(RunPhase.Preparing, "");
     volatile TaskCompletionSource changed = New();
 
@@ -15,11 +16,9 @@ public sealed class RunFeed : IRunView
 
     public Task Changed => changed.Task;
 
-    public void Say(RunLine line)
-    {
-        lines.Enqueue(line);
-        changed.TrySetResult();
-    }
+    public void Say(RunLine line) => Tell(line);
+
+    public void Report(TaskEnd ended) => Tell(ended);
 
     public void Show(RunStatus status)
     {
@@ -27,12 +26,21 @@ public sealed class RunFeed : IRunView
         changed.TrySetResult();
     }
 
-    // Moves the lines that were said to the log of the page. What is said from now on is something new.
-    public void Take(List<RunLine> log)
+    // Gives what was told since it was taken last: each is a line of the log or a task that is over. What is told
+    // from now on is something new.
+    public IReadOnlyList<object> Take()
     {
         changed = New();
-        while (lines.TryDequeue(out var line))
-            log.Add(line);
+        var taken = new List<object>();
+        while (told.TryDequeue(out var said))
+            taken.Add(said);
+        return taken;
+    }
+
+    void Tell(object said)
+    {
+        told.Enqueue(said);
+        changed.TrySetResult();
     }
 
     static TaskCompletionSource New() => new(TaskCreationOptions.RunContinuationsAsynchronously);

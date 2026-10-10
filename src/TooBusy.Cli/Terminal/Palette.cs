@@ -167,6 +167,14 @@ public sealed class Palette
         return codes.Length == 0 ? text : $"\u001b[{codes}m{text}{Reset}";
     }
 
+    // What erases the rest of a line of the terminal to a ground: the terminal fills what it erases with the colour
+    // of the moment.
+    public string Erase(Ground ground)
+    {
+        var colour = code is null || ground != Ground.Bar ? "" : code(BarShade);
+        return colour.Length == 0 ? "\u001b[K" : $"\u001b[{colour}m\u001b[K{Reset}";
+    }
+
     // A message of the tool: `toobusy:` at its start is muted and whatever stands between backticks, a command as a rule,
     // gets the accent. The text itself is the same with and without colour.
     public string Message(string text)

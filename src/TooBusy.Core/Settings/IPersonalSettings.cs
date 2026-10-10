@@ -3,8 +3,9 @@ using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Settings;
 
-// Where the choices of the user are kept for the project: the milestone to work on, and the model and the effort
-// the tasks are done with by default. Each is null until the user has chosen it.
+// Where the choices of the user are kept for the project: the milestone to work on, the model and the effort the
+// tasks are done with by default, and the share of the weekly limit a run may use. Each is null until the user has
+// chosen it.
 public interface IPersonalSettings
 {
     MilestoneChoice? LoadMilestone();
@@ -19,4 +20,9 @@ public interface IPersonalSettings
     string? LoadEffort();
 
     void SaveEffort(string effort);
+
+    // How much of the weekly limit of usage a run may use, in percent.
+    int? LoadShare();
+
+    void SaveShare(int share);
 }

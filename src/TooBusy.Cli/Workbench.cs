@@ -82,13 +82,13 @@ public sealed record Workbench(
     }
 
     // A run of the queue over the settings and the choices of the user as they are now; the milestone is null for
-    // tasks whatever their milestone. In a demo the run is an imitated one. Otherwise the tasks are the issues of
+    // tasks whatever their milestone, and the share of the weekly limit is the proposed one until the user chooses. In a demo the run is an imitated one. Otherwise the tasks are the issues of
     // the repository, Claude Code does them in the working copy, and what the run leaves on this machine is kept in
     // the local folder of the project. Null when the project has no tasks to take: its `origin` remote is not a
     // GitHub repository.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort);
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort, Personal.LoadShare() ?? UsageShare.Proposed);
         if (Demo)
             return ImitatedRun.Open(plan, Clock);
         if (Repository is null)
@@ -104,6 +104,30 @@ public sealed record Workbench(
             Clock,
             plan,
             RunPolicy.Default);
+    }
+
+    // How many tasks a run over these settings and this milestone would take as things are: those that are ready
+    // and those that open after them. Null when the tasks cannot be read. A demo counts its made-up tasks, and takes
+    // a moment over it, as a tracker does.
+    public async Task<int?> CountTasksAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    {
+        var rules = QueueRules.Of(settings);
+        ITaskTracker? tasks = Demo ? new ImitatedTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
+        if (tasks is null)
+            return null;
+
+        try
+        {
+            if (Demo)
+                await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
+
+            var lineup = TaskLineup.Arrange(await tasks.ReadOpenAsync(milestone, cancellationToken), rules);
+            return lineup.Ready.Count + lineup.Later.Count;
+        }
+        catch (Exception refused) when (refused is TrackerException or OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     // The open milestones of the repository; null when they cannot be read.

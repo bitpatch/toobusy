@@ -4,9 +4,22 @@ using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Run;
 
-// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
-// and the effort the tasks are done with.
-public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort);
+// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, the model and
+// the effort the tasks are done with, and the share of the far limit of usage the run may use.
+public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort, int Share = UsageShare.Proposed);
+
+// How much of the far limit of usage, the weekly one of Claude Code, a run may use, in percent: at that much of it
+// no next task is taken. It is the choice of the user.
+public static class UsageShare
+{
+    // The shares that are offered.
+    public static IReadOnlyList<int> Offered { get; } = [50, 60, 70, 80, 90, 96];
+
+    // The share of a user who has not chosen.
+    public const int Proposed = 96;
+
+    public static bool Is(int percent) => percent is > 0 and <= 100;
+}
 
 // The times and the counts of a run.
 public sealed record RunPolicy
@@ -27,7 +40,8 @@ public sealed record RunPolicy
     // How long a session has to wrap up after `/abort` before its turn is cut.
     public TimeSpan AbortGrace { get; init; } = TimeSpan.FromMinutes(10);
 
-    // At this much of a limit, in percent, no task is started; at Spent a limit counts as run into.
+    // At this much of the near limit, in percent, no task is started before its reset; at Spent a limit counts as
+    // run into. The line of the far limit is the share of the plan.
     public double Limit { get; init; } = 96;
 
     public double Spent { get; init; } = 99;
@@ -127,8 +141,12 @@ public enum RunPhase
     Ended,
 }
 
+// A task that is over for this run: the mark of how it went, as a line of the log has it, and how long it took.
+public sealed record TaskEnd(QueueTask Task, RunMark Mark, TimeSpan Took);
+
 // What a run is doing right now. Text says it in words when no task is being done. Since is when the task was
 // taken, Step what its session is doing, Context the size of its conversation, Queued how many tasks follow it.
+// Reply is what a session that waits for the owner said last, line by line; it is empty while nothing waits.
 public sealed record RunStatus(RunPhase Phase, string Text)
 {
     public QueueTask? Task { get; init; }
@@ -145,6 +163,8 @@ public sealed record RunStatus(RunPhase Phase, string Text)
 
     // How the owner opens the session of the task.
     public string? Open { get; init; }
+
+    public IReadOnlyList<string> Reply { get; init; } = [];
 
     public UsageLimits Limits { get; init; } = UsageLimits.Unknown;
 
@@ -174,7 +194,9 @@ public enum RunEnd
     Killed,
 }
 
-public sealed record RunResult(RunEnd End, int Done, string? Problem = null);
+// How a run ended. Why says what ended a run that neither ran out of tasks nor was stopped by the owner: the limit,
+// the problem, or what a kill left behind.
+public sealed record RunResult(RunEnd End, int Done, string? Why = null);
 
 // Times as a run says them.
 public static class Spoken

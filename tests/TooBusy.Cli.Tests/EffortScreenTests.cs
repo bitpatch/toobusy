@@ -41,7 +41,7 @@ public sealed class EffortScreenTests : IDisposable
 
         using var page = terminal.Open();
         Assert.Null(EffortScreen.Ask(page, "high"));
-        terminal.AssertSaw("   max\n ❯ Back\n ↑↓ move · enter choose");
+        terminal.AssertSaw("   max\n ❯ Back  esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]

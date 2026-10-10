@@ -354,9 +354,14 @@ sealed class Log : IRunView
 
     public List<RunStatus> Statuses { get; } = [];
 
+    // The tasks that were told to be over, each as its number, its mark and the seconds it took.
+    public List<(int Task, RunMark Mark, int Seconds)> Ends { get; } = [];
+
     public string Text => string.Join('\n', Lines);
 
     public void Say(RunLine line) => Lines.Add(line.ToString());
+
+    public void Report(TaskEnd ended) => Ends.Add((ended.Task.Number, ended.Mark, (int)ended.Took.TotalSeconds));
 
     public void Show(RunStatus status) => Statuses.Add(status);
 }

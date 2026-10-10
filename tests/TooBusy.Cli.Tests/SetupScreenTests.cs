@@ -50,10 +50,10 @@ public sealed class SetupScreenTests : IDisposable
                 "   → Project: none → Rocket",
                 " Reading the milestones",
                 " •••••••",
-                " ❯ Back",
+                " ❯ Back  esc",
             ],
             terminal.Text.Split('\n').Take(9));
-        Assert.Equal([" enter choose · esc back · ctrl+c exit", "", " ●──◉──○"], terminal.Frame[^3..]);
+        Assert.Equal([" enter choose · ctrl+c exit", "", " ●──◉──○"], terminal.Frame[^3..]);
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(1, screen.Choose("Milestone rule", "Which milestone.", Rules, 1));
-        terminal.AssertSaw(" Milestone rule\n Which milestone.\n   lowest-version  → v.0.2.0\n ❯ earliest-due    → Polish\n   none\n   Back\n ↑↓ move · enter choose");
+        terminal.AssertSaw(" Milestone rule\n Which milestone.\n   lowest-version  → v.0.2.0\n ❯ earliest-due    → Polish\n   none\n   Back            esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class SetupScreenTests : IDisposable
 
         Assert.Null(screen.Choose("Milestone rule", "", Rules, 0));
         Assert.Null(screen.ChooseMany("Blocking labels", "", ["bug", "draft"], []));
-        terminal.AssertSaw("   ◯ bug\n   ◯ draft\n ❯ Back\n ↑↓ move · space select · enter confirm");
+        terminal.AssertSaw("   ◯ bug\n   ◯ draft\n ❯ Back  esc\n ↑↓ move · space select · enter confirm · ctrl+c exit");
         Assert.Null(screen.Confirm("Write the settings?"));
         Assert.Null(screen.AskBoard(Question(current: Boards[0])));
     }
@@ -103,7 +103,7 @@ public sealed class SetupScreenTests : IDisposable
 
         Assert.Null(screen.AskBoard(Question(current: null)));
         Assert.Null(screen.AskBoard(Question(current: null)));
-        terminal.AssertSaw("   Go on without a project\n ❯ Back\n ↑↓ move · enter confirm");
+        terminal.AssertSaw("   Go on without a project\n ❯ Back  esc\n ↑↓ move · enter confirm · ctrl+c exit");
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Down, Keys.Enter, Keys.Escape, Keys.Enter);
 
         Assert.Equal(new BoardAnswer.Existing(Rocket), screen.AskBoard(Question(current: Boards[0])));
-        terminal.AssertSaw("type to filter · ↑↓ move · enter choose · esc back · ctrl+c exit");
+        terminal.AssertSaw("   Back  esc\n type to filter · ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Escape);
 
         Assert.Null(screen.Confirm("Write the settings?"));
-        terminal.AssertSaw("esc back · ctrl+c exit");
+        terminal.AssertSaw("   Back  esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public sealed class SetupScreenTests : IDisposable
         var chosen = screen.ChooseMany("Blocking labels", "Never taken.", ["bug", "draft", "manual"], [0]);
 
         Assert.Equal([1, 2], chosen);
-        terminal.AssertSaw(" Never taken.\n   ◯ bug\n ❯ ◉ draft\n   ◉ manual\n   Back\n ↑↓ move · space select · enter confirm");
+        terminal.AssertSaw(" Never taken.\n   ◯ bug\n ❯ ◉ draft\n   ◉ manual\n   Back  esc\n ↑↓ move · space select · enter confirm · ctrl+c exit");
     }
 
     [Fact]
@@ -229,16 +229,14 @@ public sealed class SetupScreenTests : IDisposable
     }
 
     [Fact]
-    public void AConfirmationTakesEnterTheArrowsAndTheLetters()
+    public void TheLastQuestionSavesOrLeavesWithoutSaving()
     {
-        terminal.Keys.Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Down, Keys.Up, Keys.Enter, Keys.No, Keys.Yes);
+        terminal.Keys.Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Down, Keys.Up, Keys.Enter);
 
         Assert.True(screen.Confirm("Write the settings?"));
-        terminal.AssertSaw(" Write the settings?\n ❯ Yes\n   No\n   Back\n ↑↓ move · enter choose · y yes · n no");
+        terminal.AssertSaw(" Write the settings?\n ❯ Save and exit\n   Exit without saving\n   Back  esc\n ↑↓ move · enter choose · ctrl+c exit");
         Assert.False(screen.Confirm("Write the settings?"));
-        terminal.AssertSaw("   Yes\n ❯ No");
-        Assert.True(screen.Confirm("Write the settings?"));
-        Assert.False(screen.Confirm("Write the settings?"));
+        terminal.AssertSaw("   Save and exit\n ❯ Exit without saving");
         Assert.True(screen.Confirm("Write the settings?"));
     }
 
@@ -248,7 +246,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(new BoardAnswer.Existing(Rocket), screen.AskBoard(Question(current: Boards[0])));
-        terminal.AssertSaw($" Project\n The project of the tasks.\n ❯ Rocket  {Rocket}  linked to this repository\n   Choose another project\n   Back\n ↑↓ move · enter choose");
+        terminal.AssertSaw($" Project\n The project of the tasks.\n ❯ Rocket  {Rocket}  linked to this repository\n   Choose another project\n   Back    esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]
@@ -277,7 +275,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(new BoardAnswer.Existing(Rocket), screen.AskBoard(Question(current: null)));
-        terminal.AssertSaw($" Project\n The project of the tasks.\n [Your projects]  By URL   New project   No project   press tab to switch\n Filter\n ❯ Rocket     {Rocket}  linked\n   Moon base  {Moon}\n   Back\n type to filter · ↑↓ move · enter choose");
+        terminal.AssertSaw($" Project\n The project of the tasks.\n [Your projects]  By URL   New project   No project   press tab to switch\n Filter\n ❯ Rocket     {Rocket}  linked\n   Moon base  {Moon}\n   Back  esc\n type to filter · ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]
@@ -299,7 +297,7 @@ public sealed class SetupScreenTests : IDisposable
                 "",
                 "   The tasks are taken from the repository, and no board keeps their statuses.",
                 " ❯ Go on without a project",
-                "   Back",
+                "   Back  esc",
             ],
             terminal.Frame[^10..^2]);
         Assert.Equal(4, terminal.Frames);
@@ -330,7 +328,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Type("moon").Press(Keys.Enter);
 
         Assert.Equal(new BoardAnswer.Existing(Moon), screen.AskBoard(Question(current: null)));
-        terminal.AssertSaw($" Filter  moon\n ❯ Moon base  {Moon}\n   Back\n type to filter");
+        terminal.AssertSaw($" Filter  moon\n ❯ Moon base  {Moon}\n   Back  esc\n type to filter");
     }
 
     [Fact]

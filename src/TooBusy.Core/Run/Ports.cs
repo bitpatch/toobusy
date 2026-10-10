@@ -119,10 +119,13 @@ public interface IRunState
 
 public sealed record PausedTask(int Number, string Conversation);
 
-// Where a run tells what happens: a line of its log for everything that happened, and what is going on right now.
+// Where a run tells what happens: a line of its log for everything that happened, every task that is over, once,
+// and what is going on right now.
 public interface IRunView
 {
     void Say(RunLine line);
+
+    void Report(TaskEnd ended);
 
     void Show(RunStatus status);
 }

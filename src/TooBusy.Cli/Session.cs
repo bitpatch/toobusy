@@ -8,8 +8,8 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli;
 
 // What happens on the page of toobusy from the moment it is opened: the setup, the choices of the milestone, the
-// model and the effort, the menu and the run, each a screen that takes the page for a while. It remembers what was
-// done, for the report that is left in the terminal when the page is closed.
+// model, the effort and the weekly limit, the menu and the run, each a screen that takes the page for a while. It
+// remembers what was done, for the report that is left in the terminal when the page is closed.
 public sealed class Session(Page page, Workbench bench)
 {
     IReadOnlyList<Milestone>? open;
@@ -27,13 +27,19 @@ public sealed class Session(Page page, Workbench bench)
 
     public string? ChosenEffort { get; private set; }
 
-    // The runs that were on the page, in their order: what each said, and how it ended; null is one that was left
-    // before it ended.
-    public List<(IReadOnlyList<RunLine> Log, RunResult? Result)> Runs { get; } = [];
+    // The share of the weekly limit that was chosen on the page; null when none was.
+    public int? ChosenShare { get; private set; }
 
-    // Opens with the menu or, when asked, with the run. A project that is not set up is set up first, and a user who
-    // has no milestone to work on, no model or no effort chooses them; leaving any of these leaves the page.
-    public async Task HomeAsync(bool run, CancellationToken cancellationToken)
+    // Whether anything was chosen on the page.
+    public bool Chose => Chosen is not null || ChosenModel is not null || ChosenEffort is not null || ChosenShare is not null;
+
+    // How the runs that were on the page ended, in their order; null is one that never got to its end.
+    public List<RunResult?> Runs { get; } = [];
+
+    // Opens with the menu. A project that is not set up is set up first, and a user who has no milestone to work
+    // on, no model or no effort chooses them; leaving any of these leaves the page. A run that is opened from the
+    // menu comes back to it when it is over, with how it went said above the menu.
+    public async Task HomeAsync(CancellationToken cancellationToken)
     {
         if (bench.Settings.Load()?.Settings is null)
         {
@@ -51,18 +57,22 @@ public sealed class Session(Page page, Workbench bench)
         if (bench.Personal.LoadEffort() is null && !ChooseEffort(leavesPage: true))
             return;
 
-        HomeAction? action = run ? HomeAction.Run : null;
+        // The tasks are counted for the menu over what is set and chosen at the moment, and anew after everything
+        // that may have changed their number.
+        var tasks = new TaskCount(async () => bench.Settings.Load()?.Settings is { } settings && standing.Choice is { } choice
+            ? await bench.CountTasksAsync(settings, choice.Title, cancellationToken)
+            : null);
         string? note = null;
         while (true)
         {
             Clear("", note);
-            switch (action ?? HomeScreen.Ask(page, Assistant(), standing.Name))
+            switch (await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks))
             {
                 case HomeAction.Run:
-                    var after = await RunAsync(cancellationToken);
-                    if (after == AfterRun.Exit)
-                        return;
-                    note = after is null ? "The `origin` remote is not a GitHub repository, so there are no tasks to take." : null;
+                    note = bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is { } run
+                        ? await RunAsync(run, cancellationToken)
+                        : "The `origin` remote is not a GitHub repository, so there are no tasks to take.";
+                    tasks.Forget();
                     break;
                 case HomeAction.Assistant:
                     ChooseAssistant();
@@ -70,15 +80,15 @@ public sealed class Session(Page page, Workbench bench)
                     break;
                 case HomeAction.Milestone:
                     note = await ChooseMilestoneAsync(leavesPage: false, cancellationToken) ? null : "The milestone is left as it was.";
+                    tasks.Forget();
                     break;
                 case HomeAction.Settings:
                     note = Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+                    tasks.Forget();
                     break;
                 default:
                     return;
             }
-
-            action = null;
         }
     }
 
@@ -136,23 +146,34 @@ public sealed class Session(Page page, Workbench bench)
         return true;
     }
 
-    // Runs the queue on the page, until the run is over and the user leaves it; says where to. Null when there is
-    // nothing to run. What the run said is remembered whatever way the page was left.
-    async Task<AfterRun?> RunAsync(CancellationToken cancellationToken)
+    // Asks how much of the weekly limit a run may use and remembers the answer; false when the user went back
+    // instead.
+    public bool ChooseLimit()
     {
-        if (bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
-            return null;
+        Clear("Choosing the weekly limit", null);
+        page.Keys = "esc back";
+        if (LimitScreen.Ask(page, Share()) is not { } share)
+            return false;
 
+        bench.Personal.SaveShare(share);
+        ChosenShare = share;
+        return true;
+    }
+
+    // Runs the queue on a tape under the bar of the page, until the run is over, and says how it went in one
+    // line. How it ended is remembered whatever way the page was left.
+    public async Task<string> RunAsync(IQueueRun run, CancellationToken cancellationToken)
+    {
         Clear("Running the queue", null);
-        page.Body = [];
         var screen = new RunScreen(page, () => bench.Clock.Now);
         try
         {
-            return await screen.RunAsync(run, cancellationToken);
+            await screen.RunAsync(run, cancellationToken);
+            return screen.Summary;
         }
         finally
         {
-            Runs.Add((screen.Log, screen.Result));
+            Runs.Add(screen.Result);
         }
     }
 
@@ -165,15 +186,21 @@ public sealed class Session(Page page, Workbench bench)
         while (true)
         {
             Clear("Assistant", note);
-            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", (int)at) is not { } action)
+            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", LimitScreen.Describe(Share()), (int)at) is not { } action)
                 return;
 
             at = action;
-            note = action == AssistantAction.Model
-                ? ChooseModel(leavesPage: false) ? null : "The model is left as it was."
-                : ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.";
+            note = action switch
+            {
+                AssistantAction.Model => ChooseModel(leavesPage: false) ? null : "The model is left as it was.",
+                AssistantAction.Effort => ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.",
+                _ => ChooseLimit() ? null : "The weekly limit is left as it was.",
+            };
         }
     }
+
+    // The share of the weekly limit that is in force: the proposed one until the user chooses.
+    int Share() => bench.Personal.LoadShare() ?? UsageShare.Proposed;
 
     // The model and the effort in a few words, as the menu shows them.
     string Assistant() =>
@@ -240,7 +267,7 @@ public sealed class Session(Page page, Workbench bench)
         if (bench.Personal.LoadModel() is { } model)
             body.Add(Picker.Answer("Model", ModelScreen.Describe(model)));
         if (bench.Personal.LoadEffort() is { } effort)
-            body.Add(Picker.Answer("Effort", effort));
+            body.AddRange([Picker.Answer("Effort", effort), Picker.Answer("Weekly limit", LimitScreen.Describe(Share()))]);
 
         if (note is not null)
             body.AddRange([Line.Empty, Line.Of(note, Tone.Muted)]);

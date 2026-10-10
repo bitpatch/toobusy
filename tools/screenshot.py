@@ -105,13 +105,23 @@ def with_libraries():
 
 
 class Terminal:
-    """The binary in a pseudo-terminal and the screen it has drawn so far."""
+    """The binary in a pseudo-terminal and the screen it has drawn so far.
+
+    A terminal has two screens: its own, where a tape of toobusy is written, and the alternate one, which a page of
+    toobusy enters and leaves. The emulator has one, so there are two of them here, and what the binary writes goes
+    to the one it is on.
+    """
+
+    # What enters the alternate screen and what leaves it.
+    ENTER, LEAVE = b"\x1b[?1049h", b"\x1b[?1049l"
 
     def __init__(self, command, columns, rows, theme, directory):
         import pyte
 
-        self.screen = pyte.Screen(columns, rows)
-        self.stream = pyte.ByteStream(self.screen)
+        self.screens = {False: pyte.Screen(columns, rows), True: pyte.Screen(columns, rows)}
+        self.streams = {which: pyte.ByteStream(screen) for which, screen in self.screens.items()}
+        self.alternate = False
+        self.held = b""
         self.master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
 
@@ -125,6 +135,31 @@ class Terminal:
         self.process = subprocess.Popen(
             command, stdin=slave, stdout=slave, stderr=slave, cwd=directory, env=environment, preexec_fn=own_terminal)
         os.close(slave)
+
+    @property
+    def screen(self):
+        return self.screens[self.alternate]
+
+    def feed(self, data):
+        """Gives what was written to the screen it was written on."""
+        data, self.held = self.held + data, b""
+        while data:
+            found = [(data.find(mark), mark) for mark in (self.ENTER, self.LEAVE) if mark in data]
+            if not found:
+                # The end of what was read may be the start of a change of the screen: it waits for the rest.
+                marks = (self.ENTER, self.LEAVE)
+                kept = next((size for size in range(min(len(data), 7), 0, -1) if any(mark.startswith(data[-size:]) for mark in marks)), 0)
+                if kept:
+                    data, self.held = data[:-kept], data[-kept:]
+                self.streams[self.alternate].feed(data)
+                return
+
+            at, mark = min(found)
+            self.streams[self.alternate].feed(data[:at])
+            self.alternate = mark == self.ENTER
+            if self.alternate:
+                self.screens[True].reset()
+            data = data[at + len(mark):]
 
     def read(self, seconds):
         """Takes in what the binary writes during the given time."""
@@ -140,7 +175,7 @@ class Terminal:
             if not data:
                 time.sleep(max(0.0, end - time.monotonic()))
                 break
-            self.stream.feed(data)
+            self.feed(data)
 
     def press(self, keys):
         try:

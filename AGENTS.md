@@ -20,10 +20,10 @@ dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup; writ
 dotnet run --project src/TooBusy.Cli -- run --demo        # a run over made-up tasks and sessions; changes nothing
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
 tools/screenshot.py init --demo -- shot tab shot blink    # pictures of the screen in artifacts/screens
-tools/screenshot.py run --demo -- until:started wait:3000 shot   # a page that goes on by itself: wait for what it shows
+tools/screenshot.py run --demo -- "until:Edit src" shot type:/ shot   # a run goes on by itself: wait for what it shows
 ```
 
-A change is ready when the build, the tests and the format check pass.
+A change is ready when the build, the tests and the format check pass. A test run is green only when its summary says so: `total`, `failed: 0`, `succeeded`. The whole run takes a few seconds; one that prints no summary has hung, and is not a pass.
 
 ## Rules
 

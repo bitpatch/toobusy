@@ -1,9 +1,11 @@
+using System.Globalization;
 using TooBusy.Core.Run;
 
 namespace TooBusy.Cli.Terminal;
 
-// What the lines of a run look like, on its page and in the lines it leaves in the terminal: the mark of a line has
-// the colour of what the line tells, and what is said under a line is muted.
+// What a run looks like: the lines of its log, on a tape and as they are printed when there is no terminal, the line
+// of a task that is over, and the summary a run ends with. The mark of a line has the colour of what the line tells,
+// and what is said under a line is muted.
 public static class RunLook
 {
     public static Tone Mark(RunMark mark) => mark switch
@@ -42,7 +44,49 @@ public static class RunLook
         }
     }
 
-    static IEnumerable<string> Pieces(string text, int room)
+    // A task that is over, in one line: the mark of how it went, its title, and the time it took. A title that does
+    // not fit gives way, so that the time is always there.
+    public static Line Ended(TaskEnd ended, int width)
+    {
+        var took = "  " + Clock(ended.Took);
+        var room = Math.Max(4, width - 2 - took.Length);
+        var title = ended.Task.Title.Length > room ? ended.Task.Title[..(room - 1)] + "…" : ended.Task.Title;
+        return new Line(new Part(new RunLine(ended.Mark, "").Symbol + " ", Mark(ended.Mark)), new Part(title), new Part(took, Tone.Muted));
+    }
+
+    // What a run that is over leaves under its tasks: how many there were, how long it took and how they went; and,
+    // for a run that did not simply run out of tasks, the line of what ended it.
+    public static (Line Tasks, RunLine? Why) Summary(RunResult result, IReadOnlyList<TaskEnd> ends, TimeSpan took)
+    {
+        (RunMark Mark, string Went)[] kinds =
+        [
+            (RunMark.Done, "done"), (RunMark.Partial, "done in part"), (RunMark.Owner, "for the owner"),
+            (RunMark.Interrupted, "interrupted"), (RunMark.Failed, "failed"), (RunMark.Paused, "paused"),
+        ];
+        var went = kinds.Select(kind => (kind.Went, Count: ends.Count(ended => ended.Mark == kind.Mark))).Where(kind => kind.Count > 0)
+            .Select(kind => string.Create(CultureInfo.InvariantCulture, $" · {kind.Count} {kind.Went}"));
+        var tasks = new Line(new Part($"{Spoken.Tasks(ends.Count)} in {Spoken.Time(took)}", Tone.Strong), new Part(string.Concat(went), Tone.Muted));
+        return (tasks, result switch
+        {
+            { End: RunEnd.Emptied } => null,
+            { End: RunEnd.Stopped } => new RunLine(RunMark.Paused, "Stopped, as you asked"),
+            { End: RunEnd.Killed } => new RunLine(RunMark.Interrupted, result.Why is null ? "Killed" : $"Killed: {result.Why}"),
+            { End: RunEnd.Limited } => new RunLine(RunMark.Paused, $"Stopped: {result.Why ?? "a usage limit"}"),
+            _ => new RunLine(RunMark.Failed, $"Stopped: {result.Why ?? "something went wrong"}"),
+        });
+    }
+
+    // A length of time as a clock shows it: `0:07`, `12:40`, `1:05:09`.
+    public static string Clock(TimeSpan time)
+    {
+        time = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        return time.TotalHours >= 1
+            ? string.Create(CultureInfo.InvariantCulture, $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}")
+            : string.Create(CultureInfo.InvariantCulture, $"{(int)time.TotalMinutes}:{time.Seconds:00}");
+    }
+
+    // A text on as many lines as the room asks for, broken between words.
+    public static IEnumerable<string> Pieces(string text, int room)
     {
         var rest = text;
         while (rest.Length > room)
@@ -62,6 +106,11 @@ public static class RunLook
 public sealed class PlainRun(TextWriter output, Palette palette) : IRunView
 {
     public void Say(RunLine line) => output.WriteLine(RunLook.Painted(line, palette));
+
+    // The log has said how the task went already.
+    public void Report(TaskEnd ended)
+    {
+    }
 
     public void Show(RunStatus status)
     {

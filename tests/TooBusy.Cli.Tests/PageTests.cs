@@ -23,10 +23,15 @@ public sealed class PageTests : IDisposable
     [Fact]
     public void APageIsAScreenOfItsOwnThatGivesTheTerminalBack()
     {
-        using (terminal.Open())
+        using (var page = terminal.Open())
         {
-            Assert.StartsWith("\u001b[?1049h", terminal.Output.ToString(), StringComparison.Ordinal);
+            // The screen is entered with the first thing that is drawn, and not before.
+            Assert.Equal("", terminal.Output.ToString());
             Assert.True(terminal.ControlCTaken);
+
+            page.Draw([], [], "");
+            Assert.StartsWith("\u001b[?1049h", terminal.Output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(Screen.Leave, page.Held);
         }
 
         Assert.EndsWith("\u001b[?25h\u001b[?1049l", terminal.Output.ToString(), StringComparison.Ordinal);
@@ -34,10 +39,23 @@ public sealed class PageTests : IDisposable
     }
 
     [Fact]
+    public void APageThatDrewNothingLeavesTheTerminalAsItIs()
+    {
+        using (var page = terminal.Open())
+            Assert.Equal("", page.Held);
+
+        Assert.Equal("", terminal.Output.ToString());
+        Assert.False(terminal.ControlCTaken);
+    }
+
+    [Fact]
     public void TheCursorBlinksWhileThePageIsOpenAndIsGivenBackAsItWas()
     {
-        using (terminal.Open())
-            Assert.EndsWith("\u001b[1 q", terminal.Output.ToString(), StringComparison.Ordinal);
+        using (var page = terminal.Open())
+        {
+            page.Draw([], [], "");
+            Assert.StartsWith("\u001b[?1049h\u001b[1 q", terminal.Output.ToString(), StringComparison.Ordinal);
+        }
 
         Assert.Contains("\u001b[0 q", terminal.Output.ToString(), StringComparison.Ordinal);
     }
@@ -140,6 +158,17 @@ public sealed class PageTests : IDisposable
     }
 
     [Fact]
+    public void AListThatEndsWithBackNamesTheKeyThereAndNotAmongTheKeys()
+    {
+        using var page = terminal.Open();
+        page.Keys = "esc back";
+
+        page.Draw([], [Picker.BackRow(true)], "↑↓ move", chosen: 0, back: true);
+
+        Assert.Equal([" ❯ Back  esc", Rule, " ↑↓ move · ctrl+c exit"], terminal.Frame[^3..]);
+    }
+
+    [Fact]
     public void TheNamesOfTheKeysAreALittleLighterThanWhatTheyDo()
     {
         var palette = Palette.Dark;
@@ -192,6 +221,18 @@ public sealed class PageTests : IDisposable
         Assert.EndsWith("\u001b[10;2H" + Dots(palette, 24), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 24), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
+    }
+
+    [Fact]
+    public void TheDotsOfAWaitMayStandAfterWhatTheLineSays()
+    {
+        var palette = Palette.Dark;
+        using var page = terminal.Open(palette: palette);
+
+        page.Draw([], [new Line(new Part("❯ Run", Tone.Muted), new Part("  •••••••", Tone.Muted)), Line.Of("  Exit")], "", waiting: 0);
+
+        // The light runs along the dots only: they start seven columns into the line.
+        Assert.EndsWith("\u001b[9;9H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -288,7 +329,7 @@ public sealed class PageTests : IDisposable
 
         Assert.True(done);
         Assert.Equal("read", value);
-        Assert.Equal([" Reading the milestones", " •••••••", " ❯ Back", Rule, " enter choose · ctrl+c exit"], terminal.Frame[^5..]);
+        Assert.Equal([" Reading the milestones", " •••••••", " ❯ Back  esc", Rule, " enter choose · ctrl+c exit"], terminal.Frame[^5..]);
     }
 
     [Theory]
@@ -303,7 +344,7 @@ public sealed class PageTests : IDisposable
 
         // The work never ends; `Back` is there before any key is pressed.
         var waiting = page.WaitAsync("Reading the milestones", stopping => { told = stopping; return never.Task; }, TestContext.Current.CancellationToken);
-        Assert.Contains(" ❯ Back", terminal.Frame);
+        Assert.Contains(" ❯ Back  esc", terminal.Frame);
         Assert.False(waiting.IsCompleted);
 
         terminal.Keys.Press(Keys.Down, escape ? Keys.Escape : Keys.Enter);
@@ -323,7 +364,7 @@ public sealed class PageTests : IDisposable
         var never = new TaskCompletionSource<string>();
 
         var waiting = page.WaitAsync("Reading the milestones", _ => never.Task, TestContext.Current.CancellationToken);
-        Assert.DoesNotContain(" ❯ Back", terminal.Frame);
+        Assert.DoesNotContain(" ❯ Back  esc", terminal.Frame);
 
         // Enter is not a way back here, and one Escape only asks.
         terminal.Keys.Press(Keys.Enter, Keys.Escape);

@@ -73,7 +73,7 @@ public sealed class MilestoneScreenTests : IDisposable
 
         using var page = terminal.Open();
         Assert.Null(MilestoneScreen.Ask(page, Open, MilestoneStanding.Of(null, Open)));
-        terminal.AssertSaw("   No milestone  take tasks whatever their milestone\n ❯ Back\n ↑↓ move · enter choose");
+        terminal.AssertSaw("   No milestone  take tasks whatever their milestone\n ❯ Back          esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]

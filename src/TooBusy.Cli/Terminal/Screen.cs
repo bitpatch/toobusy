@@ -21,8 +21,8 @@ public sealed record Line(params Part[] Parts)
 // question, which is what is asked, then under a rule the choice, where the user acts, then under another rule the
 // keys; and the foot. Two things show where the screen waits for the user, and both blink: the cursor, a block at the
 // caret, where a text is typed, and the chosen line of the choice, the one the pointer is on. A frame may have either,
-// both or none. When it is the user who waits, a line of the choice is a row of dots that a light runs along; a
-// screen that shows something going on has such a row in its question instead. The foot is as many pieces as it has
+// both or none. When it is the user who waits, a line of the choice ends with a row of dots that a light runs along;
+// a screen that shows something going on has such a row in its question instead. The foot is as many pieces as it has
 // marks: it goes on to a line of its own when the window is too narrow for them all.
 public sealed record Frame(
     string Title,
@@ -39,7 +39,12 @@ public sealed record Frame(
 
 // A screen of its own in the terminal: the alternate screen that programs like editors use. What the terminal showed
 // before stays untouched under it and is back when the screen is closed. A frame is drawn whole every time; the body
-// gives way when the window is short, its oldest lines first.
+// gives way when the window is short, its oldest lines first. The screen is entered when its first frame is drawn,
+// and not before: what never draws a frame never leaves the terminal's own screen.
+//
+// The terminal's own screen can be written too, as a tape: lines that stay in the history of the terminal, with a
+// few under them that are drawn again and again. While a tape is unrolled the screen is left; the next frame rolls
+// the tape up and enters the screen again.
 //
 // The cursor is the screen's own: a block at the caret that glows in the accent and fades away to nothing, and the
 // chosen line blinks with it, between the accent and the colour of any text. The blink is smooth and keeps its time
@@ -52,11 +57,19 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 {
     // The alternate screen, with a cursor that blinks.
     const string Enter = "\u001b[?1049h\u001b[1 q";
-    const string HideCursor = "\u001b[?25l";
-    const string ShowCursor = "\u001b[?25h";
+    internal const string HideCursor = "\u001b[?25l";
+    internal const string ShowCursor = "\u001b[?25h";
 
-    // What a program that is stopped while a screen is open must still write: the cursor and the terminal as they were.
-    public const string Leave = "\u001b[0 q" + ShowCursor + "\u001b[?1049l";
+    // What gives the cursor back as it was, and with it the terminal's own screen.
+    public const string Shown = "\u001b[0 q" + ShowCursor;
+    public const string Leave = Shown + "\u001b[?1049l";
+
+    // The screen that has the terminal now; null when none has.
+    static volatile Screen? open;
+
+    // What a program that is stopped from outside must still write, whatever has the terminal at the moment: the
+    // cursor and the terminal as they were. Nothing when nothing has it.
+    public static string Rescue => open?.Held ?? "";
 
     // The blink is counted in beats: so many of them take it from its brightest to nothing and back.
     public static readonly TimeSpan Beat = TimeSpan.FromMilliseconds(80);
@@ -72,36 +85,60 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     readonly Lock drawing = new();
     Frame? last;
 
+    // Whether the alternate screen is entered; the tape that is unrolled over the terminal's own screen instead; and
+    // whether a tape has left that screen bare: with the cursor hidden, and nothing entered since.
+    bool inside;
+    Tape? tape;
+    bool bare;
+
     // Where the cursor is drawn and what stands in its cell, and where the chosen line is and what it says;
     // null when there is none.
     (int Row, int Column, string Cell)? cursor;
     (int Row, Line Line, int Width)? chosen;
-    (int Row, int Count)? waiting;
+    (int Row, int Column, int Count)? waiting;
     int beat;
     int step;
 
-    public void Open()
-    {
-        output.Write(Enter);
-        output.Flush();
-    }
+    // What gives the terminal back from where this screen has it now; empty when it does not have it.
+    public string Held => tape is { Closed: false } ? Tape.Rescue : inside ? Leave : bare ? Shown : "";
 
+    // Gives the terminal back as it was: out of the alternate screen, or from under a tape.
     public void Close()
     {
         lock (drawing)
         {
             (last, cursor, chosen, waiting) = (null, null, null, null);
-            output.Write(Leave);
+            tape?.Close();
+            output.Write(Held);
             output.Flush();
+            (inside, bare, tape) = (false, false, null);
+            if (open == this)
+                open = null;
         }
     }
 
-    // Draws the last frame again: the size of the window has changed.
+    // Leaves the alternate screen for a tape on the terminal's own screen, under a bar with the title and the
+    // status. The tape has the terminal until it is closed or the next frame is drawn.
+    public Tape Unroll(string title, string status)
+    {
+        lock (drawing)
+        {
+            tape?.Close();
+            (last, cursor, chosen, waiting) = (null, null, null, null);
+            var before = inside ? "\u001b[?1049l" : "";
+            (inside, bare, open) = (false, true, this);
+            return tape = new Tape(output, palette, size, drawing, before, title, status);
+        }
+    }
+
+    // Draws again what is on the terminal: the size of the window has changed.
     public void Redraw()
     {
         lock (drawing)
         {
-            if (last is not null)
+            if (tape is { Closed: false })
+                tape.Redraw();
+            else if (last is not null)
                 Draw(last);
         }
     }
@@ -111,11 +148,20 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     {
         lock (drawing)
         {
-            if ((cursor is null && chosen is null && waiting is null) || !palette.DrawsCursor)
+            if (!palette.DrawsCursor)
                 return;
 
             beat = (beat + 1) % Beats;
             step++;
+            if (tape is { Closed: false })
+            {
+                tape.Pulse(Glow);
+                return;
+            }
+
+            if (cursor is null && chosen is null && waiting is null)
+                return;
+
             output.Write(Pulsing());
             output.Flush();
         }
@@ -125,6 +171,15 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     {
         lock (drawing)
         {
+            // A frame takes the terminal back from a tape, and enters the screen when it is not entered.
+            tape?.Close();
+            tape = null;
+            if (!inside)
+            {
+                output.Write(Enter);
+                (inside, bare, open) = (true, false, this);
+            }
+
             last = frame;
             (cursor, chosen, waiting) = (null, null, null);
             var (width, height) = size();
@@ -148,7 +203,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
             var room = Math.Max(0, height - 4 - foot - (panel.Count - cut));
             var body = frame.Body.Skip(Math.Max(0, frame.Body.Count - room)).ToList();
 
-            var rows = new List<string> { Row(Line.Empty, width, Ground.Bar), Bar(frame.Title, frame.Status, width), Row(Line.Empty, width, Ground.Bar), "" };
+            var rows = new List<string> { Row(Line.Empty, width, Ground.Bar), Row(Bar(frame.Title, frame.Status, width), width, Ground.Bar), Row(Line.Empty, width, Ground.Bar), "" };
             rows.AddRange(body.Select(line => Inset(line, width, Ground.None)));
             rows.AddRange(Enumerable.Repeat("", room - body.Count));
             var first = rows.Count;
@@ -171,14 +226,24 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
             }
 
             if (frame.Waiting is { } dotted && dotted < frame.Choice.Count && choice + dotted - cut >= 0)
-                waiting = (first + choice + dotted - cut + 1, Math.Min(width - 1, frame.Choice[dotted].Parts.Sum(part => part.Text.Length)));
+                waiting = Dotted(first + choice + dotted - cut + 1, frame.Choice[dotted], width);
             else if (frame.Running is { } going && going < frame.Question.Count && going - cut >= 0)
-                waiting = (first + going - cut + 1, Math.Min(width - 1, frame.Question[going].Parts.Sum(part => part.Text.Length)));
+                waiting = Dotted(first + going - cut + 1, frame.Question[going], width);
 
             text.Append(Pulsing());
             output.Write(text);
             output.Flush();
         }
+    }
+
+    // Where the dots of a line of the screen are: its row, the column of the first of them and how many of them the
+    // window has room for. They are the first dots of the line, whatever stands before them; null when it has none.
+    static (int Row, int Column, int Count)? Dotted(int row, Line line, int width)
+    {
+        var told = string.Concat(line.Parts.Select(part => part.Text));
+        var from = told.IndexOf(Dot, StringComparison.Ordinal);
+        var room = width - 1 - from;
+        return from < 0 || room <= 0 ? null : (row, from + 2, Math.Min(room, told.Skip(from).TakeWhile(character => character == Dot).Count()));
     }
 
     // How brightly a dot of a wait is lit at a step, from 0, the colour of the rest, to 1, the accent. The light is
@@ -207,7 +272,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
         if (!palette.DrawsCursor)
             return cursor is var (row, column, _) ? At(row, column) + ShowCursor : chosen is { } on ? At(on.Row, 2) + ShowCursor : "";
 
-        var glow = (1 + Math.Cos(2 * Math.PI * beat / Beats)) / 2;
+        var glow = Glow;
         var text = new StringBuilder();
         // Of the chosen line only its first piece blinks, the pointer with the name: what explains the name after
         // it stays as the frame drew it.
@@ -221,9 +286,9 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
         if (cursor is { } typed)
             text.Append(At(typed.Row, typed.Column)).Append(palette.Cursor(typed.Cell, glow));
 
-        if (waiting is var (line, count))
+        if (waiting is var (line, from, count))
         {
-            text.Append(At(line, 2));
+            text.Append(At(line, from));
             for (var dot = 0; dot < count; dot++)
                 text.Append(palette.Spark(Dot.ToString(), Spark(dot, count, step)));
         }
@@ -231,14 +296,18 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
         return text.ToString();
     }
 
-    // The title with the status at the right edge; the status gives way to the title when both do not fit.
-    string Bar(string title, string status, int width)
+    // How far the blink is from nothing, 0, to its brightest, 1, at the beat it is on.
+    double Glow => (1 + Math.Cos(2 * Math.PI * beat / Beats)) / 2;
+
+    // The pieces of the bar: the title with the status at the right edge; the status gives way to the title when
+    // both do not fit.
+    internal static Line Bar(string title, string status, int width)
     {
         var left = title.Length + 2;
         var right = status.Length + 2;
         return left + 2 + right > width || status.Length == 0
-            ? Row(new Line(new Part("  " + title, Tone.Strong)), width, Ground.Bar)
-            : Row(new Line(new Part("  " + title, Tone.Strong), new Part(new string(' ', width - left - right)), new Part(status, Tone.Muted)), width, Ground.Bar);
+            ? new Line(new Part("  " + title, Tone.Strong))
+            : new Line(new Part("  " + title, Tone.Strong), new Part(new string(' ', width - left - right)), new Part(status, Tone.Muted));
     }
 
     // The pieces of a line on as many lines as the room asks for; a piece is never broken.
@@ -268,8 +337,11 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     // A line that starts a column in from the edge of the window.
     string Inset(Line line, int width, Ground ground) => Row(new Line([new Part(" "), .. line.Parts]), width, ground);
 
-    // The line cut to the width, each piece in its colour. On a ground the line is filled to the width.
-    string Row(Line line, int width, Ground ground)
+    string Row(Line line, int width, Ground ground) => Row(palette, line, width, ground, fill: true);
+
+    // The line cut to the width, each piece in its colour. On a ground the line is filled to the width, unless
+    // what follows it fills the rest.
+    internal static string Row(Palette palette, Line line, int width, Ground ground, bool fill)
     {
         var room = width;
         var row = new StringBuilder();
@@ -283,7 +355,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
             row.Append(palette.Paint(part.Tone, text, part.Ground == Ground.None ? ground : part.Ground));
         }
 
-        if (ground != Ground.None && room > 0)
+        if (fill && ground != Ground.None && room > 0)
             row.Append(palette.Paint(Tone.Plain, new string(' ', room), ground));
         return row.ToString();
     }

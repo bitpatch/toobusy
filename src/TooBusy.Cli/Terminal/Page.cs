@@ -1,7 +1,8 @@
 namespace TooBusy.Cli.Terminal;
 
-// What every screen of the tool shares: it is opened over the terminal and closed again, it draws the body and the
-// foot it is given around the question of the moment, and it reads the keys. Ctrl+C leaves the screen, but only when it
+// What every screen of the tool shares: it takes the terminal and gives it back, it draws the body and the foot it
+// is given around the question of the moment, and it reads the keys. The screen itself is entered with the first
+// thing that is drawn; a tape can be unrolled over the terminal's own screen instead. Ctrl+C leaves the screen, but only when it
 // is pressed twice in a row: the first one asks, any other key takes the question back. Leaving this way throws
 // OperationCanceledException, which the command that opened the page catches. Escape is asked about in the same way
 // where the page is told that it leaves: the first one is read as a key that means nothing.
@@ -29,7 +30,6 @@ public sealed class Page : IDisposable
         this.title = title;
         screen = new Screen(output, palette, device.Size);
         device.TakeControlC(true);
-        screen.Open();
         watching = device.WatchSize(screen.Redraw);
         pulsing = device.Every(Screen.Beat, screen.Pulse);
     }
@@ -52,22 +52,37 @@ public sealed class Page : IDisposable
 
     public int Width => device.Size().Width;
 
+    // Whether more keys are typed already, as in a paste: nothing is drawn between them.
+    public bool KeyWaiting => device.KeyWaiting();
+
+    // What the page asks before it is left: a key that leaves was pressed once and waits to be pressed again. Null
+    // when nothing is asked.
+    public string? Asking => leaving is null ? null : $"press {leaving} again to {(leaving == "ctrl+c" ? Leaving : "exit")}";
+
+    // What gives the terminal back from where the page has it now.
+    public string Held => screen.Held;
+
+    // Leaves the screen for a tape on the terminal's own screen, under the bar of the page. The next thing the
+    // page draws takes the terminal back.
+    public Tape Unroll() => screen.Unroll(title, Status);
+
     // Whether the page has colours: without them what a colour would tell has to be told by a mark.
     public bool Coloured { get; }
 
     // Draws the page with what is asked, the lines where the user acts, and the keys that act there. The caret is
     // where a text is typed among those lines, and `chosen` the line the pointer is on.
     // `waiting` is the line of dots that run while the page waits for something, and `running` such a line of the
-    // question, for a page that shows something going on. While more keys are waiting, as in a paste, it does not
-    // draw.
-    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null, int? running = null)
+    // question, for a page that shows something going on. `back` tells that the lines end with `Back`, which names
+    // the key that goes back: the keys of the page are left out then. While more keys are waiting, as in a paste,
+    // it does not draw.
+    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null, int? running = null, bool back = false)
     {
         if (device.KeyWaiting())
             return;
 
-        var all = leaving is not null
-            ? Line.Of($"press {leaving} again to {(leaving == "ctrl+c" ? Leaving : "exit")}", Tone.Warning)
-            : Hints(string.Join(" · ", ((string[])[keys, Keys, $"ctrl+c {Leaving}"]).Where(part => part.Length > 0)));
+        var all = Asking is { } asking
+            ? Line.Of(asking, Tone.Warning)
+            : Hints(string.Join(" · ", ((string[])[keys, back ? "" : Keys, $"ctrl+c {Leaving}"]).Where(part => part.Length > 0)));
         screen.Draw(new Frame(title, Status, Body, question, choice, all, Foot, caret, chosen, waiting, running));
     }
 
@@ -97,10 +112,11 @@ public sealed class Page : IDisposable
         var back = Picker.GoesBack(this);
         void Show() => Draw(
             [],
-            [Line.Of(text, Tone.Muted), Line.Of(new string(Screen.Dot, Screen.Dots), Tone.Muted), .. back ? [Picker.Row(true, Picker.Back)] : (Line[])[]],
+            [Line.Of(text, Tone.Muted), Line.Of(new string(Screen.Dot, Screen.Dots), Tone.Muted), .. back ? [Picker.BackRow(true)] : (Line[])[]],
             back ? "enter choose" : "",
             chosen: back ? 2 : null,
-            waiting: 1);
+            waiting: 1,
+            back: back);
 
         Show();
         var working = work(stopping.Token);

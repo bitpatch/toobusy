@@ -35,7 +35,7 @@ public static class CliApp
             if (FindProject(context) is not { } folder || await OpenAsync(context, folder, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
-            return await HomeAsync(context, terminal, bench, run: false, cancellationToken);
+            return await OnPageAsync(context, terminal, bench, session => session.HomeAsync(cancellationToken), cancellationToken);
         });
         return root;
     }
@@ -257,8 +257,8 @@ public static class CliApp
         return ExitCode.Done;
     }
 
-    // Takes the tasks of the queue one after another: on the page of the run in a terminal, and as plain lines
-    // without one. It does not start without a milestone to work on, a model and an effort.
+    // Takes the tasks of the queue one after another: on a tape in a terminal, which the tool leaves when the run is
+    // over, and as plain lines without one. It does not start without a milestone to work on, a model and an effort.
     static Command CreateRunCommand(CliContext context, Option<bool> demo)
     {
         var command = new Command("run", "Takes the tasks of the queue one after another.");
@@ -302,10 +302,10 @@ public static class CliApp
                 return Fail(context, "Run `toobusy effort` to choose it.");
             }
 
-            if (context.Terminal is { } terminal)
-                return await HomeAsync(context, terminal, bench, run: true, cancellationToken);
             if (bench.OpenRun(settings!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
                 return Fail(context, "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take");
+            if (context.Terminal is { } terminal)
+                return await OnPageAsync(context, terminal, bench, session => session.RunAsync(run, cancellationToken), cancellationToken);
 
             // Without a terminal the log of the run is printed line by line, and stopping the tool kills the run.
             if (bench.Demo)
@@ -315,8 +315,10 @@ public static class CliApp
         return command;
     }
 
-    // The page of toobusy, from the menu or from the run, and what is left in the terminal when it is closed.
-    static async Task<int> HomeAsync(CliContext context, TerminalDevice terminal, Workbench bench, bool run, CancellationToken cancellationToken)
+    // The page of toobusy, for the menu or for a run alone, and what is left in the terminal when it is closed. A
+    // run has left its tape there already, with its bar, its tasks and how it went: only what else was done on the
+    // page is reported under it.
+    static async Task<int> OnPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task> open, CancellationToken cancellationToken)
     {
         Session session;
         using (var page = OpenPage(context, terminal, bench.Root))
@@ -324,25 +326,26 @@ public static class CliApp
             session = new Session(page, bench);
             try
             {
-                await session.HomeAsync(run, cancellationToken);
+                await open(session);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
             }
         }
 
-        context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
-        var failed = session.Setup is not null && ReportSetup(context, session.Setup, bench.Demo);
-        ReportChoices(context, session, bench.Demo);
+        var failed = false;
+        if (session.Runs.Count == 0 || session.Setup is not null || session.Chose)
+        {
+            context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
+            failed = session.Setup is not null && ReportSetup(context, session.Setup, bench.Demo);
+            ReportChoices(context, session, bench.Demo);
+        }
 
-        // What the runs said stays in the terminal: it is what the owner comes back to.
-        foreach (var line in session.Runs.SelectMany(run => run.Log))
-            context.Output.WriteLine(RunLook.Painted(line, context.OutputPalette));
         if (bench.Demo && session.Runs.Count > 0)
             context.Output.WriteLine(context.OutputPalette.Muted("Demo: the tasks and the sessions were made up, and nothing was changed."));
 
         if (session.Runs is [.., var last])
-            return last.Result is { } result ? Code(result) : ExitCode.Killed;
+            return last is { } result ? Code(result) : ExitCode.Killed;
         return failed && session.Setup!.Outcome == SetupOutcome.Failed ? ExitCode.Failed : ExitCode.Done;
     }
 
@@ -371,7 +374,7 @@ public static class CliApp
         return failed;
     }
 
-    // What was chosen on the page: the milestone, the model, the effort; false when nothing was.
+    // What was chosen on the page: the milestone, the model, the effort, the weekly limit; false when nothing was.
     static bool ReportChoices(CliContext context, Session session, bool demo)
     {
         (string Label, string? Value)[] choices =
@@ -379,6 +382,7 @@ public static class CliApp
             ("Milestone", session.Chosen is { } milestone ? milestone.Title ?? "none" : null),
             ("Model", session.ChosenModel is { } model ? ModelScreen.Describe(model) : null),
             ("Effort", session.ChosenEffort),
+            ("Weekly limit", session.ChosenShare is { } share ? LimitScreen.Describe(share) : null),
         ];
         var chosen = choices.Where(choice => choice.Value is not null).ToList();
         foreach (var (label, value) in chosen)

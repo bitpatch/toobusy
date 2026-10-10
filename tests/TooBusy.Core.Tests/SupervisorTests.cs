@@ -127,7 +127,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(RunEnd.Problem, result.End);
-        Assert.Equal("the working tree is not clean: commit or stash the changes first", result.Problem);
+        Assert.Equal("the working tree is not clean: commit or stash the changes first", result.Why);
         Assert.Contains("✖ Stopped: the working tree is not clean: commit or stash the changes first · the next task did not start · 0 done", log.Lines);
         Assert.Empty(assistant.Started);
         Assert.Empty(tracker.Did);
@@ -140,7 +140,7 @@ public sealed class SupervisorTests : IDisposable
         tracker.Add(3);
         workspace.State = null;
 
-        Assert.Equal("the working tree cannot be read", (await RunAsync()).Problem);
+        Assert.Equal("the working tree cannot be read", (await RunAsync()).Why);
     }
 
     [Fact]
@@ -153,9 +153,10 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Problem);
+        Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
+        Assert.Equal([(3, RunMark.Failed)], Ended);
     }
 
     [Fact]
@@ -166,7 +167,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal("#3 left 2 commits that are not pushed · fake attach 3", result.Problem);
+        Assert.Equal("#3 left 2 commits that are not pushed · fake attach 3", result.Why);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
     }
 
@@ -239,6 +240,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains("  │ I tried twice.", log.Lines);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
         Assert.Single(assistant.Started);
+        Assert.Equal([(3, RunMark.Failed, 3)], log.Ends);
     }
 
     [Fact]
@@ -249,7 +251,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Problem);
+        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
         Assert.Contains("✖ #3 Task 3 — ended after 3 s without saying how the task went", log.Lines);
     }
 
@@ -273,6 +275,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker refused: close 3."), result);
         Assert.Single(assistant.Started);
+        Assert.Equal([(3, RunMark.Failed)], Ended);
     }
 
     [Fact]
@@ -280,7 +283,7 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Refused.Add("read");
 
-        Assert.Equal("The tracker refused: read.", (await RunAsync()).Problem);
+        Assert.Equal("The tracker refused: read.", (await RunAsync()).Why);
     }
 
     [Fact]
@@ -305,7 +308,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal("The tracker refused: label 3 +needs-owner.", result.Problem);
+        Assert.Equal("The tracker refused: label 3 +needs-owner.", result.Why);
         Assert.Single(assistant.Started);
     }
 
@@ -335,7 +338,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([Briefing.Alone(3)], session.Told);
         Assert.Equal(
             [
-                "▲ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3",
+                "‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3",
                 "  │ CSV or JSON?",
                 "▶ #3 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · fake attach 3",
                 $"  “{Briefing.Alone(3)}”",
@@ -343,6 +346,10 @@ public sealed class SupervisorTests : IDisposable
             ],
             log.Lines.Skip(3).Take(5));
         Assert.Contains("#3 waits for an answer", machine.Notified);
+
+        // What the session said stands in what the run is doing for as long as it waits, and no longer.
+        Assert.Equal(["CSV or JSON?"], log.Statuses.First(status => status.Phase == RunPhase.WaitingForOwner).Reply);
+        Assert.All(log.Statuses.Where(status => status.Phase != RunPhase.WaitingForOwner), status => Assert.Empty(status.Reply));
     }
 
     [Fact]
@@ -355,7 +362,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(1, result.Done);
         Assert.Single(session.Told);
-        Assert.Contains("▲ #3 ended its turn without saying how the task went · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -410,7 +417,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(RunEnd.Killed, result.End);
         Assert.Equal(2, session.Told.Count);
-        Assert.Contains("▲ #3 waits for the owner: an answer is needed · it is left to the owner: it was told to go on alone 2 times · fake attach 3", log.Lines);
+        Assert.Contains("‖ #3 waits for the owner: an answer is needed · it is left to the owner: it was told to go on alone 2 times · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -422,8 +429,8 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(2, session.Told.Count);
-        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Problem);
-        Assert.Contains("▲ #3 ended its turn without saying how the task went · it is left to the owner: 2 messages in a row brought no step of its own · fake attach 3", log.Lines);
+        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
+        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is left to the owner: 2 messages in a row brought no step of its own · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -540,7 +547,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Empty(session.Told);
-        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Problem);
+        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
     }
 
     [Fact]
@@ -586,7 +593,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal("#3 was interrupted, and nobody asked for it · fake attach 3", result.Problem);
+        Assert.Equal("#3 was interrupted, and nobody asked for it · fake attach 3", result.Why);
         Assert.Contains("label 3 +interrupted", tracker.Did);
         Assert.Single(assistant.Started);
     }
@@ -600,11 +607,12 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Killed, 0), result);
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress · fake attach 3 goes on with it"), result);
         Assert.Equal(1, session.Stopped);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
         Assert.Contains("■ Killed the session of #3: the task stays In Progress · fake attach 3 goes on with it", log.Lines);
         Assert.False(machine.Awake);
+        Assert.Equal([(3, RunMark.Interrupted)], Ended);
     }
 
     [Fact]
@@ -632,6 +640,9 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "claude did not start #3: not logged in"), result);
         Assert.Equal(["status 3 InProgress", "status 3 Todo"], tracker.Did);
+
+        // A task whose session never started is not one that is over.
+        Assert.Empty(log.Ends);
     }
 
     [Fact]
@@ -671,9 +682,25 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Limited, 0), result);
+        Assert.Equal(new RunResult(RunEnd.Limited, 0, "the weekly limit is at 96%, it resets 2030-01-04 09:00 UTC"), result);
         Assert.Empty(assistant.Started);
         Assert.Contains("‖ Stopped: the weekly limit is at 96%, it resets 2030-01-04 09:00 UTC · 0 done", log.Lines);
+    }
+
+    [Fact]
+    public async Task TheFarLimitStopsTheRunAtTheShareTheUserChose()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        plan = plan with { Share = 80 };
+        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 79.9, null));
+        assistant.Session(3).Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 80, null))).Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Limited, 1, "the weekly limit is at 80%"), result);
+        Assert.Equal(3, Assert.Single(assistant.Started).Task);
+        Assert.Contains("‖ Stopped: the weekly limit is at 80% · 1 done", log.Lines);
     }
 
     [Fact]
@@ -716,7 +743,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([Briefing.AfterLimit(3)], session.Told);
         Assert.Equal(
             [
-                "▲ #3 ran into a usage limit: You have hit your limit · resets 10am",
+                "‖ #3 ran into a usage limit: You have hit your limit · resets 10am",
                 "‖ #3 waits 1 h 00 min for the 5-hour limit to reset, then goes on · /stop pauses it for the next run",
                 "▶ #3 goes on after the reset of the limit · fake attach 3",
             ],
@@ -746,10 +773,11 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Limited, 0), result);
+        Assert.Equal(new RunResult(RunEnd.Limited, 0, "#3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session"), result);
         Assert.Equal(2, session.Told.Count);
         Assert.Equal(["status 3 InProgress", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
         Assert.Equal(new PausedTask(3, "conversation-3"), state.Paused);
+        Assert.Equal([(3, RunMark.Paused)], Ended);
         Assert.StartsWith("**Stopped by a usage limit** (the limit did not reset after 2 waits).", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("‖ #3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
         Assert.Contains("#3 is paused by a usage limit", machine.Notified);
@@ -859,7 +887,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.StartsWith("the changes of #5 wait in the working tree after a usage limit, but the queue does not take it (it has the manual label)", result.Problem, StringComparison.Ordinal);
+        Assert.StartsWith("the changes of #5 wait in the working tree after a usage limit, but the queue does not take it (it has the manual label)", result.Why, StringComparison.Ordinal);
         Assert.NotNull(state.Paused);
     }
 
@@ -873,7 +901,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.StartsWith("the session of #5 did not go on after the usage limit", result.Problem, StringComparison.Ordinal);
+        Assert.StartsWith("the session of #5 did not go on after the usage limit", result.Why, StringComparison.Ordinal);
         Assert.NotNull(state.Paused);
         Assert.Empty(tracker.Did);
     }
@@ -893,6 +921,33 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task EveryTaskThatIsOverIsToldOnceWithHowItWentAndHowLongItTook()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+        assistant.Session(3).Works().Ends(Done);
+        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(7).Works().Asks("input needed", "Which key is it?").Then().Works().Ends("Still: which key?\nTOOBUSY: owner");
+
+        await RunAsync();
+
+        Assert.Equal([(3, RunMark.Done, 3), (5, RunMark.Partial, 3), (7, RunMark.Owner, 99)], log.Ends);
+    }
+
+    [Fact]
+    public async Task ATaskThatIsAbortedIsToldAsInterrupted()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works(20).WhenAsked().Works().Ends("Undone.\nTOOBUSY: interrupted");
+        clock.At(TimeSpan.FromSeconds(5), () => Run.Send(RunCommand.Abort));
+
+        await RunAsync();
+
+        Assert.Equal([(3, RunMark.Interrupted)], Ended);
+    }
+
+    [Fact]
     public async Task SessionsThatCannotBeReadAreSaidOnce()
     {
         tracker.Add(3);
@@ -901,8 +956,13 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(1, result.Done);
-        Assert.Single(log.Lines, line => line == "▲ The sessions of the assistant cannot be read: #3 may still be working · fake attach 3");
+        Assert.Single(log.Lines, line => line == "‖ The sessions of the assistant cannot be read: #3 may still be working · fake attach 3");
         Assert.Contains("▶ The sessions are read again: #3 is watched", log.Lines);
+
+        // While they cannot be read, what the run is doing says so in the place of the step of the session.
+        var steps = log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Step).ToList();
+        Assert.Contains("its session cannot be read", steps);
+        Assert.NotEqual("its session cannot be read", steps[^1]);
     }
 
     [Fact]
@@ -933,6 +993,9 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal((RunPhase.Ended, RunCommands.None), (log.Statuses[^1].Phase, log.Statuses[^1].Available));
     }
+
+    // The tasks that were told to be over, each with its mark.
+    IEnumerable<(int Task, RunMark Mark)> Ended => log.Ends.Select(ended => (ended.Task, ended.Mark));
 
     Supervisor Run => run ??= new Supervisor(tracker, assistant, workspace, state, machine, clock, plan, policy);
 

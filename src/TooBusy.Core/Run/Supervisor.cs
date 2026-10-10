@@ -43,6 +43,9 @@ public sealed class Supervisor(
     bool paused;
     int done;
 
+    // What the pause of a task or a kill said last: it is why the run ended.
+    string? left;
+
     public void Send(RunCommand command) => commands.Enqueue(command);
 
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
@@ -58,7 +61,7 @@ public sealed class Supervisor(
             }
             catch (OperationCanceledException) when (kill.IsCancellationRequested)
             {
-                result = new RunResult(RunEnd.Killed, done);
+                result = new RunResult(RunEnd.Killed, done, left);
             }
             catch (TrackerException refused)
             {
@@ -127,11 +130,12 @@ public sealed class Supervisor(
 
             first = false;
             limits = assistant.ReadLimits().At(clock.Now);
-            if (limits.Far is { } spent && spent.Used >= policy.Limit)
+            if (limits.Far is { } spent && spent.Used >= plan.Share)
             {
-                Say(RunMark.Paused, $"Stopped: {Limit(spent)} is at {Spoken.Percent(spent.Used)}{Reset(spent)} · {done} done");
+                var why = $"{Limit(spent)} is at {Spoken.Percent(spent.Used)}{Reset(spent)}";
+                Say(RunMark.Paused, $"Stopped: {why} · {done} done");
                 machine.Notify($"Stopped: {Limit(spent)} is at {Spoken.Percent(spent.Used)}");
-                return new RunResult(RunEnd.Limited, done);
+                return new RunResult(RunEnd.Limited, done, why);
             }
 
             if (limits.Near is { ResetsAt: { } reset } near && near.Used >= policy.Limit)
@@ -202,23 +206,45 @@ public sealed class Supervisor(
         if (plan.Rules.Board)
             Say(RunMark.Note, $"#{number} is In Progress on the board; the session is told that toobusy keeps the tracker");
 
-        Watched watched;
+        // However the task ends for this run, it is told once: as one that failed, unless more is known of it.
+        var mark = RunMark.Failed;
         try
         {
-            watched = await WatchAsync(task, session, since, queued, kill);
+            Watched watched;
+            try
+            {
+                watched = await WatchAsync(task, session, since, queued, kill);
+            }
+            catch (OperationCanceledException) when (kill.IsCancellationRequested)
+            {
+                if (!paused)
+                {
+                    await Quietly(() => session.StopAsync(CancellationToken.None));
+                    left = $"#{number} stays In Progress · {session.Open} goes on with it";
+                    Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays In Progress · {session.Open} goes on with it");
+                }
+
+                throw;
+            }
+
+            if (watched.Paused)
+            {
+                mark = RunMark.Paused;
+                return new RunResult(RunEnd.Limited, done, left);
+            }
+
+            (mark, var ended) = await SettleAsync(task, session, text, watched.Look, since, kill);
+            return ended;
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
         {
-            if (!paused)
-            {
-                await Quietly(() => session.StopAsync(CancellationToken.None));
-                Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays In Progress · {session.Open} goes on with it");
-            }
-
+            mark = paused ? RunMark.Paused : RunMark.Interrupted;
             throw;
         }
-
-        return watched.Paused ? new RunResult(RunEnd.Limited, done) : await SettleAsync(task, session, text, watched.Look, since, kill);
+        finally
+        {
+            view.Report(new TaskEnd(task, mark, clock.Now - since));
+        }
     }
 
     SessionStart Start(QueueTask task, string message) => new(task.Number, $"#{task.Number} {task.Title}", message, plan.Model, plan.Effort);
@@ -254,11 +280,12 @@ public sealed class Supervisor(
         {
             Task = task,
             Since = since,
-            Step = look.Step,
+            Step = unseen ? "its session cannot be read" : look.Step,
             Context = look.Context,
             Queued = queued,
             Until = sendAt,
             Open = session.Open,
+            Reply = waiting ? Said(look.Reply) : [],
         };
 
         while (true)
@@ -302,8 +329,11 @@ public sealed class Supervisor(
                 if (look.Phase == SessionPhase.Unseen)
                 {
                     if (!unseen)
-                        Say(RunMark.Attention, $"The sessions of the assistant cannot be read: #{number} may still be working · {session.Open}");
-                    unseen = true;
+                    {
+                        unseen = true;
+                        Say(RunMark.Paused, $"The sessions of the assistant cannot be read: #{number} may still be working · {session.Open}");
+                        Show(Now());
+                    }
                 }
                 else
                 {
@@ -339,7 +369,7 @@ public sealed class Supervisor(
                             : told >= policy.Messages ? $"it was told to go on alone {policy.Messages} times"
                             : null;
                         sendAt = left is null && !aborting ? clock.Now + policy.OwnerWait : null;
-                        Say(RunMark.Attention, (look.Phase == SessionPhase.Asking ? $"#{number} waits for the owner: {look.Asks ?? "an answer is needed"}" : $"#{number} ended its turn without saying how the task went")
+                        Say(RunMark.Paused, (look.Phase == SessionPhase.Asking ? $"#{number} waits for the owner: {look.Asks ?? "an answer is needed"}" : $"#{number} ended its turn without saying how the task went")
                             + (sendAt is not null ? $" · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never"
                                 : left is not null ? $" · it is left to the owner: {left}"
                                 : "")
@@ -391,7 +421,7 @@ public sealed class Supervisor(
     async Task<bool> LimitAsync(QueueTask task, IAssistantSession session, DateTimeOffset since, string refusal, int waits, CancellationToken kill)
     {
         var number = task.Number;
-        Say(RunMark.Attention, $"#{number} ran into a usage limit: {refusal.Split('\n')[0].Trim()}");
+        Say(RunMark.Paused, $"#{number} ran into a usage limit: {refusal.Split('\n')[0].Trim()}");
         limits = assistant.ReadLimits().At(clock.Now);
         if (limits.Far is { } spent && spent.Used >= policy.Spent)
             return await PauseAsync(task, session, $"{Limit(spent)} is spent{Reset(spent)}", kill);
@@ -453,16 +483,17 @@ public sealed class Supervisor(
         else
             missing.Add("its session cannot be gone on with");
 
-        Say(RunMark.Paused, $"#{number} is paused: {why}. Its changes stay in the working tree, and the next run goes on with its session · {done} done");
+        left = $"#{number} is paused: {why}. Its changes stay in the working tree, and the next run goes on with its session";
+        Say(RunMark.Paused, $"{left} · {done} done");
         if (missing.Count > 0)
             Say(RunMark.Attention, $"The pause of #{number} is not whole: {string.Join(" · ", missing)} · set it right by hand before the next run");
         machine.Notify($"#{number} is paused by a usage limit");
         return false;
     }
 
-    // Tells the tracker how the task went, after checking what the session says against the working copy.
-    // Null when the run goes on to the next task.
-    async Task<RunResult?> SettleAsync(QueueTask task, IAssistantSession session, TaskText? text, SessionLook look, DateTimeOffset since, CancellationToken kill)
+    // Tells the tracker how the task went, after checking what the session says against the working copy. Gives the
+    // mark of how it went, and how the run ends with it: null when the run goes on to the next task.
+    async Task<(RunMark Mark, RunResult? Ended)> SettleAsync(QueueTask task, IAssistantSession session, TaskText? text, SessionLook look, DateTimeOffset since, CancellationToken kill)
     {
         var number = task.Number;
         var took = Spoken.Time(clock.Now - since);
@@ -472,22 +503,22 @@ public sealed class Supervisor(
         if (Outcome.Read(look.Reply) is not { } outcome)
         {
             Say(RunMark.Failed, $"#{number} {task.Title} — ended after {took} without saying how the task went");
-            return Stop($"the session of #{number} did not say how the task went · {session.Open}");
+            return (RunMark.Failed, Stop($"the session of #{number} did not say how the task went · {session.Open}"));
         }
 
         if (outcome.Kind == OutcomeKind.Failed)
         {
             Say(RunMark.Failed, $"#{number} {task.Title} — failed after {took}: {outcome.Reason ?? "no reason is given"}");
             Quote(outcome.Report, session);
-            return Stop($"#{number} failed · {session.Open}");
+            return (RunMark.Failed, Stop($"#{number} failed · {session.Open}"));
         }
 
         if (await workspace.ReadAsync(kill) is not { } tree)
-            return Stop($"the working tree cannot be read after #{number} · {session.Open}");
+            return (RunMark.Failed, Stop($"the working tree cannot be read after #{number} · {session.Open}"));
         if (tree.Changes > 0)
-            return Stop($"#{number} left changes in the working tree · {session.Open}");
+            return (RunMark.Failed, Stop($"#{number} left changes in the working tree · {session.Open}"));
         if (outcome.Kind is OutcomeKind.Done or OutcomeKind.Partial && tree.Unpushed > 0)
-            return Stop($"#{number} left {(tree.Unpushed == 1 ? "a commit that is" : $"{tree.Unpushed} commits that are")} not pushed · {session.Open}");
+            return (RunMark.Failed, Stop($"#{number} left {(tree.Unpushed == 1 ? "a commit that is" : $"{tree.Unpushed} commits that are")} not pushed · {session.Open}"));
 
         var rules = plan.Rules;
         switch (outcome.Kind)
@@ -497,7 +528,7 @@ public sealed class Supervisor(
                 await CloseAsync(number, kill);
                 Say(RunMark.Done, $"#{number} {task.Title} — done in {took}");
                 Say(RunMark.Note, $"#{number} is closed, with the report of the session as its comment");
-                return null;
+                return (RunMark.Done, null);
 
             case OutcomeKind.Partial:
                 // What is left is a task of its own: what the session wrote of it, and the description of the task
@@ -511,7 +542,7 @@ public sealed class Supervisor(
                 await CloseAsync(number, kill);
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");
                 Say(RunMark.Note, $"#{number} is closed; what is left is #{made} “{title}”, which waits for the owner with the {rules.Owner} label");
-                return null;
+                return (RunMark.Partial, null);
 
             case OutcomeKind.Owner:
                 await tracker.AddLabelAsync(number, rules.Owner, kill);
@@ -519,7 +550,7 @@ public sealed class Supervisor(
                 await tracker.SetStatusAsync(number, BoardStatus.Todo, kill);
                 Say(RunMark.Owner, $"#{number} {task.Title} — waits for the owner after {took}");
                 Say(RunMark.Note, $"#{number} has the {rules.Owner} label and a comment that says what is needed; no run takes it while it has the label");
-                return null;
+                return (RunMark.Owner, null);
 
             default:
                 await tracker.AddLabelAsync(number, rules.Interrupted, kill);
@@ -527,7 +558,7 @@ public sealed class Supervisor(
                 await tracker.SetStatusAsync(number, BoardStatus.Todo, kill);
                 Say(RunMark.Interrupted, $"#{number} {task.Title} — interrupted after {took}: the report is in the task, and the next run takes it first");
                 Quote(outcome.Report, session);
-                return aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}");
+                return (RunMark.Interrupted, aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}"));
         }
     }
 
@@ -636,10 +667,14 @@ public sealed class Supervisor(
 
     static string Held(TaskLineup lineup) => "Held: " + string.Join(" · ", lineup.Held.Select(held => $"#{held.Task.Number} {held.Reason}"));
 
+    // What a session said, line by line, without the empty lines and without the line that is for toobusy.
+    static List<string> Said(string? reply) =>
+        [.. (reply ?? "").Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0 && !line.Trim().StartsWith(Outcome.Mark, StringComparison.OrdinalIgnoreCase))];
+
     // What a session said, in the log: its first lines, and where the rest is.
     void Quote(string? reply, IAssistantSession session)
     {
-        var lines = (reply ?? "").Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0 && !line.Trim().StartsWith(Outcome.Mark, StringComparison.OrdinalIgnoreCase)).ToList();
+        var lines = Said(reply);
         foreach (var line in lines.Take(Quoted))
             Say(RunMark.Note, $"│ {line}");
         if (lines.Count > Quoted)
@@ -699,6 +734,10 @@ public sealed class Supervisor(
         public static Silent View { get; } = new();
 
         public void Say(RunLine line)
+        {
+        }
+
+        public void Report(TaskEnd ended)
         {
         }
 

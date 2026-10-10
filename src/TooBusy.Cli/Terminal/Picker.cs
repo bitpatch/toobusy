@@ -1,7 +1,9 @@
 namespace TooBusy.Cli.Terminal;
 
-// A choice of a list: what it is called, what explains it, and what is to be noticed about it.
-public sealed record Choice(string Name, string Detail = "", string Note = "");
+// A choice of a list: what it is called, what explains it, and what is to be noticed about it. A choice that is off
+// cannot be chosen: it is muted, and Enter does nothing on it. One that waits has the dots of a wait where what is
+// to be noticed about it will stand.
+public sealed record Choice(string Name, string Detail = "", string Note = "", bool Off = false, bool Waits = false);
 
 // The lists of every screen: a pointer on the chosen row, the name of a row with what explains it after it, and
 // marks above and below a list that does not fit. One look for the setup, the milestones and the menu.
@@ -10,8 +12,10 @@ public static class Picker
     // A list longer than this scrolls.
     public const int Rows = 8;
 
-    // The last row of every list that there is somewhere to go back from.
+    // The last row of every list that there is somewhere to go back from, and the key that does what the row does:
+    // the row names it at its right, so the keys of the page do not name it again.
     public const string Back = "Back";
+    public const string BackKey = "esc";
 
     const int LabelWidth = 16;
 
@@ -23,41 +27,44 @@ public static class Picker
     // and does not leave the page, the list ends with `Back`, which does what Escape does.
     public static int? Pick(Page page, IReadOnlyList<Line> question, IReadOnlyList<Choice> choices, string keys = "", int at = 0, Func<ConsoleKey, int?>? shortcut = null)
     {
-        var back = GoesBack(page);
-        if (back)
-            choices = [.. choices, new Choice(Back)];
-
-        at = Math.Clamp(at, 0, choices.Count - 1);
-        var top = 0;
-        // Names that something follows are as wide as the widest of them, so that what follows stands in a column.
-        var widest = choices.Where(choice => choice.Detail.Length + choice.Note.Length > 0).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
+        var list = new Listed(page, question, keys, at);
         while (true)
         {
-            var lines = new List<Line>();
-            top = Window(lines, choices.Count, at, top, Rows, out var pointer, index =>
-                Row(index == at, choices[index].Detail.Length + choices[index].Note.Length > 0 ? choices[index].Name.PadRight(widest) : choices[index].Name, choices[index].Detail, choices[index].Note));
-            page.Draw(question, lines, keys.Length == 0 ? "↑↓ move · enter choose" : $"↑↓ move · enter choose · {keys}", chosen: pointer);
-
-            var key = page.Read();
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
-                at = (at + choices.Count - 1) % choices.Count;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J or ConsoleKey.Tab)
-                at = (at + 1) % choices.Count;
-            else if (key.Key == ConsoleKey.Enter)
-                return back && at == choices.Count - 1 ? null : at;
-            else if (key.Key == ConsoleKey.Escape)
-                return null;
-            else if (shortcut?.Invoke(key.Key) is { } chosen)
+            list.Draw(choices);
+            if (list.Press(page.Read(), shortcut) is (true, var chosen))
                 return chosen;
+        }
+    }
+
+    // The same list on a page where something goes on meanwhile: the choices are asked for again, and the list is
+    // drawn anew, whenever what `changed` gives is done. `off` is told when Enter is pressed on a choice that is off.
+    public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null)
+    {
+        var list = new Listed(page, question, "", 0);
+        while (true)
+        {
+            // Whether anything still goes on is looked at before the choices are asked for: what is done between the
+            // two is seen by the wait for a key, and the list is drawn again.
+            var wake = changed();
+            var settled = wake.IsCompleted;
+            list.Draw(choices());
+
+            // Once nothing goes on any more the page waits for a key as any list does.
+            if ((settled ? (ConsoleKeyInfo?)page.Read() : await page.ReadAsync(wake)) is not { } key)
+                continue;
+            if (list.Press(key, null) is (true, var chosen))
+                return chosen;
+            if (key.Key == ConsoleKey.Enter)
+                off?.Invoke(list.At);
         }
     }
 
     // A row of a list: the pointer when it is on the row, the name, and after it what explains the name and what is
     // to be noticed about it.
-    public static Line Row(bool pointed, string name, string detail = "", string note = "") => new(
-        new Part((pointed ? "❯ " : "  ") + name, pointed ? Tone.Accent : Tone.Plain),
-        new Part(detail.Length == 0 ? "" : "  " + detail, Tone.Muted),
-        new Part(note.Length == 0 ? "" : "  " + note, Tone.Success));
+    public static Line Row(bool pointed, string name, string detail = "", string note = "") => Row(pointed, new Choice(name, detail, note), name);
+
+    // The row that goes back, with its key at its right.
+    public static Line BackRow(bool pointed) => Row(pointed, Back, BackKey);
 
     // Something that is settled, as every screen lists it: a mark, its name and its value.
     public static Line Answer(string label, string value) =>
@@ -82,5 +89,63 @@ public static class Picker
         if (count > rows)
             lines.Add(below > 0 ? Line.Of($"  ↓ {below} more", Tone.Muted) : Line.Empty);
         return top;
+    }
+
+    // The row of a choice, its name as wide as the list wants it. What is off is muted all through.
+    static Line Row(bool pointed, Choice choice, string name) => new(
+        new Part((pointed ? "❯ " : "  ") + name, choice.Off ? Tone.Muted : pointed ? Tone.Accent : Tone.Plain),
+        new Part(choice.Detail.Length == 0 ? "" : "  " + choice.Detail, Tone.Muted),
+        new Part(choice.Note.Length == 0 ? "" : "  " + choice.Note, choice.Off ? Tone.Muted : Tone.Success),
+        new Part(choice.Waits ? "  " + new string(Screen.Dot, Screen.Dots) : "", Tone.Muted));
+
+    // Whether something stands after the name of the choice.
+    static bool Followed(Choice choice) => choice.Detail.Length + choice.Note.Length > 0 || choice.Waits;
+
+    // A list on a page: where its pointer is and what of it is in the window, from one drawing to the next.
+    sealed class Listed(Page page, IReadOnlyList<Line> question, string keys, int at)
+    {
+        IReadOnlyList<Choice> choices = [];
+        bool back;
+        int top;
+
+        public int At { get; private set; } = at;
+
+        public void Draw(IReadOnlyList<Choice> offered)
+        {
+            back = GoesBack(page);
+            choices = back ? [.. offered, new Choice(Back, BackKey)] : offered;
+            At = Math.Clamp(At, 0, choices.Count - 1);
+
+            // Names that something follows are as wide as the widest of them, so that what follows stands in a column.
+            var widest = choices.Where(Followed).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
+            var lines = new List<Line>();
+            int? waits = null;
+            top = Window(lines, choices.Count, At, top, Rows, out var pointer, index =>
+            {
+                if (choices[index].Waits)
+                    waits = lines.Count;
+                return Row(index == At, choices[index], Followed(choices[index]) ? choices[index].Name.PadRight(widest) : choices[index].Name);
+            });
+
+            // A choice that is off does not blink under the pointer: it does not wait to be chosen.
+            page.Draw(question, lines, keys.Length == 0 ? "↑↓ move · enter choose" : $"↑↓ move · enter choose · {keys}", chosen: choices[At].Off ? null : pointer, waiting: waits, back: back);
+        }
+
+        // What the key does to the list: `Done` when the list is over, with the index of what was chosen, null for
+        // going back.
+        public (bool Done, int? Chosen) Press(ConsoleKeyInfo key, Func<ConsoleKey, int?>? shortcut)
+        {
+            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
+                At = (At + choices.Count - 1) % choices.Count;
+            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J or ConsoleKey.Tab)
+                At = (At + 1) % choices.Count;
+            else if (key.Key == ConsoleKey.Enter && !choices[At].Off)
+                return (true, back && At == choices.Count - 1 ? null : At);
+            else if (key.Key == ConsoleKey.Escape)
+                return (true, null);
+            else if (shortcut?.Invoke(key.Key) is { } chosen)
+                return (true, chosen);
+            return (false, null);
+        }
     }
 }

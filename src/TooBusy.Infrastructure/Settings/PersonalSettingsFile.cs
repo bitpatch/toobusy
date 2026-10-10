@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Text;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Infrastructure.Settings;
@@ -16,8 +18,11 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
     const string Model = "model";
     const string Effort = "effort";
 
+    // The share of the weekly limit, the only choice that is a number.
+    const string Limit = "limit";
+
     // The choices a table holds, in the order they are written.
-    static readonly string[] Keys = [Milestone, Model, Effort];
+    static readonly string[] Keys = [Milestone, Model, Effort, Limit];
 
     public string Path { get; } = System.IO.Path.Combine(folder, "projects.toml");
 
@@ -45,6 +50,11 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
 
     public void SaveEffort(string effort) => Save(Effort, effort);
 
+    // A share that is not a share of anything counts as one that is not chosen.
+    public int? LoadShare() => int.TryParse(Load(Limit), NumberStyles.None, CultureInfo.InvariantCulture, out var share) && UsageShare.Is(share) ? share : null;
+
+    public void SaveShare(int share) => Save(Limit, share.ToString(CultureInfo.InvariantCulture));
+
     string? Load(string key) => Read().TryGetValue(projectRoot, out var choices) ? choices.GetValueOrDefault(key) : null;
 
     void Save(string key, string value)
@@ -56,11 +66,12 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
 
         var text = new StringBuilder("# What you chose for each project you run toobusy in. toobusy writes this file.\n");
         text.Append("# An empty milestone means working without one; an empty model means the assistant's own.\n");
+        text.Append("# The limit is how much of the weekly limit of usage a run may use, in percent.\n");
         foreach (var (root, chosen) in projects.OrderBy(project => project.Key, StringComparer.Ordinal))
         {
             text.Append("\n[").Append(SettingsToml.Quoted(root)).Append("]\n");
             foreach (var name in Keys.Where(chosen.ContainsKey))
-                text.Append(name).Append(" = ").Append(SettingsToml.Quoted(chosen[name])).Append('\n');
+                text.Append(name).Append(" = ").Append(name == Limit ? chosen[name] : SettingsToml.Quoted(chosen[name])).Append('\n');
         }
 
         Directory.CreateDirectory(folder);
@@ -90,7 +101,17 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
             var chosen = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var pair in table.Items)
             {
-                if (pair is { Key: { DotKeys.ChildrenCount: 0, Key: BareKeySyntax { Key.Text: { } key } }, Value: StringValueSyntax { Value: { } value } } && Keys.Contains(key))
+                if (pair is not { Key: { DotKeys.ChildrenCount: 0, Key: BareKeySyntax { Key.Text: { } key } } } || !Keys.Contains(key))
+                    continue;
+
+                // A choice of the wrong kind counts as one that is not there.
+                var value = pair.Value switch
+                {
+                    StringValueSyntax { Value: { } text } when key != Limit => text,
+                    IntegerValueSyntax number when key == Limit => number.Value.ToString(CultureInfo.InvariantCulture),
+                    _ => null,
+                };
+                if (value is not null)
                     chosen.TryAdd(key, value);
             }
 

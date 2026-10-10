@@ -87,7 +87,7 @@ public sealed class ModelScreenTests : IDisposable
 
         using var page = terminal.Open();
         Assert.Null(ModelScreen.Ask(page, null));
-        terminal.AssertSaw("   Other…           any model, by its name\n ❯ Back\n ↑↓ move · enter choose");
+        terminal.AssertSaw("   Other…           any model, by its name\n ❯ Back             esc\n ↑↓ move · enter choose · ctrl+c exit");
     }
 
     [Fact]

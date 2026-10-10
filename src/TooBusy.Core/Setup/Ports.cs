@@ -24,7 +24,7 @@ public interface ISetupDialog
     // The board of the tasks: one of the known ones, one by its address, a new one, or none.
     BoardAnswer? AskBoard(BoardQuestion question);
 
-    // Yes or no.
+    // The last question, when everything is answered: true saves what was answered and false leaves it unsaved.
     bool? Confirm(string question);
 }
 
