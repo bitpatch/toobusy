@@ -1,10 +1,20 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Queue;
 
-// Which of the open milestones is the current one under each rule of the settings.
+public enum MilestoneRule
+{
+    LowestVersion,
+    EarliestDue,
+    Fixed,
+    None,
+}
+
+// A rule and, for the fixed one, the title of its milestone.
+public sealed record MilestoneSettings(MilestoneRule Rule, string? Title);
+
+// Which of the open milestones is the current one under each rule.
 public static partial class MilestoneRules
 {
     public static Milestone? Choose(MilestoneSettings settings, IReadOnlyList<Milestone> open) => settings.Rule switch

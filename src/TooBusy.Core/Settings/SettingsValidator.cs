@@ -2,8 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace TooBusy.Core.Settings;
 
-// The validation rules of the settings. They look at the file alone: whether the repository, the board,
-// the labels and the milestone exist is checked elsewhere, against the tracker.
+// The validation rules of the settings. They look at the file alone: whether the board,
+// and the labels exist is checked elsewhere, against the tracker.
 public static partial class SettingsValidator
 {
     public static SettingsValidation Validate(SettingsDocument document)
@@ -15,19 +15,14 @@ public static partial class SettingsValidator
             : new SettingsValidation(null, [.. run.Errors.OrderBy(error => error.Line ?? int.MaxValue)]);
     }
 
-    public static bool IsRepository(string value) => RepositoryPattern().IsMatch(value);
-
     public static bool IsBoard(string value) => BoardPattern().IsMatch(value);
-
-    [GeneratedRegex(@"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")]
-    private static partial Regex RepositoryPattern();
 
     [GeneratedRegex(@"^https://github\.com/(orgs|users)/[A-Za-z0-9-]+/projects/[0-9]+$")]
     private static partial Regex BoardPattern();
 
     sealed class Run(SettingsDocument document)
     {
-        static readonly string[] Sections = ["tracker", "queue", "queue.milestone", "queue.labels", "assistant"];
+        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant"];
 
         readonly Dictionary<string, SettingsEntry> entries = [];
 
@@ -39,9 +34,6 @@ public static partial class SettingsValidator
             ReadVersion();
 
             var trackerType = OneOf(SettingsKeys.TrackerType, [SettingsKeys.GitHubTracker]);
-            var repository = String(SettingsKeys.TrackerRepository, required: true);
-            if (repository is not null && !IsRepository(repository.Value.Text))
-                Refuse(repository.Value.Entry, "must be a repository as `owner/name`");
             var board = String(SettingsKeys.TrackerBoard, required: false);
             if (board is not null && !IsBoard(board.Value.Text))
             {
@@ -49,13 +41,12 @@ public static partial class SettingsValidator
                     "must be the address of a GitHub Projects board: `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>`");
             }
 
-            var milestone = ReadMilestone();
             var labels = ReadLabels();
             var assistantType = OneOf(SettingsKeys.AssistantType, [SettingsKeys.ClaudeCodeAssistant]);
 
             return new ProjectSettings(
-                new TrackerSettings(trackerType ?? "", repository?.Text ?? "", board?.Text),
-                new QueueSettings(milestone, labels),
+                new TrackerSettings(trackerType ?? "", board?.Text),
+                new QueueSettings(labels),
                 new AssistantSettings(assistantType ?? ""));
         }
 
@@ -93,27 +84,6 @@ public static partial class SettingsValidator
                 Refuse(entry, $"the file was made by a newer toobusy: its version is {version}, and this one reads version {ProjectSettings.SchemaVersion}");
             else if (version != ProjectSettings.SchemaVersion)
                 Refuse(entry, $"must be {ProjectSettings.SchemaVersion}");
-        }
-
-        MilestoneSettings ReadMilestone()
-        {
-            var title = String(SettingsKeys.MilestoneTitle, required: false);
-            MilestoneRule? rule = null;
-            if (String(SettingsKeys.MilestoneRule, required: true) is { } named)
-            {
-                rule = SettingsKeys.RuleNamed(named.Text);
-                if (rule is null)
-                    Refuse(named.Entry, "must be one of `lowest-version`, `earliest-due`, `fixed`, `none`");
-            }
-
-            if (title is not null && string.IsNullOrWhiteSpace(title.Value.Text))
-                Refuse(title.Value.Entry, "must not be empty");
-            else if (title is not null && rule is not null and not MilestoneRule.Fixed)
-                Refuse(title.Value.Entry, $"is for the `fixed` rule only; the rule is `{SettingsKeys.NameOf(rule.Value)}`");
-            else if (title is null && rule is MilestoneRule.Fixed && !entries.ContainsKey(SettingsKeys.MilestoneTitle))
-                Missing(SettingsKeys.MilestoneTitle, "is missing; the `fixed` rule needs the title of its milestone");
-
-            return new MilestoneSettings(rule ?? MilestoneRule.None, title?.Text);
         }
 
         LabelSettings ReadLabels()

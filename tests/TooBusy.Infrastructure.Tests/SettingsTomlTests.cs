@@ -11,12 +11,7 @@ public class SettingsTomlTests
 
         [tracker]
         type = "github"
-        repository = "bitpatch/toobusy"
         board = "https://github.com/orgs/bitpatch/projects/3"   # optional
-
-        [queue.milestone]
-        rule = "lowest-version"   # lowest-version | earliest-due | fixed | none
-        # title = "v.0.2.0"       # with rule = "fixed" only
 
         [queue.labels]
         blocking = ["manual", "draft"]              # a task with any of these is never taken
@@ -28,10 +23,8 @@ public class SettingsTomlTests
         """;
 
     static readonly ProjectSettings Settings = new(
-        new TrackerSettings("github", "bitpatch/toobusy", "https://github.com/orgs/bitpatch/projects/3"),
-        new QueueSettings(
-            new MilestoneSettings(MilestoneRule.LowestVersion, null),
-            new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"])),
+        new TrackerSettings("github", "https://github.com/orgs/bitpatch/projects/3"),
+        new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"])),
         new AssistantSettings("claude-code"));
 
     [Fact]
@@ -49,12 +42,10 @@ public class SettingsTomlTests
         var result = SettingsToml.Read("""
             version = 1
             tracker.type = 'github'
-            "tracker".repository = "bitpatch/toobusy"
+            "tracker".board = "https://github.com/orgs/bitpatch/projects/3"
             assistant.type = "claude-code"
 
             [queue]
-            milestone.rule = "fixed"
-            milestone.title = "v.0.2.0"
             labels.blocking = [
               "manual",  # by hand
             ]
@@ -62,17 +53,17 @@ public class SettingsTomlTests
             """);
 
         Assert.Empty(result.Errors);
-        Assert.Equal(new MilestoneSettings(MilestoneRule.Fixed, "v.0.2.0"), result.Settings!.Queue.Milestone);
+        Assert.Equal("https://github.com/orgs/bitpatch/projects/3", result.Settings!.Tracker.Board);
         Assert.Equal(["manual"], result.Settings.Queue.Labels.Blocking);
     }
 
     [Fact]
     public void AnErrorNamesTheKeyAndTheLine()
     {
-        var result = SettingsToml.Read(Example.Replace("\"bitpatch/toobusy\"", "42", StringComparison.Ordinal));
+        var result = SettingsToml.Read(Example.Replace("\"https://github.com/orgs/bitpatch/projects/3\"", "42", StringComparison.Ordinal));
 
         Assert.Null(result.Settings);
-        Assert.Equal(new SettingsError("tracker.repository", 5, "must be a string"), Assert.Single(result.Errors));
+        Assert.Equal(new SettingsError("tracker.board", 5, "must be a string"), Assert.Single(result.Errors));
     }
 
     [Fact]
@@ -80,7 +71,15 @@ public class SettingsTomlTests
     {
         var result = SettingsToml.Read(Example.Replace("[assistant]", "[assistant]\nmodel = \"opus\"", StringComparison.Ordinal));
 
-        Assert.Equal(new SettingsError("assistant.model", 17, "unknown key"), Assert.Single(result.Errors));
+        Assert.Equal(new SettingsError("assistant.model", 12, "unknown key"), Assert.Single(result.Errors));
+    }
+
+    [Fact]
+    public void TheRepositoryIsNotAKeyOfTheSettings()
+    {
+        var result = SettingsToml.Read(Example.Replace("type = \"github\"", "type = \"github\"\nrepository = \"bitpatch/toobusy\"", StringComparison.Ordinal));
+
+        Assert.Equal(new SettingsError("tracker.repository", 5, "unknown key"), Assert.Single(result.Errors));
     }
 
     [Fact]
@@ -88,13 +87,13 @@ public class SettingsTomlTests
     {
         var result = SettingsToml.Read(Example.Replace("type = \"claude-code\"", "", StringComparison.Ordinal));
 
-        Assert.Equal(new SettingsError("assistant.type", 16, "is missing"), Assert.Single(result.Errors));
+        Assert.Equal(new SettingsError("assistant.type", 11, "is missing"), Assert.Single(result.Errors));
     }
 
     [Theory]
-    [InlineData("tracker.repository = { owner = \"bitpatch\", name = \"toobusy\" }", "tracker.repository")]
-    [InlineData("tracker.repository = 2026-10-09", "tracker.repository")]
-    [InlineData("tracker.repository = 1.5", "tracker.repository")]
+    [InlineData("tracker.board = { owner = \"bitpatch\", number = 3 }", "tracker.board")]
+    [InlineData("tracker.board = 2026-10-09", "tracker.board")]
+    [InlineData("tracker.board = 1.5", "tracker.board")]
     [InlineData("[[tracker]]", "tracker")]
     public void ValuesOfOtherKindsAreRefused(string line, string key)
     {
@@ -127,12 +126,7 @@ public class SettingsTomlTests
             # Where the tasks are.
             [tracker]
             type = "github"
-            repository = "bitpatch/toobusy"
             board = "https://github.com/orgs/bitpatch/projects/3"
-
-            # Which milestone the tasks are taken from: lowest-version, earliest-due, fixed (with a title) or none.
-            [queue.milestone]
-            rule = "lowest-version"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
             [queue.labels]
@@ -152,9 +146,7 @@ public class SettingsTomlTests
         var settings = Settings with
         {
             Tracker = Settings.Tracker with { Board = null },
-            Queue = new QueueSettings(
-                new MilestoneSettings(MilestoneRule.Fixed, "The \"first\" one \\ v.0.2.0"),
-                new LabelSettings([], ["good first issue", "höhe"])),
+            Queue = new QueueSettings(new LabelSettings(["The \"first\" one \\ v.0.2.0"], ["good first issue", "höhe"])),
         };
 
         var result = SettingsToml.Read(SettingsToml.Write(settings));
@@ -174,7 +166,7 @@ public class SettingsTomlTests
     {
         var settings = Settings with
         {
-            Tracker = Settings.Tracker with { Repository = "bitpatch/other" },
+            Tracker = Settings.Tracker with { Board = "https://github.com/orgs/bitpatch/projects/9" },
             Queue = Settings.Queue with { Labels = new LabelSettings(["manual"], Settings.Queue.Labels.Take) },
         };
 
@@ -182,7 +174,7 @@ public class SettingsTomlTests
 
         Assert.Equal(
             Example
-                .Replace("\"bitpatch/toobusy\"", "\"bitpatch/other\"", StringComparison.Ordinal)
+                .Replace("projects/3", "projects/9", StringComparison.Ordinal)
                 .Replace("[\"manual\", \"draft\"]", "[\"manual\"]", StringComparison.Ordinal),
             text);
     }
@@ -190,14 +182,12 @@ public class SettingsTomlTests
     [Fact]
     public void ARewriteAddsAKeyToItsSection()
     {
-        var settings = Settings with { Queue = Settings.Queue with { Milestone = new MilestoneSettings(MilestoneRule.Fixed, "v.0.2.0") } };
+        var existing = Example.Replace("board = \"https://github.com/orgs/bitpatch/projects/3\"   # optional\n", "", StringComparison.Ordinal);
 
-        var text = SettingsToml.Write(settings, Example);
+        var text = SettingsToml.Write(Settings, existing);
 
         Assert.Equal(
-            Example
-                .Replace("rule = \"lowest-version\"", "rule = \"fixed\"", StringComparison.Ordinal)
-                .Replace("none\n", "none\ntitle = \"v.0.2.0\"\n", StringComparison.Ordinal),
+            existing.Replace("type = \"github\"\n", "type = \"github\"\nboard = \"https://github.com/orgs/bitpatch/projects/3\"\n", StringComparison.Ordinal),
             text);
     }
 
@@ -222,12 +212,7 @@ public class SettingsTomlTests
             # Ours.
             [tracker]
             type = "github" # the only one
-            repository = "bitpatch/toobusy"
             board = "https://github.com/orgs/bitpatch/projects/3"
-
-            # Which milestone the tasks are taken from: lowest-version, earliest-due, fixed (with a title) or none.
-            [queue.milestone]
-            rule = "lowest-version"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
             [queue.labels]
@@ -256,13 +241,17 @@ public class SettingsTomlTests
     public void ARewriteKeepsWindowsLineEndings()
     {
         var existing = Example.ReplaceLineEndings("\r\n");
-        var settings = Settings with { Tracker = Settings.Tracker with { Repository = "bitpatch/other", Board = null } };
+        var settings = Settings with
+        {
+            Tracker = Settings.Tracker with { Board = null },
+            Queue = new QueueSettings(new LabelSettings(["manual"], Settings.Queue.Labels.Take)),
+        };
 
         var text = SettingsToml.Write(settings, existing);
 
         Assert.Equal(
             existing
-                .Replace("\"bitpatch/toobusy\"", "\"bitpatch/other\"", StringComparison.Ordinal)
+                .Replace("[\"manual\", \"draft\"]", "[\"manual\"]", StringComparison.Ordinal)
                 .Replace("board = \"https://github.com/orgs/bitpatch/projects/3\"   # optional\r\n", "", StringComparison.Ordinal),
             text);
     }
@@ -277,7 +266,7 @@ public class SettingsTomlTests
 
     [Theory]
     [InlineData("version = 1\n[tracker\n")]
-    [InlineData("tracker = { type = \"github\", repository = \"bitpatch/toobusy\", board = \"https://github.com/orgs/bitpatch/projects/3\" }\n")]
+    [InlineData("tracker = { type = \"github\", board = \"https://github.com/orgs/bitpatch/projects/3\" }\n")]
     public void ARewriteRefusesTextItCannotEdit(string existing)
     {
         Assert.Throws<FormatException>(() => SettingsToml.Write(Settings with { Tracker = Settings.Tracker with { Board = null } }, existing));
@@ -286,7 +275,6 @@ public class SettingsTomlTests
     static void AssertSame(ProjectSettings expected, ProjectSettings actual)
     {
         Assert.Equal(expected.Tracker, actual.Tracker);
-        Assert.Equal(expected.Queue.Milestone, actual.Queue.Milestone);
         Assert.Equal(expected.Queue.Labels.Blocking, actual.Queue.Labels.Blocking);
         Assert.Equal(expected.Queue.Labels.Take, actual.Queue.Labels.Take);
         Assert.Equal(expected.Assistant, actual.Assistant);

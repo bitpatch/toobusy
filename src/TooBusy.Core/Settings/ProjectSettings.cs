@@ -8,20 +8,10 @@ public sealed record ProjectSettings(TrackerSettings Tracker, QueueSettings Queu
     public const int SchemaVersion = 1;
 }
 
-public sealed record TrackerSettings(string Type, string Repository, string? Board);
+public sealed record TrackerSettings(string Type, string? Board);
 
-public sealed record QueueSettings(MilestoneSettings Milestone, LabelSettings Labels);
-
-public sealed record MilestoneSettings(MilestoneRule Rule, string? Title);
+public sealed record QueueSettings(LabelSettings Labels);
 
 public sealed record LabelSettings(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take);
 
 public sealed record AssistantSettings(string Type);
-
-public enum MilestoneRule
-{
-    LowestVersion,
-    EarliestDue,
-    Fixed,
-    None,
-}

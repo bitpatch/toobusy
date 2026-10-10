@@ -2,7 +2,9 @@ using System.CommandLine;
 using TooBusy.Cli.Imitation;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Setup;
+using TooBusy.Infrastructure.Git;
 using TooBusy.Infrastructure.Settings;
+using TooBusy.Trackers.GitHub;
 
 namespace TooBusy.Cli;
 
@@ -29,7 +31,9 @@ public static class CliApp
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
     }
 
-    // Only the dry run exists so far: the real steps and the real terminal over an imitated machine and tracker.
+    // Only the dry run exists so far: the real steps and the real screen over an imitated machine and tracker.
+    // What it reads for the question about the project is real, the `origin` remote and the boards of the user:
+    // reading them changes nothing. What the setup would make, link and write is imitated.
     static Command CreateInitCommand(CliContext context)
     {
         var dryRun = new Option<bool>("--dry-run") { Description = "Go through the setup with an imitated tracker and write nothing." };
@@ -41,22 +45,51 @@ public static class CliApp
                 return ExitCode.NotReady;
             if (!result.GetValue(dryRun))
                 return Fail(context, "toobusy: a real setup is not implemented yet; use `--dry-run`");
-            if (context.ReadKey is null)
+            if (context.Terminal is not { } terminal)
                 return Fail(context, "toobusy: `init` asks questions and needs a terminal");
 
-            context.Output.WriteLine(context.OutputPalette.Muted("Dry run: the machine and the tracker are imitated, and nothing is written."));
-            var imitated = new ImitatedSetup();
-            var setup = new ProjectSetup(
-                new TerminalDialog(context.Output, context.ReadKey, context.OutputPalette), imitated, imitated, new UnwrittenSettings(new SettingsFile(root)));
-            var outcome = await setup.RunAsync(cancellationToken);
-            if (outcome == SetupOutcome.Written)
-                context.Output.WriteLine(context.OutputPalette.Muted($"Dry run: {SettingsFile.DisplayPath} is left as it was."));
-            return outcome == SetupOutcome.Declined ? ExitCode.Failed : ExitCode.Done;
+            var origin = context.Processes is null ? "example/project" : await new GitOrigin(context.Processes).ReadAsync(root, cancellationToken);
+            var imitated = new ImitatedSetup(origin);
+            var boards = new ImitatedBoards(context.Processes is null ? null : new GitHubBoards(context.Processes));
+
+            SetupResult? ended = null;
+            using (var page = OpenPage(context, terminal, root, "Setting up this project · dry run"))
+            {
+                try
+                {
+                    ended = await new ProjectSetup(new SetupScreen(page), imitated, imitated, boards, new UnwrittenSettings(new SettingsFile(root))).RunAsync(cancellationToken);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                }
+            }
+
+            // The screen is gone; what was answered and how it ended is left in the terminal.
+            var palette = context.OutputPalette;
+            context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
+            foreach (var answer in ended?.Answers ?? [])
+                context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
+            switch (ended?.Outcome)
+            {
+                case SetupOutcome.Written:
+                    context.Output.WriteLine(palette.Muted($"Dry run: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."));
+                    return ExitCode.Done;
+                case SetupOutcome.NothingToChange:
+                    context.Output.WriteLine("Nothing to change: the settings already say this.");
+                    return ExitCode.Done;
+                case SetupOutcome.Declined:
+                    context.Output.WriteLine($"{palette.Error("✘")} The setup was declined: nothing was changed.");
+                    return ExitCode.Failed;
+                default:
+                    context.Output.WriteLine($"{palette.Error("✘")} The setup was left: nothing was changed.");
+                    return ExitCode.Failed;
+            }
         });
         return command;
     }
 
     // Only the dry run exists so far, and it has nothing to imitate: it is the entry point that the run grows from.
+    // In a terminal it is the page of a run with its commands; elsewhere it says the same in two lines.
     static Command CreateRunCommand(CliContext context)
     {
         var dryRun = new Option<bool>("--dry-run") { Description = "Imitate the run without changing anything." };
@@ -79,12 +112,32 @@ public static class CliApp
             if (!result.GetValue(dryRun))
                 return Fail(context, "toobusy: a real run is not implemented yet; use `--dry-run`");
 
+            if (context.Terminal is { } terminal)
+            {
+                var root = ProjectLocator.FindRoot(context.Folder)!;
+                using (var page = OpenPage(context, terminal, root, "Running the queue · dry run"))
+                {
+                    try
+                    {
+                        new RunScreen(page).Run();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                }
+
+                context.Output.WriteLine($"toobusy · Running the queue · {context.Shorten(root)}");
+            }
+
             context.Output.WriteLine("Dry run: nothing is changed.");
             context.Output.WriteLine("There is nothing to imitate yet.");
             return ExitCode.Done;
         });
         return command;
     }
+
+    static Page OpenPage(CliContext context, TerminalDevice terminal, string root, string status) =>
+        new(context.Output, context.OutputPalette, terminal, $"toobusy · {context.Shorten(root)}") { Status = status };
 
     // The root of the project around the folder; without a project it says so and gives null.
     static string? FindProject(CliContext context)

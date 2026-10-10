@@ -1,4 +1,3 @@
-using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 
@@ -6,90 +5,143 @@ namespace TooBusy.Core.Tests;
 
 public class ProjectSetupTests
 {
+    const string Rocket = "https://github.com/orgs/acme/projects/1";
+    const string Moon = "https://github.com/users/denis/projects/7";
+
     static readonly ProjectSettings Existing = new(
-        new TrackerSettings("github", "bitpatch/toobusy", "https://github.com/orgs/bitpatch/projects/3"),
-        new QueueSettings(new MilestoneSettings(MilestoneRule.Fixed, "Polish"), new LabelSettings(["manual"], ["bug", "retired"])),
+        new TrackerSettings("github", Rocket),
+        new QueueSettings(new LabelSettings(["manual"], ["bug", "retired"])),
         new AssistantSettings("claude-code"));
 
     readonly ScriptedDialog dialog = new();
     readonly FakeMachine machine = new();
     readonly FakeTracker tracker = new();
+    readonly FakeBoards boards = new();
     readonly FakeStore store = new();
 
     [Fact]
     public async Task AFirstSetupProposesWhatItFindsAndWritesIt()
     {
-        var outcome = await RunAsync();
+        var result = await RunAsync();
 
-        Assert.Equal(SetupOutcome.Written, outcome);
-        Assert.Equal(new TrackerSettings("github", "acme/rocket", null), store.Saved!.Tracker);
-        Assert.Equal(new MilestoneSettings(MilestoneRule.LowestVersion, null), store.Saved.Queue.Milestone);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new TrackerSettings("github", null), store.Saved!.Tracker);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
         Assert.Equal(new AssistantSettings("claude-code"), store.Saved.Assistant);
-        Assert.Equal(
-            ["Tracker", "Repository", "Board", "Milestone rule", "Blocking labels", "Labels to take", "Assistant", "Write the settings?"],
-            dialog.Steps);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", "Write the settings?"], dialog.Asked);
     }
 
     [Fact]
-    public async Task AFirstSetupShowsTheWholeFileAsAdditions()
+    public async Task AFirstSetupSaysThatTheAnswersWillBeWritten()
     {
         await RunAsync();
 
-        Assert.Contains((SetupTone.Plain, "New file .toobusy/settings.toml:"), dialog.Said);
-        Assert.Contains((SetupTone.Added, "+ repository = acme/rocket"), dialog.Said);
-        Assert.DoesNotContain(dialog.Said, line => line.Tone == SetupTone.Removed);
+        Assert.Equal([new SetupNote(SetupTone.Plain, "The answers above will be written to .toobusy/settings.toml.")], dialog.Shown.Notes);
+        Assert.Equal(5, dialog.Shown.Answers.Count);
     }
 
     [Fact]
     public async Task TheAnswersBecomeTheSettings()
     {
-        dialog.Answer("Repository", "https://github.com/bitpatch/toobusy.git");
-        dialog.Answer("Board", " https://github.com/users/denis/projects/7 ");
-        dialog.Answer("Milestone rule", "earliest-due");
+        dialog.Board(new BoardAnswer.Existing($" {Moon}/views/2?layout=board "));
         dialog.Answer("Blocking labels", "manual", "draft");
         dialog.Answer("Labels to take", "bug");
 
-        await RunAsync();
+        var result = await RunAsync();
 
-        Assert.Equal(new TrackerSettings("github", "bitpatch/toobusy", "https://github.com/users/denis/projects/7"), store.Saved!.Tracker);
-        Assert.Equal(new MilestoneSettings(MilestoneRule.EarliestDue, null), store.Saved.Queue.Milestone);
+        Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
         Assert.Equal(["draft", "manual"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug"], store.Saved.Queue.Labels.Take);
+        Assert.Equal(
+            [
+                new SetupAnswer("Tracker", "GitHub"),
+                new SetupAnswer("Project", Moon),
+                new SetupAnswer("Blocking labels", "draft, manual"),
+                new SetupAnswer("Labels to take", "bug"),
+                new SetupAnswer("Assistant", "Claude Code"),
+            ],
+            result.Answers);
     }
 
     [Fact]
-    public async Task EachRuleIsShownWithTheMilestoneItWouldChooseNow()
+    public async Task TheStepsAndThePlaceAmongThemAreShown()
     {
         await RunAsync();
 
-        var details = dialog.Offered["Milestone rule"];
-        Assert.EndsWith(" → v.0.2.0", details[0], StringComparison.Ordinal);
-        Assert.EndsWith(" → Polish", details[1], StringComparison.Ordinal);
+        // At the confirmation every step is done.
+        Assert.Equal(["Project", "Blocking labels", "Labels to take"], dialog.Shown.Steps);
+        Assert.Equal([0, 1, 2, 3], dialog.Places.Distinct());
+        Assert.Equal(dialog.Shown.Steps.Count, dialog.Shown.Step);
     }
 
     [Fact]
-    public async Task TheProposedRuleFollowsTheOpenMilestones()
+    public async Task TheBoardQuestionOffersTheBoardsAndTheOwnersThatWereRead()
     {
-        tracker.Milestones = [new Milestone("Polish", new DateOnly(2030, 1, 15)), new Milestone("Backlog", null)];
-        await RunAsync();
-        Assert.Equal(MilestoneRule.EarliestDue, store.Saved!.Queue.Milestone.Rule);
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", false), new(Moon, "Moon", false)], [new("denis", false), new("acme", true)]);
 
-        tracker.Milestones = [new Milestone("Backlog", null)];
         await RunAsync();
-        Assert.Equal(MilestoneRule.None, store.Saved!.Queue.Milestone.Rule);
+
+        Assert.Equal("acme/rocket", boards.Repository);
+        Assert.Equal(boards.Read.Boards, dialog.Question!.Known);
+        Assert.Equal([new SetupOwner("acme", true), new SetupOwner("denis", false)], dialog.Question.Owners);
+        Assert.Null(dialog.Question.Current);
     }
 
     [Fact]
-    public async Task TheFixedRuleGoesOnToPickAnOpenMilestone()
+    public async Task ABoardThatIsLinkedToTheRepositoryIsTheOneTheProjectHas()
     {
-        dialog.Answer("Milestone rule", "fixed");
-        dialog.Answer("Milestone", "Polish");
+        boards.Read = new SetupBoards([new(Moon, "Moon", false), new(Rocket, "Rocket", true)], []);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new SetupBoard(Rocket, "Rocket", true), dialog.Question!.Current);
+        Assert.Equal(Rocket, store.Saved!.Tracker.Board);
+        Assert.Contains(new SetupAnswer("Project", $"Rocket  {Rocket}"), result.Answers);
+        Assert.Empty(tracker.Linked);
+    }
+
+    [Fact]
+    public async Task ABoardThatIsNotLinkedYetIsLinkedWhenTheSetupIsConfirmed()
+    {
+        boards.Read = new SetupBoards([new(Moon, "Moon", false)], []);
+        dialog.Board(new BoardAnswer.Existing(Moon));
 
         await RunAsync();
 
-        Assert.Equal(new MilestoneSettings(MilestoneRule.Fixed, "Polish"), store.Saved!.Queue.Milestone);
+        Assert.Contains(new SetupNote(SetupTone.Plain, "The project will be linked to acme/rocket."), dialog.Shown.Notes);
+        Assert.Equal([(Moon, "acme/rocket")], tracker.Linked);
+    }
+
+    [Fact]
+    public async Task ANewBoardIsMadeAndLinkedOnlyWhenTheSetupIsConfirmed()
+    {
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
+        tracker.OnConfirm = () => Assert.Empty(tracker.Made);
+        dialog.BeforeConfirm = tracker.OnConfirm;
+
+        var result = await RunAsync();
+
+        Assert.Contains(new SetupNote(SetupTone.Plain, "The project “Rocket” will be made for acme."), dialog.Shown.Notes);
+        Assert.Contains(new SetupAnswer("Project", "new: Rocket (acme)"), dialog.Shown.Answers);
+        Assert.Equal([(new SetupOwner("acme", true), "Rocket")], tracker.Made);
+        Assert.Equal([("https://github.com/orgs/acme/projects/42", "acme/rocket")], tracker.Linked);
+        Assert.Equal("https://github.com/orgs/acme/projects/42", store.Saved!.Tracker.Board);
+        Assert.Contains(new SetupAnswer("Project", "new: Rocket (acme)"), result.Answers);
+    }
+
+    [Fact]
+    public async Task DecliningMakesNothingAndWritesNothing()
+    {
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
+        dialog.Confirm(false);
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Declined, result.Outcome);
+        Assert.Empty(tracker.Made);
+        Assert.Empty(tracker.Linked);
+        Assert.Null(store.Saved);
     }
 
     [Fact]
@@ -103,80 +155,136 @@ public class ProjectSetupTests
     }
 
     [Fact]
-    public async Task AnswersThatCannotBeRightAreRefusedByTheQuestion()
+    public async Task GoingBackAsksTheStepBeforeAndProposesWhatWasAnswered()
     {
-        dialog.Answer("Repository", "rocket");
-        dialog.Answer("Repository", "acme/rocket");
-        dialog.Answer("Board", "https://example.com/board");
-        dialog.Answer("Board", "");
+        dialog.Answer("Blocking labels", "manual");
+        dialog.Back("Labels to take");
 
         await RunAsync();
 
-        Assert.Equal(["rocket", "https://example.com/board"], dialog.Refused);
-        Assert.Equal(new TrackerSettings("github", "acme/rocket", null), store.Saved!.Tracker);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", "Blocking labels", "Labels to take", "Write the settings?"], dialog.Asked);
+        Assert.Equal(["manual"], store.Saved!.Queue.Labels.Blocking);
     }
 
     [Fact]
-    public async Task ARepositoryThatCannotBeReadIsAskedAgain()
+    public async Task GoingBackFromTheConfirmationAsksTheLastStepAgain()
     {
-        tracker.Unreadable.Add("acme/secret");
-        dialog.Answer("Repository", "acme/secret");
-        dialog.Answer("Repository", "acme/rocket");
+        dialog.Confirm(null, true);
 
-        await RunAsync();
+        var result = await RunAsync();
 
-        Assert.Contains((SetupTone.Failure, "acme/secret cannot be read"), dialog.Said);
-        Assert.Equal("acme/rocket", store.Saved!.Tracker.Repository);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(["Labels to take", "Write the settings?", "Labels to take", "Write the settings?"], dialog.Asked.Skip(2));
     }
 
     [Fact]
-    public async Task ABoardThatCannotBeReadIsAskedAgain()
+    public async Task GoingBackFromTheFirstStepLeavesTheSetup()
     {
-        tracker.Unreadable.Add("https://github.com/orgs/acme/projects/1");
-        dialog.Answer("Board", "https://github.com/orgs/acme/projects/1");
-        dialog.Answer("Board", "https://github.com/orgs/acme/projects/2");
+        dialog.Back("Blocking labels");
+        dialog.Board(null);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new SetupResult(SetupOutcome.Left, []), result, (left, right) => left!.Outcome == right!.Outcome && left.Answers.Count == right.Answers.Count);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task ABoardAddressThatCannotBeRightIsRefusedByTheQuestion()
+    {
+        await RunAsync();
+
+        Assert.NotNull(dialog.Question!.RefuseAddress("https://example.com/board"));
+        Assert.Null(dialog.Question.RefuseAddress($"{Moon}/views/1"));
+        Assert.NotNull(dialog.Question.RefuseTitle("  "));
+        Assert.Null(dialog.Question.RefuseTitle("Rocket"));
+    }
+
+    [Fact]
+    public async Task ABoardThatCannotBeReadIsAskedAgainWithTheReason()
+    {
+        tracker.Unreadable.Add(Rocket);
+        dialog.Board(new BoardAnswer.Existing(Rocket));
+        dialog.Board(new BoardAnswer.Existing(Moon));
 
         await RunAsync();
 
-        Assert.Equal("https://github.com/orgs/acme/projects/2", store.Saved!.Tracker.Board);
+        Assert.Contains(dialog.Seen, progress => progress.Step == 0 && progress.Notes.Contains(new SetupNote(SetupTone.Failure, $"{Rocket} cannot be read")));
+        Assert.Equal(Moon, store.Saved!.Tracker.Board);
     }
 
     [Fact]
     public async Task AnExistingSetupProposesItsValuesSoThatAcceptingThemChangesNothing()
     {
         store.Current = Existing;
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
 
-        var outcome = await RunAsync();
+        var result = await RunAsync();
 
-        Assert.Equal(SetupOutcome.NothingToChange, outcome);
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
         Assert.Null(store.Saved);
-        Assert.Contains((SetupTone.Plain, "Nothing to change"), dialog.Said);
-        Assert.DoesNotContain("Write the settings?", dialog.Steps);
+        Assert.DoesNotContain("Write the settings?", dialog.Asked);
+    }
+
+    [Fact]
+    public async Task AnExistingSetupWhoseBoardIsNotLinkedOffersOnlyToLinkIt()
+    {
+        store.Current = Existing;
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("Link the project?", dialog.Asked[^1]);
+        Assert.Equal([(Rocket, "acme/rocket")], tracker.Linked);
+        Assert.Null(store.Saved);
     }
 
     [Fact]
     public async Task AnExistingSetupShowsOnlyWhatChanges()
     {
         store.Current = Existing;
-        dialog.Answer("Repository", "acme/rocket");
+        dialog.Board(new BoardAnswer.None());
 
         await RunAsync();
 
         Assert.Equal(
-            [(SetupTone.Removed, "- repository = bitpatch/toobusy"), (SetupTone.Added, "+ repository = acme/rocket")],
-            dialog.Said.Where(line => line.Tone is SetupTone.Added or SetupTone.Removed));
-        Assert.Equal(Existing with { Tracker = Existing.Tracker with { Repository = "acme/rocket" } }, store.Saved, SameSettings);
+            [
+                new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"),
+                new SetupNote(SetupTone.Change, $"Project: {Rocket} → none"),
+            ],
+            dialog.Shown.Notes);
+        Assert.Equal(Existing with { Tracker = Existing.Tracker with { Board = null } }, store.Saved, SameSettings);
+    }
+
+    [Fact]
+    public async Task EverySettingThatChangesIsSaidAsItWasAndAsItWillBe()
+    {
+        store.Current = Existing;
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true), new(Moon, "Moon", true)], []);
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Answer("Blocking labels");
+        dialog.Answer("Labels to take", "bug");
+
+        await RunAsync();
+
+        Assert.Equal(
+            [
+                $"Project: Rocket  {Rocket} → Moon  {Moon}",
+                "Blocking labels: manual → none",
+                "Labels to take: bug, retired → bug",
+            ],
+            dialog.Shown.Notes.Where(note => note.Tone == SetupTone.Change).Select(note => note.Text));
     }
 
     [Fact]
     public async Task SettingsThatDoNotValidateAreReported()
     {
-        store.Errors = [new SettingsError("tracker.repository", 5, "is missing")];
+        store.Errors = [new SettingsError("tracker.type", 5, "is missing")];
 
-        var outcome = await RunAsync();
+        var result = await RunAsync();
 
-        Assert.Contains((SetupTone.Failure, ".toobusy/settings.toml:5: tracker.repository: is missing"), dialog.Said);
-        Assert.Equal(SetupOutcome.Written, outcome);
+        Assert.Contains(new SetupNote(SetupTone.Failure, ".toobusy/settings.toml:5: tracker.type: is missing"), dialog.Shown.Notes);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
     }
 
     [Fact]
@@ -184,112 +292,170 @@ public class ProjectSetupTests
     {
         machine.Problems = [new SetupProblem("Claude Code is not installed", "curl -fsSL https://claude.ai/install.sh | bash")];
 
-        var outcome = await RunAsync();
+        var result = await RunAsync();
 
         Assert.Equal(
-            [(SetupTone.Failure, "Claude Code is not installed"), (SetupTone.Muted, "fix: curl -fsSL https://claude.ai/install.sh | bash")],
-            dialog.Said.Take(2));
-        Assert.Equal(SetupOutcome.Written, outcome);
+            [new SetupNote(SetupTone.Failure, "Claude Code is not installed"), new SetupNote(SetupTone.Muted, "fix: curl -fsSL https://claude.ai/install.sh | bash")],
+            dialog.Shown.Notes.Take(2));
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
     }
 
     [Fact]
     public async Task WithoutTheTrackerTheAnswersAreTypedAndNothingIsVerified()
     {
         machine.TrackerReachable = false;
-        tracker.Unreadable.Add("acme/secret");
-        dialog.Answer("Repository", "acme/secret");
-        dialog.Answer("Milestone rule", "fixed");
-        dialog.Answer("Milestone", "v.0.3.0");
+        tracker.Unreadable.Add(Rocket);
+        dialog.Board(new BoardAnswer.Existing(Rocket));
         dialog.Answer("Blocking labels", "manual, draft,");
         dialog.Answer("Labels to take", "draft");
         dialog.Answer("Labels to take", "bug, feature");
 
         await RunAsync();
 
-        Assert.Contains(dialog.Said, line => line.Tone == SetupTone.Warning && line.Text.Contains("nothing is verified", StringComparison.Ordinal));
+        Assert.Contains(dialog.Shown.Notes, note => note.Tone == SetupTone.Warning && note.Text.Contains("nothing is verified", StringComparison.Ordinal));
         Assert.Equal(0, tracker.Calls);
-        Assert.Equal("acme/secret", store.Saved!.Tracker.Repository);
-        Assert.Equal(new MilestoneSettings(MilestoneRule.Fixed, "v.0.3.0"), store.Saved.Queue.Milestone);
+        Assert.Null(boards.Repository);
+        Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Equal(["manual", "draft"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug", "feature"], store.Saved.Queue.Labels.Take);
         Assert.Equal(["draft"], dialog.Refused);
     }
 
     [Fact]
-    public async Task DecliningWritesNothing()
+    public async Task WithoutAGitHubOriginTheAnswersAreTypedAndNothingIsVerified()
     {
-        dialog.Confirmed = false;
+        machine.Origin = null;
+        dialog.Board(new BoardAnswer.Existing(Rocket));
+        dialog.Answer("Blocking labels", "manual");
 
-        var outcome = await RunAsync();
+        await RunAsync();
 
-        Assert.Equal(SetupOutcome.Declined, outcome);
-        Assert.Null(store.Saved);
+        Assert.Contains(dialog.Shown.Notes, note => note.Tone == SetupTone.Warning && note.Text.Contains("`origin`", StringComparison.Ordinal));
+        Assert.Equal(0, tracker.Calls);
+        Assert.Empty(tracker.Linked);
+        Assert.Equal(["manual"], store.Saved!.Queue.Labels.Blocking);
     }
 
-    Task<SetupOutcome> RunAsync() => new ProjectSetup(dialog, machine, tracker, store).RunAsync(TestContext.Current.CancellationToken);
+    [Fact]
+    public async Task WhatTakesAMomentIsSaid()
+    {
+        await RunAsync();
+
+        Assert.Equal(["Reading your projects from GitHub…", "Reading the labels…"], dialog.Waited);
+    }
+
+    Task<SetupResult> RunAsync() => new ProjectSetup(dialog, machine, tracker, boards, store).RunAsync(TestContext.Current.CancellationToken);
 
     static bool SameSettings(ProjectSettings? left, ProjectSettings? right) => FakeStore.Render(left!) == FakeStore.Render(right!);
 
     // Answers each question from its script and accepts what is proposed when the script has nothing for it.
+    // A board that the project has is kept; without one the answer is no board.
     sealed class ScriptedDialog : ISetupDialog
     {
-        readonly Dictionary<string, Queue<string[]>> answers = [];
+        readonly Dictionary<string, Queue<string[]?>> answers = [];
+        readonly Queue<BoardAnswer?> boards = new();
+        readonly Queue<bool?> confirmations = new();
 
-        public List<string> Steps { get; } = [];
+        // The names of the questions in the order they were asked.
+        public List<string> Asked { get; } = [];
 
-        public List<(SetupTone Tone, string Text)> Said { get; } = [];
+        public List<SetupProgress> Seen { get; } = [];
+
+        public SetupProgress Shown => Seen[^1];
+
+        // The step that was shown, for each time something was shown.
+        public IEnumerable<int> Places => Seen.Select(progress => progress.Step);
+
+        public List<string> Waited { get; } = [];
 
         public List<string> Refused { get; } = [];
 
         // The details of a selection, or the options of a multiple choice, under the label of the question.
         public Dictionary<string, string[]> Offered { get; } = [];
 
-        public bool Confirmed { get; set; } = true;
+        public BoardQuestion? Question { get; private set; }
 
-        public void Answer(string label, params string[] answer)
+        public Action? BeforeConfirm { get; set; }
+
+        public void Answer(string label, params string[] answer) => Script(label).Enqueue(answer);
+
+        public void Back(string label) => Script(label).Enqueue(null);
+
+        public void Board(BoardAnswer? answer) => boards.Enqueue(answer);
+
+        public void Confirm(params bool?[] answers)
         {
-            if (!answers.TryGetValue(label, out var queue))
-                answers.Add(label, queue = new Queue<string[]>());
-            queue.Enqueue(answer);
+            foreach (var answer in answers)
+                confirmations.Enqueue(answer);
         }
 
-        public int Choose(string label, IReadOnlyList<SetupOption> options, int proposed)
+        public void Show(SetupProgress progress) => Seen.Add(progress);
+
+        public void Wait(string text) => Waited.Add(text);
+
+        public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed)
         {
-            Steps.Add(label);
+            Asked.Add(label);
             Offered[label] = [.. options.Select(option => option.Detail)];
-            return Next(label) is { } answer ? options.Select(option => option.Name).ToList().IndexOf(answer[0]) : proposed;
+            if (!Next(label, out var answer))
+                return proposed;
+            return answer is null ? null : options.Select(option => option.Name).ToList().IndexOf(answer[0]);
         }
 
-        public IReadOnlyList<int> ChooseMany(string label, IReadOnlyList<string> options, IReadOnlyList<int> proposed, string whenNone)
+        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
         {
-            Steps.Add(label);
+            Asked.Add(label);
             Offered[label] = [.. options];
-            return Next(label) is { } answer ? [.. answer.Select(name => options.ToList().IndexOf(name)).Order()] : proposed;
+            if (!Next(label, out var answer))
+                return proposed;
+            return answer is null ? null : [.. answer.Select(name => options.ToList().IndexOf(name)).Order()];
         }
 
-        public string Ask(string label, string hint, string proposed, string whenEmpty, Func<string, string?> refuse)
+        public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse)
         {
-            Steps.Add(label);
+            Asked.Add(label);
             while (true)
             {
-                var answer = Next(label) is { } scripted ? scripted[0] : proposed;
-                if (refuse(answer) is null)
-                    return answer;
-                Refused.Add(answer);
+                var scripted = Next(label, out var answer);
+                if (scripted && answer is null)
+                    return null;
+
+                var text = scripted ? answer![0] : proposed;
+                if (refuse(text) is null)
+                    return text;
+                Refused.Add(text);
             }
         }
 
-        public bool Confirm(string question)
+        public BoardAnswer? AskBoard(BoardQuestion question)
         {
-            Steps.Add(question);
-            return Confirmed;
+            Asked.Add(question.Label);
+            Question = question;
+            if (boards.Count > 0)
+                return boards.Dequeue();
+            return question.Current is { } current ? new BoardAnswer.Existing(current.Address) : new BoardAnswer.None();
         }
 
-        public void Answered(string label, string value) => Steps.Add(label);
+        public bool? Confirm(string question)
+        {
+            Asked.Add(question);
+            BeforeConfirm?.Invoke();
+            return confirmations.Count > 0 ? confirmations.Dequeue() : true;
+        }
 
-        public void Say(SetupTone tone, string text) => Said.Add((tone, text));
+        Queue<string[]?> Script(string label)
+        {
+            if (!answers.TryGetValue(label, out var queue))
+                answers.Add(label, queue = new Queue<string[]?>());
+            return queue;
+        }
 
-        string[]? Next(string label) => answers.TryGetValue(label, out var queue) && queue.Count > 0 ? queue.Dequeue() : null;
+        // False when the script has nothing for the question; a null answer is going back.
+        bool Next(string label, out string[]? answer)
+        {
+            answer = null;
+            return answers.TryGetValue(label, out var queue) && queue.TryDequeue(out answer);
+        }
     }
 
     sealed class FakeMachine : ISetupEnvironment
@@ -298,22 +464,43 @@ public class ProjectSetupTests
 
         public bool TrackerReachable { get; set; } = true;
 
+        public string? Origin { get; set; } = "acme/rocket";
+
         public Task<SetupEnvironment> InspectAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new SetupEnvironment(Problems, TrackerReachable, "acme/rocket"));
+            Task.FromResult(new SetupEnvironment(Problems, TrackerReachable, Origin));
+    }
+
+    sealed class FakeBoards : ISetupBoards
+    {
+        public SetupBoards Read { get; set; } = SetupBoards.None;
+
+        // The repository the boards were read for; null when they were not read.
+        public string? Repository { get; private set; }
+
+        public Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
+        {
+            Repository = repository;
+            return Task.FromResult(Read);
+        }
     }
 
     sealed class FakeTracker : ISetupTracker
     {
-        public IReadOnlyList<Milestone> Milestones { get; set; } =
-            [new("v.0.3.0", null), new("v.0.2.0", new DateOnly(2030, 3, 1)), new("Polish", new DateOnly(2030, 1, 15))];
-
         public HashSet<string> Unreadable { get; } = [];
 
         public int Calls { get; private set; }
 
-        public Task<string?> RefuseRepositoryAsync(string repository, CancellationToken cancellationToken) => Task.FromResult(Refuse(repository));
+        public List<(SetupOwner Owner, string Title)> Made { get; } = [];
 
-        public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) => Task.FromResult(Refuse(board));
+        public List<(string Board, string Repository)> Linked { get; } = [];
+
+        public Action? OnConfirm { get; set; }
+
+        public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(Unreadable.Contains(board) ? $"{board} cannot be read" : null);
+        }
 
         public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken)
         {
@@ -321,16 +508,16 @@ public class ProjectSetupTests
             return Task.FromResult<IReadOnlyList<string>>(["bug", "draft", "feature", "manual"]);
         }
 
-        public Task<IReadOnlyList<Milestone>> ReadOpenMilestonesAsync(string repository, CancellationToken cancellationToken)
+        public Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)
         {
-            Calls++;
-            return Task.FromResult(Milestones);
+            Made.Add((owner, title));
+            return Task.FromResult($"https://github.com/orgs/{owner.Login}/projects/42");
         }
 
-        string? Refuse(string what)
+        public Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken)
         {
-            Calls++;
-            return Unreadable.Contains(what) ? $"{what} cannot be read" : null;
+            Linked.Add((board, repository));
+            return Task.CompletedTask;
         }
     }
 
@@ -353,9 +540,7 @@ public class ProjectSetupTests
         public void Save(ProjectSettings settings) => Saved = settings;
 
         public static string Render(ProjectSettings settings) => string.Join('\n',
-            $"repository = {settings.Tracker.Repository}",
             $"board = {settings.Tracker.Board}",
-            $"rule = {settings.Queue.Milestone.Rule} {settings.Queue.Milestone.Title}",
             $"blocking = {string.Join(", ", settings.Queue.Labels.Blocking)}",
             $"take = {string.Join(", ", settings.Queue.Labels.Take)}") + "\n";
     }

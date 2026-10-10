@@ -13,7 +13,6 @@ public static class SettingsToml
     static readonly (string Name, string Comment)[] Sections =
     [
         ("tracker", "Where the tasks are."),
-        ("queue.milestone", "Which milestone the tasks are taken from: lowest-version, earliest-due, fixed (with a title) or none."),
         ("queue.labels", "A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task."),
         ("assistant", "Who does the tasks."),
     ];
@@ -80,10 +79,7 @@ public static class SettingsToml
     [
         (SettingsKeys.Version, (long)ProjectSettings.SchemaVersion),
         (SettingsKeys.TrackerType, settings.Tracker.Type),
-        (SettingsKeys.TrackerRepository, settings.Tracker.Repository),
         (SettingsKeys.TrackerBoard, settings.Tracker.Board),
-        (SettingsKeys.MilestoneRule, SettingsKeys.NameOf(settings.Queue.Milestone.Rule)),
-        (SettingsKeys.MilestoneTitle, settings.Queue.Milestone.Title),
         (SettingsKeys.BlockingLabels, settings.Queue.Labels.Blocking),
         (SettingsKeys.TakeLabels, settings.Queue.Labels.Take),
         (SettingsKeys.AssistantType, settings.Assistant.Type),

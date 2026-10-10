@@ -11,5 +11,6 @@
     <Project Path="tests/TooBusy.Cli.Tests/TooBusy.Cli.Tests.csproj" />
     <Project Path="tests/TooBusy.Core.Tests/TooBusy.Core.Tests.csproj" />
     <Project Path="tests/TooBusy.Infrastructure.Tests/TooBusy.Infrastructure.Tests.csproj" />
+    <Project Path="tests/TooBusy.Trackers.GitHub.Tests/TooBusy.Trackers.GitHub.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,4 +1,3 @@
-using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Setup;
@@ -8,177 +7,300 @@ public enum SetupOutcome
     Written,
     NothingToChange,
     Declined,
+
+    // The user went back from the first step: the setup is left as if it never started.
+    Left,
 }
 
-// The steps of `toobusy init`: it asks what the settings need, shows what would change in the file, and saves it.
+// Answers are those the setup ended with, as the screen showed them.
+public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer> Answers);
+
+// The steps of `toobusy init`: it asks what the settings need, shows what would change, and on a yes makes it so.
 // With settings that exist every question proposes the current value, so that accepting them all changes nothing.
-public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environment, ISetupTracker tracker, ISettingsStore store)
+// From every step the user can go back to the one before; an answer that was given is proposed again.
+public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environment, ISetupTracker tracker, ISetupBoards boards, ISettingsStore store)
 {
-    public async Task<SetupOutcome> RunAsync(CancellationToken cancellationToken = default)
+    // The steps that are asked; the confirmation comes when they are all done.
+    static readonly string[] Steps = ["Project", "Blocking labels", "Labels to take"];
+
+    readonly List<SetupNote> notes = [];
+
+    ProjectSettings? current;
+    string repository = "";
+    bool verified;
+    SetupBoards known = SetupBoards.None;
+    IReadOnlyList<string>? labels;
+
+    // The answers so far; null is a step that was not answered yet.
+    BoardAnswer? board;
+    List<string>? blocking;
+    List<string>? take;
+
+    public async Task<SetupResult> RunAsync(CancellationToken cancellationToken = default)
     {
         var machine = await environment.InspectAsync(cancellationToken);
         foreach (var problem in machine.Problems)
         {
-            dialog.Say(SetupTone.Failure, problem.Text);
-            dialog.Say(SetupTone.Muted, $"fix: {problem.Fix}");
+            notes.Add(new SetupNote(SetupTone.Failure, problem.Text));
+            notes.Add(new SetupNote(SetupTone.Muted, $"fix: {problem.Fix}"));
         }
 
-        var verified = machine.TrackerReachable;
-        if (!verified)
-            dialog.Say(SetupTone.Warning, "GitHub cannot be read from here: the answers are taken as typed and nothing is verified.");
+        // The tasks are those of the repository the project is cloned from. Without it, as without the tracker,
+        // there is nothing to read the labels and the milestones from.
+        repository = machine.OriginRepository ?? "";
+        verified = machine.TrackerReachable && repository.Length > 0;
+        if (!machine.TrackerReachable)
+            notes.Add(new SetupNote(SetupTone.Warning, "GitHub cannot be read from here, so nothing is verified: your answers are taken as typed."));
+        else if (!verified)
+            notes.Add(new SetupNote(SetupTone.Warning, "The `origin` remote is not a GitHub repository, so nothing is verified: your answers are taken as typed."));
 
         var loaded = store.Load();
         if (loaded is { Settings: null })
         {
-            dialog.Say(SetupTone.Warning, "The settings that exist do not validate:");
-            foreach (var error in loaded.Errors)
-                dialog.Say(SetupTone.Failure, error.Describe(store.DisplayPath));
+            notes.Add(new SetupNote(SetupTone.Warning, "The settings that exist do not validate:"));
+            notes.AddRange(loaded.Errors.Select(error => new SetupNote(SetupTone.Failure, error.Describe(store.DisplayPath))));
         }
 
-        var current = loaded?.Settings;
-        dialog.Answered("Tracker", "GitHub");
-        var repository = await AskRepositoryAsync(current?.Tracker.Repository ?? machine.OriginRepository ?? "", verified, cancellationToken);
-        var board = await AskBoardAsync(current?.Tracker.Board ?? "", verified, cancellationToken);
-        var milestone = await AskMilestoneAsync(current?.Queue.Milestone, repository, verified, cancellationToken);
-        var labels = await AskLabelsAsync(current?.Queue.Labels, repository, verified, cancellationToken);
-        dialog.Answered("Assistant", "Claude Code");
+        current = loaded?.Settings;
+        if (machine.TrackerReachable)
+        {
+            Show(0);
+            dialog.Wait("Reading your projects from GitHub…");
+            known = await boards.ReadAsync(machine.OriginRepository, cancellationToken);
 
-        var settings = new ProjectSettings(
-            new TrackerSettings(SettingsKeys.GitHubTracker, repository, board),
-            new QueueSettings(milestone, labels),
-            new AssistantSettings(SettingsKeys.ClaudeCodeAssistant));
-        return Conclude(settings);
+            // A new board is proposed for the owner of the repository when the user can make one there.
+            known = known with { Owners = [.. known.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] };
+        }
+
+        var step = 0;
+        while (step >= 0)
+        {
+            bool answered;
+            switch (step)
+            {
+                case 0:
+                    answered = await AskBoardAsync(cancellationToken);
+                    break;
+                case 1:
+                    answered = await AskBlockingAsync(cancellationToken);
+                    break;
+                case 2:
+                    answered = await AskTakeAsync(cancellationToken);
+                    break;
+                default:
+                    if (await ConcludeAsync(cancellationToken) is { } outcome)
+                        return new SetupResult(outcome, Answers(Steps.Length));
+                    answered = false;
+                    break;
+            }
+
+            step += answered ? 1 : -1;
+        }
+
+        return new SetupResult(SetupOutcome.Left, []);
     }
 
-    async Task<string> AskRepositoryAsync(string proposed, bool verified, CancellationToken cancellationToken)
+    async Task<bool> AskBoardAsync(CancellationToken cancellationToken)
     {
+        SetupNote[] refused = [];
         while (true)
         {
-            var answer = RepositoryOf(dialog.Ask("Repository", "owner/name or a GitHub URL", proposed, "", text =>
-                SettingsValidator.IsRepository(RepositoryOf(text)) ? null : "this is neither `owner/name` nor a GitHub URL"));
-            if (!verified || await tracker.RefuseRepositoryAsync(answer, cancellationToken) is not { } reason)
-                return answer;
-            dialog.Say(SetupTone.Failure, reason);
-            proposed = answer;
+            // What the project has now: the board that was chosen a moment ago, the one of the settings,
+            // or one that is linked to the repository already.
+            var address = board switch
+            {
+                BoardAnswer.Existing existing => existing.Address,
+                null => current?.Tracker.Board ?? known.Boards.FirstOrDefault(known => known.Linked)?.Address,
+                _ => null,
+            };
+            var now = address is null ? null : Known(address) ?? new SetupBoard(address, "", false);
+
+            Show(0, refused);
+            var answer = dialog.AskBoard(new BoardQuestion(
+                "Project",
+                "The GitHub project of the tasks: their statuses are kept on its board.",
+                now,
+                known.Boards,
+                known.Owners,
+                text => SettingsValidator.IsBoard(BoardSuggestions.AddressOf(text)) ? null : "That is not a project. Use https://github.com/orgs/<org>/projects/<number>.",
+                title => string.IsNullOrWhiteSpace(title) ? "A project needs a title." : null));
+            if (answer is null)
+                return false;
+
+            if (answer is BoardAnswer.Existing chosen)
+            {
+                answer = chosen = new BoardAnswer.Existing(BoardSuggestions.AddressOf(chosen.Address));
+                if (verified && await tracker.RefuseBoardAsync(chosen.Address, cancellationToken) is { } reason)
+                {
+                    refused = [new SetupNote(SetupTone.Failure, reason)];
+                    continue;
+                }
+            }
+
+            board = answer;
+            return true;
         }
     }
 
-    async Task<string?> AskBoardAsync(string proposed, bool verified, CancellationToken cancellationToken)
+    async Task<bool> AskBlockingAsync(CancellationToken cancellationToken)
     {
-        while (true)
-        {
-            var answer = dialog.Ask("Board", "the URL of a GitHub Projects board; empty for none", proposed, "none", text =>
-                text.Trim().Length == 0 || SettingsValidator.IsBoard(text.Trim()) ? null : "this is not the URL of a GitHub Projects board").Trim();
-            if (answer.Length == 0)
-                return null;
-            if (!verified || await tracker.RefuseBoardAsync(answer, cancellationToken) is not { } reason)
-                return answer;
-            dialog.Say(SetupTone.Failure, reason);
-            proposed = answer;
-        }
-    }
-
-    async Task<MilestoneSettings> AskMilestoneAsync(MilestoneSettings? current, string repository, bool verified, CancellationToken cancellationToken)
-    {
-        IReadOnlyList<Milestone> open = verified ? await tracker.ReadOpenMilestonesAsync(repository, cancellationToken) : [];
-        string Now(MilestoneRule rule) => !verified
-            ? ""
-            : MilestoneRules.Choose(new MilestoneSettings(rule, null), open) is { } milestone ? $" → {milestone.Title}" : " → no open milestone fits";
-
-        MilestoneRule[] rules = [MilestoneRule.LowestVersion, MilestoneRule.EarliestDue, MilestoneRule.Fixed, MilestoneRule.None];
-        SetupOption[] options =
-        [
-            new(SettingsKeys.NameOf(MilestoneRule.LowestVersion), "the open milestone with the lowest version" + Now(MilestoneRule.LowestVersion)),
-            new(SettingsKeys.NameOf(MilestoneRule.EarliestDue), "the open milestone that is due first" + Now(MilestoneRule.EarliestDue)),
-            new(SettingsKeys.NameOf(MilestoneRule.Fixed), "one milestone that you name"),
-            new(SettingsKeys.NameOf(MilestoneRule.None), "no milestone: tasks of the whole repository"),
-        ];
-
-        var proposed = current?.Rule
-            ?? (open.Any(milestone => MilestoneRules.VersionOf(milestone.Title) is not null) ? MilestoneRule.LowestVersion
-                : open.Any(milestone => milestone.Due is not null) ? MilestoneRule.EarliestDue
-                : MilestoneRule.None);
-        var rule = rules[dialog.Choose("Milestone rule", options, Array.IndexOf(rules, proposed))];
-        if (rule != MilestoneRule.Fixed)
-            return new MilestoneSettings(rule, null);
-
-        if (open.Count == 0)
-        {
-            var typed = dialog.Ask("Milestone", "the title of the milestone", current?.Title ?? "", "", text =>
-                string.IsNullOrWhiteSpace(text) ? "the `fixed` rule needs the title of its milestone" : null);
-            return new MilestoneSettings(rule, typed.Trim());
-        }
-
-        var titles = open.Select(milestone => milestone.Title).ToList();
-        var chosen = dialog.Choose(
-            "Milestone",
-            [.. open.Select(milestone => new SetupOption(milestone.Title, milestone.Due is { } due ? $"due {due:yyyy-MM-dd}" : ""))],
-            Math.Max(0, titles.IndexOf(current?.Title ?? "")));
-        return new MilestoneSettings(rule, titles[chosen]);
-    }
-
-    async Task<LabelSettings> AskLabelsAsync(LabelSettings? current, string repository, bool verified, CancellationToken cancellationToken)
-    {
+        var proposed = blocking ?? current?.Queue.Labels.Blocking ?? [];
         if (!verified)
         {
-            var typedBlocking = Names(dialog.Ask("Blocking labels", "names separated by commas; a task with any of them is never taken",
-                string.Join(", ", current?.Blocking ?? []), "none", _ => null));
-            var typedTake = Names(dialog.Ask("Labels to take", "names separated by commas; empty means any task",
-                string.Join(", ", current?.Take ?? []), "any task", text =>
-                    Names(text).Intersect(typedBlocking, StringComparer.OrdinalIgnoreCase).FirstOrDefault() is { } shared ? $"`{shared}` is a blocking label" : null));
-            return new LabelSettings(typedBlocking, typedTake);
+            Show(1);
+            var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", proposed), _ => null);
+            if (typed is not null)
+                blocking = Names(typed);
+            return typed is not null;
         }
 
-        // Labels of the settings stay among the choices even when the repository lost them:
-        // accepting what is proposed must not change the file.
-        var known = await tracker.ReadLabelsAsync(repository, cancellationToken);
-        var all = known.Concat(current?.Blocking ?? []).Concat(current?.Take ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var blocking = Pick("Blocking labels", all, current?.Blocking ?? [], "none");
-        var rest = all.Except(blocking, StringComparer.OrdinalIgnoreCase).ToList();
-        var take = Pick("Labels to take", rest, current?.Take ?? [], "any task");
-        return new LabelSettings(blocking, take);
+        var all = await AllLabelsAsync(1, cancellationToken);
+        Show(1);
+        var picked = dialog.ChooseMany("Blocking labels", "Tasks with any of these labels are never taken. Choose none to block nothing.", all, Indexes(all, proposed));
+        if (picked is not null)
+            blocking = [.. picked.Select(index => all[index])];
+        return picked is not null;
     }
 
-    List<string> Pick(string label, List<string> options, IReadOnlyList<string> current, string whenNone)
+    async Task<bool> AskTakeAsync(CancellationToken cancellationToken)
     {
-        var proposed = Enumerable.Range(0, options.Count).Where(index => current.Contains(options[index], StringComparer.OrdinalIgnoreCase)).ToList();
-        return [.. dialog.ChooseMany(label, options, proposed, whenNone).Select(index => options[index])];
-    }
-
-    SetupOutcome Conclude(ProjectSettings settings)
-    {
-        var preview = store.Preview(settings);
-        if (preview.Before == preview.After)
+        var proposed = take ?? current?.Queue.Labels.Take ?? [];
+        if (!verified)
         {
-            dialog.Say(SetupTone.Plain, "Nothing to change");
-            return SetupOutcome.NothingToChange;
+            Show(2);
+            var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", proposed), text =>
+                Names(text).Intersect(blocking!, StringComparer.OrdinalIgnoreCase).FirstOrDefault() is { } shared ? $"{shared} is a blocking label." : null);
+            if (typed is not null)
+                take = Names(typed);
+            return typed is not null;
         }
 
-        dialog.Say(SetupTone.Plain, "");
-        dialog.Say(SetupTone.Plain, preview.Before.Length == 0 ? $"New file {store.DisplayPath}:" : $"Changes in {store.DisplayPath}:");
-        foreach (var line in LineDiff.Changes(preview.Before, preview.After))
-            dialog.Say(line.Added ? SetupTone.Added : SetupTone.Removed, $"{(line.Added ? '+' : '-')} {line.Text}".TrimEnd());
-        dialog.Say(SetupTone.Plain, "");
+        var rest = (await AllLabelsAsync(2, cancellationToken)).Except(blocking!, StringComparer.OrdinalIgnoreCase).ToList();
+        Show(2);
+        var picked = dialog.ChooseMany("Labels to take", "Only tasks with one of these labels are taken. Choose none to take any task.", rest, Indexes(rest, proposed));
+        if (picked is not null)
+            take = [.. picked.Select(index => rest[index])];
+        return picked is not null;
+    }
 
-        if (!dialog.Confirm("Write the settings?"))
+    // Labels of the settings stay among the choices even when the repository lost them:
+    // accepting what is proposed must not change the file.
+    async Task<List<string>> AllLabelsAsync(int step, CancellationToken cancellationToken)
+    {
+        if (labels is null)
+        {
+            Show(step);
+            dialog.Wait("Reading the labels…");
+            labels = await tracker.ReadLabelsAsync(repository, cancellationToken);
+        }
+
+        return [.. labels.Concat(current?.Queue.Labels.Blocking ?? []).Concat(current?.Queue.Labels.Take ?? []).Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    // Shows what a yes would do and, on a yes, does it. Null is going back.
+    async Task<SetupOutcome?> ConcludeAsync(CancellationToken cancellationToken)
+    {
+        // The address of a board that is not made yet stands for it in the file that is shown.
+        var made = board as BoardAnswer.Created;
+        var unmade = made is null ? null : $"https://github.com/{(made.Owner.Organisation ? "orgs" : "users")}/{made.Owner.Login}/projects/0";
+        var address = board is BoardAnswer.Existing existing ? existing.Address : unmade;
+        var linking = verified && address is not null && Known(address) is not { Linked: true };
+
+        var preview = store.Preview(Settings(address));
+        var writing = preview.Before != preview.After;
+        if (!writing && !linking)
+            return SetupOutcome.NothingToChange;
+
+        // What a yes will do, in the words of the questions: a first setup writes what was answered, and a setup
+        // that exists says what changes in it, each setting as it was and as it will be.
+        var coming = new List<SetupNote>();
+        var changes = current is null ? [] : Changes(current, address, made);
+        if (writing && changes.Count > 0)
+        {
+            coming.Add(new SetupNote(SetupTone.Plain, $"This will change in {store.DisplayPath}:"));
+            coming.AddRange(changes.Select(change => new SetupNote(SetupTone.Change, change)));
+        }
+        else if (writing)
+        {
+            coming.Add(new SetupNote(SetupTone.Plain, $"The answers above will be written to {store.DisplayPath}."));
+        }
+
+        if (made is not null)
+            coming.Add(new SetupNote(SetupTone.Plain, $"The project “{made.Title}” will be made for {made.Owner.Login}."));
+        if (linking)
+            coming.Add(new SetupNote(SetupTone.Plain, $"The project will be linked to {repository}."));
+
+        Show(Steps.Length, coming);
+        if (dialog.Confirm(writing ? "Write the settings?" : "Link the project?") is not { } yes)
+            return null;
+        if (!yes)
             return SetupOutcome.Declined;
-        store.Save(settings);
+
+        if (made is not null)
+            address = await tracker.CreateBoardAsync(made.Owner, made.Title, cancellationToken);
+
+        if (linking)
+            await tracker.LinkBoardAsync(address!, repository, cancellationToken);
+        if (writing)
+            store.Save(Settings(address));
         return SetupOutcome.Written;
     }
 
-    // `owner/name` out of what people paste: the address of the repository's page or of its clone.
-    static string RepositoryOf(string answer)
+    // The settings that differ from those that exist, each as `name: before → after`.
+    List<string> Changes(ProjectSettings before, string? address, BoardAnswer.Created? made)
     {
-        var text = answer.Trim();
-        foreach (var prefix in (string[])["https://github.com/", "http://github.com/", "ssh://git@github.com/", "git@github.com:"])
+        static string Labels(IReadOnlyList<string> labels, string none) => labels.Count == 0 ? none : string.Join(", ", labels);
+
+        (string Name, string Before, string After)[] settings =
+        [
+            ("Project", Board(before.Tracker.Board), made is null ? Board(address) : $"new: {made.Title} ({made.Owner.Login})"),
+            ("Blocking labels", Labels(before.Queue.Labels.Blocking, "none"), Labels(blocking!, "none")),
+            ("Labels to take", Labels(before.Queue.Labels.Take, "any task"), Labels(take!, "any task")),
+        ];
+        return [.. settings.Where(setting => setting.Before != setting.After).Select(setting => $"{setting.Name}: {setting.Before} → {setting.After}")];
+    }
+
+    // A board as people know it: by its title when it is known, with its address.
+    string Board(string? address) =>
+        address is null ? "none" : Known(address) is { Title.Length: > 0 } named ? $"{named.Title}  {named.Address}" : address;
+
+    ProjectSettings Settings(string? address) => new(
+        new TrackerSettings(SettingsKeys.GitHubTracker, address),
+        new QueueSettings(new LabelSettings(blocking!, take!)),
+        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant));
+
+    void Show(int step, IReadOnlyList<SetupNote>? more = null) =>
+        dialog.Show(new SetupProgress([.. notes, .. more ?? []], Answers(step), Steps, step));
+
+    // The answers of the steps before the given one, with the two that are never asked around them.
+    List<SetupAnswer> Answers(int step)
+    {
+        var answers = new List<SetupAnswer> { new("Tracker", "GitHub") };
+        if (step > 0)
         {
-            if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                text = text[prefix.Length..];
+            answers.Add(new SetupAnswer("Project", board switch
+            {
+                BoardAnswer.Existing existing => Board(existing.Address),
+                BoardAnswer.Created made => $"new: {made.Title} ({made.Owner.Login})",
+                _ => "none",
+            }));
         }
 
-        text = text.TrimEnd('/');
-        return text.EndsWith(".git", StringComparison.Ordinal) ? text[..^4] : text;
+        if (step > 1)
+            answers.Add(new SetupAnswer("Blocking labels", blocking!.Count == 0 ? "none" : string.Join(", ", blocking)));
+        if (step > 2)
+        {
+            answers.Add(new SetupAnswer("Labels to take", take!.Count == 0 ? "any task" : string.Join(", ", take)));
+            answers.Add(new SetupAnswer("Assistant", "Claude Code"));
+        }
+
+        return answers;
     }
+
+    SetupBoard? Known(string address) => known.Boards.FirstOrDefault(board => board.Address.Equals(address, StringComparison.OrdinalIgnoreCase));
+
+    static List<int> Indexes(List<string> options, IReadOnlyList<string> chosen) =>
+        [.. Enumerable.Range(0, options.Count).Where(index => chosen.Contains(options[index], StringComparer.OrdinalIgnoreCase))];
 
     static List<string> Names(string text) =>
         [.. text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase)];

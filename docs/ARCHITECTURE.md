@@ -16,6 +16,7 @@ tests/
   TooBusy.Cli.Tests/
   TooBusy.Core.Tests/
   TooBusy.Infrastructure.Tests/
+  TooBusy.Trackers.GitHub.Tests/
 ```
 
 A test project is added together with the first code of the project it tests.
@@ -37,7 +38,7 @@ A test project is added together with the first code of the project it tests.
 | Task tracker | reading the queue, changing a task's labels and status, commenting | `TooBusy.Trackers.GitHub` |
 | Assistant | starting, polling, resuming and stopping a session; reading its activity and its limits | `TooBusy.Assistants.ClaudeCode` |
 | Workspace | the state of the working copy: branch, changes, sync with the remote | `TooBusy.Infrastructure` |
-| Process runner | running a command with a timeout, retries and cancellation | `TooBusy.Infrastructure` |
+| Process runner | running a command with a timeout and cancellation; retries when something needs them | `ProcessRunner` in `TooBusy.Infrastructure`, behind `IProcessRunner` |
 | System services | keeping the machine awake, notifications, the clock | `TooBusy.Infrastructure` |
 
 Core is tested with hand-written fakes of these ports. A dry run is such a fake offered to the user: imitated tracker and sessions behind the same ports.
@@ -60,22 +61,32 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 
 | Port | What it hides | Implementations |
 |---|---|---|
-| `ISetupDialog` | asking: a selection, a multiple choice, a text prompt, a confirmation; and saying | `TerminalDialog` in `TooBusy.Cli`; a scripted one in the tests |
-| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | imitated only, until `doctor` brings the real checks |
-| `ISetupTracker` | whether a repository and a board can be read, the labels, the open milestones | imitated only, until `doctor` brings the reading of GitHub |
+| `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation. Every question can be gone back from | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests |
+| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | imitated only, until `doctor` brings the real checks; the `origin` it gives is the real one, read by `GitOrigin` in `TooBusy.Infrastructure` |
+| `ISetupTracker` | whether a board can be read, the labels; making a board and linking one to the repository | imitated only, until `doctor` brings the reading of GitHub |
+| `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
 | `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
 
-`TooBusy.Core/Queue` holds the milestone rules (`MilestoneRules`), which the setup uses to show what each rule would choose now.
+`TooBusy.Core/Queue` holds the milestone rules (`MilestoneRules`): which of the open milestones is the current one. The setup does not ask for the rule and the settings do not hold it; a run will choose it.
 
-`init --dry-run` is the real steps and the real terminal over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels and milestones, and a settings file that is read and never written.
+`ProjectSetup` is a walk over its steps: an answer moves it forward, going back from a question moves it to the step before, and going back from the first one leaves the setup. It keeps the answers, so that a step that is asked again proposes what was answered. Nothing is changed before the last step is confirmed; a new board is an answer like any other until then.
+
+The setup never asks for the repository: `ISetupEnvironment` gives the one of the `origin` remote, and the labels are read from it. `BoardSuggestions` is what the question about the board does with a typed text: it finds the boards that fit it and turns the address of any page of a project into the address of its board.
+
+`init --dry-run` is the real steps and the real screen over the imitations in `TooBusy.Cli/Imitation`: a machine where everything is installed, a tracker with made-up labels that makes and links nothing, and a settings file that is read and never written. The `origin` remote and the boards are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards are added after the real ones until there are enough to scroll.
 
 ## Terminal
 
 `TooBusy.Cli/Terminal` is everything that knows it talks to a terminal.
 
 - `Palette` is the one place that defines colours: the accent, the error, success, the warning and muted text, each for a dark and a light terminal in truecolor, and as one of the sixteen colours for a terminal that does not announce truecolor. `Palette.Detect` gives the palette without colours when `NO_COLOR` is set or the stream is not a terminal. Commands never write an escape sequence of a colour themselves.
-- `TerminalDialog` draws the three prompts by hand: a prompt is redrawn in place by moving the cursor up and clearing to the end of the screen, and an answered one is replaced by a single line. Spectre.Console was the first candidate and was not taken: its prompts leave their own lines behind, and the setup needs every answered question to collapse into the same `✔ label value` line.
-- `CliContext` carries the folder, the streams, their palettes and the reading of keys into the commands, so that tests run them with string writers and scripted keys.
+- `TerminalDevice` is the terminal as a screen needs it: its keys, its size, taking Ctrl+C as a key, watching the size of the window, and a timer.
+- `Screen` is the alternate screen. It draws a frame whole every time: the bar with the title and the status, the body, the question, the choice and the keys with a rule between them, and the foot, each line cut to the width. What waits for the user is drawn by the screen and blinks: the chosen line of the choice and the block where a text is typed. `Pulse` counts the beats, eighty milliseconds each, and rewrites only that line and that cell in the shade of the moment; drawing a frame does not start the count again. The foot is wrapped to the width, never cut. `TerminalDevice.Every` is the timer behind it, so that tests move the pulse by hand. It keeps the last frame to draw it again when the size changes.
+- `Page` is what every screen of the tool shares: it opens and closes the screen, puts the body, the status and the foot it is given around the question of the moment, and reads the keys. Ctrl+C twice in a row throws `OperationCanceledException`, which the command that opened the page catches. While more keys are waiting, as in a paste, it does not draw.
+- `SetupScreen` is the setup on a page and `RunScreen` the run with its commands. Every list of the setup is made of the same row: a pointer, a name, what explains it and what is to be noticed about it. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
+- `CliContext` carries the folder, the streams, their palettes, the terminal device and the process runner into the commands, so that tests run them with string writers, scripted keys and a faked `git` and `gh`.
+
+The screens are drawn by hand with the escape sequences every terminal knows. Spectre.Console was the first candidate and was not taken: the setup needs the whole window, with a panel that stays at its bottom, and its prompts write below one another.
 
 ## Adding a tracker or an assistant
 

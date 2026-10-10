@@ -6,8 +6,8 @@ namespace TooBusy.Infrastructure.Tests;
 public sealed class SettingsFileTests : IDisposable
 {
     static readonly ProjectSettings Settings = new(
-        new TrackerSettings("github", "bitpatch/toobusy", null),
-        new QueueSettings(new MilestoneSettings(MilestoneRule.None, null), new LabelSettings(["manual"], [])),
+        new TrackerSettings("github", null),
+        new QueueSettings(new LabelSettings(["manual"], [])),
         new AssistantSettings("claude-code"));
 
     readonly DirectoryInfo folder = Directory.CreateTempSubdirectory("toobusy-settings-");
@@ -42,11 +42,11 @@ public sealed class SettingsFileTests : IDisposable
         file.Save(Settings);
         File.WriteAllText(file.Path, File.ReadAllText(file.Path).Replace("[\"manual\"]", "[\"manual\"]  # by hand", StringComparison.Ordinal));
 
-        file.Save(Settings with { Tracker = Settings.Tracker with { Repository = "bitpatch/other" } });
+        file.Save(Settings with { Tracker = Settings.Tracker with { Board = "https://github.com/orgs/bitpatch/projects/9" } });
 
         var text = File.ReadAllText(file.Path);
         Assert.Contains("blocking = [\"manual\"]  # by hand", text, StringComparison.Ordinal);
-        Assert.Contains("repository = \"bitpatch/other\"", text, StringComparison.Ordinal);
+        Assert.Contains("board = \"https://github.com/orgs/bitpatch/projects/9\"", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,5 +1,4 @@
 using TooBusy.Core.Queue;
-using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
 
