@@ -28,8 +28,8 @@ public sealed class HomeScreenTests : IDisposable
                Assistant  own model · high
                Milestone  v0.3.0
                Settings
-               Exit
-             ↑↓ move · enter choose · esc exit · ctrl+c exit
+               Exit       esc
+             ↑↓ move · enter choose · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
         terminal.AssertSaw(" ❯ Run        5 tasks\n   Assistant  own model · high");
     }

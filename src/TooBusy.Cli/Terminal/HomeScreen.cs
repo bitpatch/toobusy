@@ -30,18 +30,19 @@ public static class HomeScreen
     // `assistant` is the chosen model and effort, and `milestone` the chosen milestone, in a few words. `Run` says
     // how many tasks a run would take: while they are counted the dots of a wait run there and Enter does nothing,
     // and it does not open a run that would take none either: it counts again, for what has changed meanwhile.
-    // Escape, asked twice, is the same as `Exit`.
+    // Escape, asked twice, is the same as `Exit`: the row names the key at its right, as `Back` does, so the keys of
+    // the page do not name it again.
     public static async Task<HomeAction> AskAsync(Page page, string assistant, string milestone, TaskCount tasks)
     {
         page.EscapeLeaves = true;
-        page.Keys = "esc exit";
+        page.Keys = "";
         IReadOnlyList<Choice> Choices() =>
         [
             Run(tasks.Counting),
             new("Assistant", Note: assistant),
             new("Milestone", Note: milestone),
             new("Settings"),
-            new("Exit"),
+            new("Exit", Picker.BackKey),
         ];
 
         var picked = await Picker.PickAsync(page, [Line.Of("What to do", Tone.Strong)], Choices, () => tasks.Counting, _ =>

@@ -212,7 +212,7 @@ Without `--yes` the options are the proposed answers of the interactive setup. W
 
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
 
-- **`Back`.** Wherever Escape goes back and does not leave the page, a list ends with a row `Back` that does what Escape does: in the lists the menu opens and in the steps of a setup opened from it, in a selection, a multiple choice, a confirmation and the lists of the boards. Where Escape would leave the page there is no `Back`: in the menu, which has `Exit`, in the first question of `init`, on the first run and in `toobusy milestone`, `model` and `effort`. A page that waits for the tracker has it under its dots. A question that is answered with a text has no list to end with it, and a list of the boards that a filter has emptied has none either; Escape goes back from them. The row names its key at its right, `Back  esc`, and the line of the keys does not say `esc back` then: it says so only where there is no such row. Where Escape leaves the page, the keys go on saying `esc exit`.
+- **`Back`.** Wherever Escape goes back and does not leave the page, a list ends with a row `Back` that does what Escape does: in the lists the menu opens and in the steps of a setup opened from it, in a selection, a multiple choice, a confirmation and the lists of the boards. Where Escape would leave the page there is no `Back`: in the menu, which has `Exit`, in the first question of `init`, on the first run and in `toobusy milestone`, `model` and `effort`. A page that waits for the tracker has it under its dots. A question that is answered with a text has no list to end with it, and a list of the boards that a filter has emptied has none either; Escape goes back from them. The row names its key at its right, `Back  esc`, and the line of the keys does not say `esc back` then: it says so only where there is no such row. Where Escape leaves the page, the keys go on saying `esc exit`, except in the menu, whose `Exit` row names the key at its right in the same way: `Exit  esc`.
 - A selection moves with Up and Down, a multiple choice marks with the space bar, and the last question of a setup is `Save and exit` over `Exit without saving`. A list that does not fit shows eight rows, five for the boards, and says above and below how many rows are beyond them: `↑ 2 more`, `↓ 4 more`.
 - A text is edited where the cursor is: Left, Right, Home and End move it, Backspace and Delete remove a character, and Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W do what they do in a shell. A pasted text is drawn once.
 
@@ -270,9 +270,9 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
    Assistant  opus · high
    Milestone  v0.3.0
    Settings
-   Exit
+   Exit       esc
  ────────────────────────────────────────────────────────────
- ↑↓ move · enter choose · esc exit · ctrl+c exit
+ ↑↓ move · enter choose · ctrl+c exit
 ```
 
 | Choice | Opens |

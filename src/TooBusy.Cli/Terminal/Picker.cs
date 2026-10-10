@@ -13,7 +13,8 @@ public static class Picker
     public const int Rows = 8;
 
     // The last row of every list that there is somewhere to go back from, and the key that does what the row does:
-    // the row names it at its right, so the keys of the page do not name it again.
+    // the row names it at its right, so the keys of the page do not name it again. The `Exit` of the menu, which
+    // Escape does the same as, names it in the same way.
     public const string Back = "Back";
     public const string BackKey = "esc";
 
