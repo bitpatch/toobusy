@@ -205,21 +205,21 @@ public sealed class PageTests : IDisposable
         var palette = Palette.Dark;
         using var page = terminal.Open(palette: palette);
 
-        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••", Tone.Muted)], "", waiting: 1);
+        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••••••", Tone.Muted)], "", waiting: 1);
 
-        Assert.Equal([" Reading the milestones", " •••••••"], terminal.Frame[8..10]);
+        Assert.Equal([" Reading the milestones", " •••••••••••"], terminal.Frame[8..10]);
         Assert.EndsWith("\u001b[10;2H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
 
         // The light is on the first dot, in the accent, and the last one is in the colour of the rest.
         Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 0), StringComparison.Ordinal);
         Assert.EndsWith(palette.Muted("•"), Dots(palette, 0), StringComparison.Ordinal);
 
-        Tick(12);
-        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 12), terminal.Output.ToString(), StringComparison.Ordinal);
-        Assert.EndsWith(palette.Spark("•", 1), Dots(palette, 12), StringComparison.Ordinal);
-        Tick(12);
-        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 24), terminal.Output.ToString(), StringComparison.Ordinal);
-        Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 24), StringComparison.Ordinal);
+        Tick(20);
+        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 20), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(palette.Spark("•", 1), Dots(palette, 20), StringComparison.Ordinal);
+        Tick(20);
+        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 40), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 40), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
     }
 
@@ -229,7 +229,7 @@ public sealed class PageTests : IDisposable
         var palette = Palette.Dark;
         using var page = terminal.Open(palette: palette);
 
-        page.Draw([], [new Line(new Part("❯ Run", Tone.Muted), new Part("  •••••••", Tone.Muted)), Line.Of("  Exit")], "", waiting: 0);
+        page.Draw([], [new Line(new Part("❯ Run", Tone.Muted), new Part("  •••••••••••", Tone.Muted)), Line.Of("  Exit")], "", waiting: 0);
 
         // The light runs along the dots only: they start seven columns into the line.
         Assert.EndsWith("\u001b[9;9H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
@@ -241,10 +241,10 @@ public sealed class PageTests : IDisposable
         var palette = Palette.Dark;
         using var page = terminal.Open(palette: palette);
 
-        page.Draw([Line.Of("#3 Export the data · 1:24"), Line.Of("•••••••", Tone.Muted)], [Line.Of("/")], "", new Caret(0, 1), running: 1);
+        page.Draw([Line.Of("#3 Export the data · 1:24"), Line.Of("•••••••••••", Tone.Muted)], [Line.Of("/")], "", new Caret(0, 1), running: 1);
 
         // The light runs along the second line of the question, and the cursor of the line that is typed in stays.
-        var dots = Array.IndexOf(terminal.Frame, " •••••••");
+        var dots = Array.IndexOf(terminal.Frame, " •••••••••••");
         Assert.Equal(" #3 Export the data · 1:24", terminal.Frame[dots - 1]);
         Assert.EndsWith(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"\u001b[{dots + 1};2H") + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Contains(palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
@@ -295,29 +295,29 @@ public sealed class PageTests : IDisposable
 
         Assert.Equal(1, glows[3]);
         Assert.True(glows[3] > glows[2] && glows[2] > glows[1] && glows[1] > glows[0] && glows[0] > 0);
-        Assert.Equal([0, 0, 0], glows[4..]);
+        Assert.All(glows[4..], glow => Assert.Equal(0, glow));
     }
 
     [Fact]
     public void TheLightTurnsAtTheLastDotWithItsTrailStillBehindIt()
     {
-        // Two beats after the turn the light is on the sixth dot again, and the fifth one still fades from the way there.
-        Assert.Equal(1, Screen.Spark(5, Screen.Dots, 14));
-        Assert.True(Screen.Spark(6, Screen.Dots, 14) > Screen.Spark(4, Screen.Dots, 14));
-        Assert.True(Screen.Spark(4, Screen.Dots, 14) > 0);
+        // Two beats after the turn the light is on the tenth dot again, and the ninth one still fades from the way there.
+        Assert.Equal(1, Screen.Spark(9, Screen.Dots, 22));
+        Assert.True(Screen.Spark(10, Screen.Dots, 22) > Screen.Spark(8, Screen.Dots, 22));
+        Assert.True(Screen.Spark(8, Screen.Dots, 22) > 0);
     }
 
     [Fact]
     public void WithoutColoursTheDotsStandStill()
     {
         using var page = terminal.Open();
-        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••", Tone.Muted)], "", waiting: 1);
+        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••••••", Tone.Muted)], "", waiting: 1);
         var waiting = terminal.Output.ToString();
 
         terminal.Tick!();
 
         Assert.Equal(waiting, terminal.Output.ToString());
-        Assert.Contains(" •••••••", terminal.Frame);
+        Assert.Contains(" •••••••••••", terminal.Frame);
     }
 
     [Fact]
@@ -329,7 +329,7 @@ public sealed class PageTests : IDisposable
 
         Assert.True(done);
         Assert.Equal("read", value);
-        Assert.Equal([" Reading the milestones", " •••••••", " ❯ Back  esc", Rule, " enter choose · ctrl+c exit"], terminal.Frame[^5..]);
+        Assert.Equal([" Reading the milestones", " •••••••••••", " ❯ Back  esc", Rule, " enter choose · ctrl+c exit"], terminal.Frame[^5..]);
     }
 
     [Theory]

@@ -38,7 +38,7 @@ public sealed class SetupScreenTests : IDisposable
             [new SetupAnswer("Tracker", "GitHub"), new SetupAnswer("Project", "none")],
             ["Project", "Milestone", "Write"],
             1));
-        await screen.WaitAsync("Reading the milestones", _ => Task.FromResult("read"), TestContext.Current.CancellationToken);
+        await screen.WaitAsync("Milestone", "The milestone of the tasks.", "Reading the milestones", _ => Task.FromResult("read"), TestContext.Current.CancellationToken);
 
         Assert.Equal(
             [
@@ -48,11 +48,13 @@ public sealed class SetupScreenTests : IDisposable
                 " ! nothing is verified",
                 " ✘ gh is missing",
                 "   → Project: none → Rocket",
+                " Milestone",
+                " The milestone of the tasks.",
                 " Reading the milestones",
-                " •••••••",
+                " •••••••••••",
                 " ❯ Back  esc",
             ],
-            terminal.Text.Split('\n').Take(9));
+            terminal.Text.Split('\n').Take(11));
         Assert.Equal([" enter choose · ctrl+c exit", "", " ●──◉──○"], terminal.Frame[^3..]);
     }
 
@@ -60,7 +62,7 @@ public sealed class SetupScreenTests : IDisposable
     public async Task WhenOnlyTheConfirmationIsLeftEveryStepIsDone()
     {
         screen.Show(new SetupProgress([], [], ["Project", "Blocking labels", "Labels to take"], 3));
-        await screen.WaitAsync("…", _ => Task.FromResult("read"), TestContext.Current.CancellationToken);
+        await screen.WaitAsync("Project", "The project.", "…", _ => Task.FromResult("read"), TestContext.Current.CancellationToken);
 
         Assert.Equal(" ●──●──●", terminal.Frame[^1]);
     }

@@ -26,6 +26,12 @@ public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer
 public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environment, ISetupTracker tracker, ISetupBoards boards, ISettingsStore store)
 {
     // The steps that are asked; the confirmation comes when they are all done.
+    const string ProjectLabel = "Project";
+    const string ProjectHint = "The GitHub project of the tasks: their statuses are kept on its board.";
+    const string BlockingLabel = "Blocking labels";
+    const string BlockingHint = "Tasks with any of these labels are never taken. Choose none to block nothing.";
+    const string TakeLabel = "Labels to take";
+    const string TakeHint = "Only tasks with one of these labels are taken. Choose none to take any task.";
     const string OwnerLabel = "Owner's label";
     const string InterruptLabel = "Interrupt label";
 
@@ -36,7 +42,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
     const string ProposedOwner = "needs-owner";
     const string ProposedInterrupted = "interrupted";
 
-    static readonly string[] Steps = ["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel];
+    static readonly string[] Steps = [ProjectLabel, BlockingLabel, TakeLabel, OwnerLabel, InterruptLabel];
 
     readonly List<SetupNote> notes = [];
 
@@ -85,7 +91,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         if (machine.TrackerReachable)
         {
             Show(0);
-            if (await dialog.WaitAsync("Reading your projects from GitHub", stopping => boards.ReadAsync(machine.OriginRepository, stopping), cancellationToken) is not { } read)
+            if (await dialog.WaitAsync(ProjectLabel, ProjectHint, "Reading your projects from GitHub", stopping => boards.ReadAsync(machine.OriginRepository, stopping), cancellationToken) is not { } read)
                 return new SetupResult(SetupOutcome.Left, []);
             known = read;
 
@@ -144,8 +150,8 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
             Show(0, refused);
             var answer = dialog.AskBoard(new BoardQuestion(
-                "Project",
-                "The GitHub project of the tasks: their statuses are kept on its board.",
+                ProjectLabel,
+                ProjectHint,
                 now,
                 known.Boards,
                 known.Owners,
@@ -181,10 +187,10 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
             return typed is not null;
         }
 
-        if (await AllLabelsAsync(1, cancellationToken) is not { } all)
+        if (await AllLabelsAsync(1, BlockingLabel, BlockingHint, cancellationToken) is not { } all)
             return false;
         Show(1);
-        var picked = dialog.ChooseMany("Blocking labels", "Tasks with any of these labels are never taken. Choose none to block nothing.", all, Indexes(all, proposed));
+        var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, all, Indexes(all, proposed));
         if (picked is not null)
             blocking = [.. picked.Select(index => all[index])];
         return picked is not null;
@@ -203,11 +209,11 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
             return typed is not null;
         }
 
-        if (await AllLabelsAsync(2, cancellationToken) is not { } all)
+        if (await AllLabelsAsync(2, TakeLabel, TakeHint, cancellationToken) is not { } all)
             return false;
         var rest = all.Except(blocking!, StringComparer.OrdinalIgnoreCase).ToList();
         Show(2);
-        var picked = dialog.ChooseMany("Labels to take", "Only tasks with one of these labels are taken. Choose none to take any task.", rest, Indexes(rest, proposed));
+        var picked = dialog.ChooseMany(TakeLabel, TakeHint, rest, Indexes(rest, proposed));
         if (picked is not null)
             take = [.. picked.Select(index => rest[index])];
         return picked is not null;
@@ -250,7 +256,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
             return typed is not null;
         }
 
-        if (await AllLabelsAsync(step, cancellationToken) is not { } all)
+        if (await AllLabelsAsync(step, label, hint, cancellationToken) is not { } all)
             return false;
         var offered = all.Where(name => refuse(name) is null).ToList();
         while (true)
@@ -278,12 +284,12 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
     // Labels of the settings stay among the choices even when the repository lost them:
     // accepting what is proposed must not change the file. Null when the user went back instead of waiting for
     // the labels to be read.
-    async Task<List<string>?> AllLabelsAsync(int step, CancellationToken cancellationToken)
+    async Task<List<string>?> AllLabelsAsync(int step, string label, string hint, CancellationToken cancellationToken)
     {
         if (labels is null)
         {
             Show(step);
-            labels = await dialog.WaitAsync("Reading the labels", stopping => tracker.ReadLabelsAsync(repository, stopping), cancellationToken);
+            labels = await dialog.WaitAsync(label, hint, "Reading the labels", stopping => tracker.ReadLabelsAsync(repository, stopping), cancellationToken);
             if (labels is null)
                 return null;
         }

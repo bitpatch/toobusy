@@ -105,13 +105,14 @@ public sealed class Page : IDisposable
     // the work gives. The user does not have to wait: where there is somewhere to go back to, `Back` stands under
     // the dots from the first moment, and Enter or Escape goes back; where Escape leaves the page it does so here
     // too, asked twice, and so does Ctrl+C. `Done` is false when the user did not wait: the work is told to stop
-    // then, and nobody waits for it.
-    public async Task<(bool Done, T? Value)> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    // then, and nobody waits for it. `question` is what the wait is for, when the page has it to say: it stands over
+    // the wait as it will stand over the choice.
+    public async Task<(bool Done, T? Value)> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken, IReadOnlyList<Line>? question = null)
     {
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var back = Picker.GoesBack(this);
         void Show() => Draw(
-            [],
+            question ?? [],
             [Line.Of(text, Tone.Muted), Line.Of(new string(Screen.Dot, Screen.Dots), Tone.Muted), .. back ? [Picker.BackRow(true)] : (Line[])[]],
             back ? "enter choose" : "",
             chosen: back ? 2 : null,

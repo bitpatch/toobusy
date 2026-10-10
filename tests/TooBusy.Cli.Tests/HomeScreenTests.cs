@@ -24,7 +24,7 @@ public sealed class HomeScreenTests : IDisposable
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => counted.Task)));
         terminal.AssertSaw("""
              What to do
-             ❯ Run        •••••••
+             ❯ Run        •••••••••••
                Assistant  own model · high
                Milestone  v0.3.0
                Settings
@@ -78,7 +78,7 @@ public sealed class HomeScreenTests : IDisposable
 
         // The last thing written is the light on the dots: they stand after the edge, the pointer, the name as wide
         // as the widest, and two spaces. The row itself is muted, and nothing of it blinks.
-        Assert.Matches(@"\u001b\[\d+;15H(\u001b\[[0-9;]*m•\u001b\[0m){7}$", waiting);
+        Assert.Matches(@"\u001b\[\d+;15H(\u001b\[[0-9;]*m•\u001b\[0m){11}$", waiting);
         Assert.Contains(palette.Paint(Tone.Muted, "❯ Run      "), waiting, StringComparison.Ordinal);
     }
 

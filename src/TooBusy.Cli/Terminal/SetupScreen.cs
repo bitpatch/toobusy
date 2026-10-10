@@ -50,9 +50,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         page.Keys = leaves ? "esc exit" : "esc back";
     }
 
-    public async Task<T?> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    public async Task<T?> WaitAsync<T>(string label, string hint, string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
         where T : class =>
-        await page.WaitAsync(text, work, cancellationToken) is (true, var value) ? value : null;
+        await page.WaitAsync(text, work, cancellationToken, Head(label, hint)) is (true, var value) ? value : null;
 
     public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
         Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);

@@ -52,7 +52,7 @@ public sealed record Workbench(
                 repository,
                 imitated,
                 imitated,
-                new ImitatedBoards(processes is null ? null : new GitHubBoards(processes)),
+                new ImitatedBoards(processes is null ? null : new GitHubBoards(processes), clock),
                 new UnwrittenSettings(new SettingsFile(root), madeUp: ready),
                 milestones,
                 new UnsavedChoice(

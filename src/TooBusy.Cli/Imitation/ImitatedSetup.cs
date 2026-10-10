@@ -1,5 +1,6 @@
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Settings;
@@ -29,9 +30,12 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
 
 // The boards of a demo: the real ones of the user when they can be read, and made-up ones after them until
 // there are enough to try a list that scrolls. The owners a board can be made for are filled up the same way.
-public sealed class ImitatedBoards(ISetupBoards? real) : ISetupBoards
+// They take their time, so that the wait for them can be looked at.
+public sealed class ImitatedBoards(ISetupBoards? real, IClock clock) : ISetupBoards
 {
     const int Enough = 10;
+
+    static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     static readonly string[] Titles =
         ["Rocket", "Moon base", "Night shift", "Lighthouse", "Paper trail", "Second wind", "Tide table", "Open road", "Low tide", "Far shore"];
@@ -44,7 +48,9 @@ public sealed class ImitatedBoards(ISetupBoards? real) : ISetupBoards
 
     public async Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
     {
+        var waited = clock.DelayAsync(Wait, cancellationToken);
         var read = real is null ? SetupBoards.None : await real.ReadAsync(repository, cancellationToken);
+        await waited;
         var boards = Titles.Take(Math.Max(0, Enough - read.Boards.Count))
             .Select((title, index) => new SetupBoard($"https://github.com/users/example/projects/{index + 1}", $"{title} (made up)", Linked: false));
         var owners = Logins.Take(Math.Max(0, Enough - read.Owners.Count))

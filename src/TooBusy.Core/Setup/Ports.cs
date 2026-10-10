@@ -7,9 +7,10 @@ public interface ISetupDialog
     // What stands around the question from now on: the notes, the answers given so far and the place among the steps.
     void Show(SetupProgress progress);
 
-    // Something takes a moment; the text says what. Gives what the work gives, or null when the user goes back
-    // instead of waiting for it: the work is told to stop then, and is not waited for.
-    Task<T?> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    // Something takes a moment; the text says what, under the label and the hint of the question it is read for.
+    // Gives what the work gives, or null when the user goes back instead of waiting for it: the work is told to stop
+    // then, and is not waited for.
+    Task<T?> WaitAsync<T>(string label, string hint, string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
         where T : class;
 
     // One of the options; gives its index. The hint of every question says what it is about and what to do.

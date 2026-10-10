@@ -570,7 +570,7 @@ public class ProjectSetupTests
         // What the user does not wait for, by the text of the wait.
         public HashSet<string> Unwaited { get; } = [];
 
-        public async Task<T?> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+        public async Task<T?> WaitAsync<T>(string label, string hint, string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
             where T : class
         {
             Waited.Add(text);

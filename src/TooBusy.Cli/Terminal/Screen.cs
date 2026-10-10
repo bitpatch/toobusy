@@ -77,7 +77,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 
     // The dots of a wait: how many there are, what a dot is, how far the light goes in a beat, and for how many beats a dot it has
     // left goes on fading.
-    public const int Dots = 7;
+    public const int Dots = 11;
     public const char Dot = '•';
     const double Pace = 0.5;
     const int Fading = 6;
