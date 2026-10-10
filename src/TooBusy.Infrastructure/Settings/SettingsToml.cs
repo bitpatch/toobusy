@@ -13,7 +13,10 @@ public static class SettingsToml
     static readonly (string Name, string Comment)[] Sections =
     [
         ("tracker", "Where the tasks are."),
-        ("queue.labels", "A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task."),
+        ("queue.labels",
+            "A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.\n"
+            + "A run puts `owner` on a task that waits for the owner, which is not taken while it has it,\n"
+            + "and `interrupted` on a task it had to stop, which is taken first."),
         ("assistant", "Who does the tasks."),
     ];
 
@@ -60,7 +63,7 @@ public static class SettingsToml
             else if (parsed.Tables.FindLastIndex(table => table.Name == section) is >= 0 and var index)
                 edits.Add(InsertAfterLine(existing, parsed.Tables[index].End, lines.ToString()));
             else
-                appended.Append("\n# ").Append(Sections.Single(known => known.Name == section).Comment).Append("\n[").Append(section).Append("]\n").Append(lines);
+                appended.Append("\n# ").Append(Sections.Single(known => known.Name == section).Comment.Replace("\n", "\n# ", StringComparison.Ordinal)).Append("\n[").Append(section).Append("]\n").Append(lines);
         }
 
         var text = new StringBuilder(existing);
@@ -82,6 +85,8 @@ public static class SettingsToml
         (SettingsKeys.TrackerBoard, settings.Tracker.Board),
         (SettingsKeys.BlockingLabels, settings.Queue.Labels.Blocking),
         (SettingsKeys.TakeLabels, settings.Queue.Labels.Take),
+        (SettingsKeys.OwnerLabel, settings.Queue.Labels.Owner),
+        (SettingsKeys.InterruptedLabel, settings.Queue.Labels.Interrupted),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
     ];
 

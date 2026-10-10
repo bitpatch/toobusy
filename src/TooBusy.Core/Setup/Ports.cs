@@ -100,7 +100,7 @@ public interface ISetupBoards
     Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken);
 }
 
-// What the setup reads from the tracker, and the two things it changes there when the user confirms them.
+// What the setup reads from the tracker, and what it changes there when the user confirms it.
 // Making and linking throw TrackerException when the tracker refuses.
 public interface ISetupTracker
 {
@@ -113,7 +113,7 @@ public interface ISetupTracker
     Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken);
 
     Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken);
-}
 
-// The tracker refused to do what it was asked; the message says why, in words for the user.
-public sealed class TrackerException(string message) : Exception(message);
+    // Makes a label in the repository; a label that is there already is left as it is.
+    Task CreateLabelAsync(string repository, string name, CancellationToken cancellationToken);
+}

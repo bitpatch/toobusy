@@ -17,12 +17,14 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
     public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 
     public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<string>>(["bug", "feature", "chore", "docs", "draft", "manual", "question"]);
+        Task.FromResult<IReadOnlyList<string>>(["bug", "feature", "chore", "docs", "draft", "interrupted", "manual", "question"]);
 
     public Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken) =>
         Task.FromResult($"https://github.com/{(owner.Organisation ? "orgs" : "users")}/{owner.Login}/projects/1");
 
     public Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task CreateLabelAsync(string repository, string name, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 // The boards of a demo: the real ones of the user when they can be read, and made-up ones after them until
@@ -102,7 +104,7 @@ public sealed class UnwrittenSettings(ISettingsStore file, bool madeUp = false) 
     ProjectSettings? saved = madeUp && file.Load() is null
         ? new ProjectSettings(
             new TrackerSettings(SettingsKeys.GitHubTracker, "https://github.com/users/example/projects/1"),
-            new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"])),
+            new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"], "needs-owner", "interrupted")),
             new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
         : null;
 

@@ -7,7 +7,7 @@ public sealed class SettingsFileTests : IDisposable
 {
     static readonly ProjectSettings Settings = new(
         new TrackerSettings("github", null),
-        new QueueSettings(new LabelSettings(["manual"], [])),
+        new QueueSettings(new LabelSettings(["manual"], [], "manual", "interrupted")),
         new AssistantSettings("claude-code"));
 
     readonly DirectoryInfo folder = Directory.CreateTempSubdirectory("toobusy-settings-");

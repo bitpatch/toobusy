@@ -16,6 +16,8 @@ public class SettingsTomlTests
         [queue.labels]
         blocking = ["manual", "draft"]              # a task with any of these is never taken
         take = ["feature", "bug", "chore", "docs"]  # a task needs one of these; empty means any task
+        owner = "manual"                            # put on a task that waits for the owner
+        interrupted = "interrupted"                 # put on a task that a run had to stop
 
         [assistant]
         type = "claude-code"
@@ -24,7 +26,7 @@ public class SettingsTomlTests
 
     static readonly ProjectSettings Settings = new(
         new TrackerSettings("github", "https://github.com/orgs/bitpatch/projects/3"),
-        new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"])),
+        new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"], "manual", "interrupted")),
         new AssistantSettings("claude-code"));
 
     [Fact]
@@ -50,11 +52,14 @@ public class SettingsTomlTests
               "manual",  # by hand
             ]
             labels.take = []
+            labels.owner = "manual"
+            labels."interrupted" = 'paused'
             """);
 
         Assert.Empty(result.Errors);
         Assert.Equal("https://github.com/orgs/bitpatch/projects/3", result.Settings!.Tracker.Board);
         Assert.Equal(["manual"], result.Settings.Queue.Labels.Blocking);
+        Assert.Equal("paused", result.Settings.Queue.Labels.Interrupted);
     }
 
     [Fact]
@@ -71,7 +76,7 @@ public class SettingsTomlTests
     {
         var result = SettingsToml.Read(Example.Replace("[assistant]", "[assistant]\nmodel = \"opus\"", StringComparison.Ordinal));
 
-        Assert.Equal(new SettingsError("assistant.model", 12, "unknown key"), Assert.Single(result.Errors));
+        Assert.Equal(new SettingsError("assistant.model", 14, "unknown key"), Assert.Single(result.Errors));
     }
 
     [Fact]
@@ -87,7 +92,7 @@ public class SettingsTomlTests
     {
         var result = SettingsToml.Read(Example.Replace("type = \"claude-code\"", "", StringComparison.Ordinal));
 
-        Assert.Equal(new SettingsError("assistant.type", 11, "is missing"), Assert.Single(result.Errors));
+        Assert.Equal(new SettingsError("assistant.type", 13, "is missing"), Assert.Single(result.Errors));
     }
 
     [Theory]
@@ -129,9 +134,13 @@ public class SettingsTomlTests
             board = "https://github.com/orgs/bitpatch/projects/3"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
+            # A run puts `owner` on a task that waits for the owner, which is not taken while it has it,
+            # and `interrupted` on a task it had to stop, which is taken first.
             [queue.labels]
             blocking = ["manual", "draft"]
             take = ["feature", "bug", "chore", "docs"]
+            owner = "manual"
+            interrupted = "interrupted"
 
             # Who does the tasks.
             [assistant]
@@ -146,7 +155,7 @@ public class SettingsTomlTests
         var settings = Settings with
         {
             Tracker = Settings.Tracker with { Board = null },
-            Queue = new QueueSettings(new LabelSettings(["The \"first\" one \\ v.0.2.0"], ["good first issue", "höhe"])),
+            Queue = new QueueSettings(new LabelSettings(["The \"first\" one \\ v.0.2.0"], ["good first issue", "höhe"], "needs the owner", "interrupted")),
         };
 
         var result = SettingsToml.Read(SettingsToml.Write(settings));
@@ -167,7 +176,7 @@ public class SettingsTomlTests
         var settings = Settings with
         {
             Tracker = Settings.Tracker with { Board = "https://github.com/orgs/bitpatch/projects/9" },
-            Queue = Settings.Queue with { Labels = new LabelSettings(["manual"], Settings.Queue.Labels.Take) },
+            Queue = Settings.Queue with { Labels = Settings.Queue.Labels with { Blocking = ["manual"] } },
         };
 
         var text = SettingsToml.Write(settings, Example);
@@ -215,15 +224,33 @@ public class SettingsTomlTests
             board = "https://github.com/orgs/bitpatch/projects/3"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
+            # A run puts `owner` on a task that waits for the owner, which is not taken while it has it,
+            # and `interrupted` on a task it had to stop, which is taken first.
             [queue.labels]
             blocking = ["manual", "draft"]
             take = ["feature", "bug", "chore", "docs"]
+            owner = "manual"
+            interrupted = "interrupted"
 
             # Who does the tasks.
             [assistant]
             type = "claude-code"
 
             """, text);
+    }
+
+    [Fact]
+    public void ARewriteAddsTheLabelsOfARunToAFileMadeBeforeThem()
+    {
+        var existing = Example
+            .Replace("owner = \"manual\"                            # put on a task that waits for the owner\n", "", StringComparison.Ordinal)
+            .Replace("interrupted = \"interrupted\"                 # put on a task that a run had to stop\n", "", StringComparison.Ordinal);
+
+        var text = SettingsToml.Write(Settings, existing);
+
+        Assert.Equal(
+            existing.Replace("empty means any task\n", "empty means any task\nowner = \"manual\"\ninterrupted = \"interrupted\"\n", StringComparison.Ordinal),
+            text);
     }
 
     [Fact]
@@ -244,7 +271,7 @@ public class SettingsTomlTests
         var settings = Settings with
         {
             Tracker = Settings.Tracker with { Board = null },
-            Queue = new QueueSettings(new LabelSettings(["manual"], Settings.Queue.Labels.Take)),
+            Queue = new QueueSettings(Settings.Queue.Labels with { Blocking = ["manual"] }),
         };
 
         var text = SettingsToml.Write(settings, existing);
@@ -277,6 +304,8 @@ public class SettingsTomlTests
         Assert.Equal(expected.Tracker, actual.Tracker);
         Assert.Equal(expected.Queue.Labels.Blocking, actual.Queue.Labels.Blocking);
         Assert.Equal(expected.Queue.Labels.Take, actual.Queue.Labels.Take);
+        Assert.Equal(expected.Queue.Labels.Owner, actual.Queue.Labels.Owner);
+        Assert.Equal(expected.Queue.Labels.Interrupted, actual.Queue.Labels.Interrupted);
         Assert.Equal(expected.Assistant, actual.Assistant);
     }
 }

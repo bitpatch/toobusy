@@ -47,6 +47,9 @@ public sealed class Page : IDisposable
 
     public Line Foot { get; set; } = Line.Empty;
 
+    // What leaving the page with Ctrl+C does, as the keys say it: more than leaving, while something is going on.
+    public string Leaving { get; set; } = "exit";
+
     public int Width => device.Size().Width;
 
     // Whether the page has colours: without them what a colour would tell has to be told by a mark.
@@ -54,17 +57,33 @@ public sealed class Page : IDisposable
 
     // Draws the page with what is asked, the lines where the user acts, and the keys that act there. The caret is
     // where a text is typed among those lines, and `chosen` the line the pointer is on.
-    // `waiting` is the line of dots that run while the page waits for something. While more keys are waiting, as in
-    // a paste, it does not draw.
-    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null)
+    // `waiting` is the line of dots that run while the page waits for something, and `running` such a line of the
+    // question, for a page that shows something going on. While more keys are waiting, as in a paste, it does not
+    // draw.
+    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null, int? running = null)
     {
         if (device.KeyWaiting())
             return;
 
         var all = leaving is not null
-            ? Line.Of($"press {leaving} again to exit", Tone.Warning)
-            : Hints(string.Join(" · ", ((string[])[keys, Keys, "ctrl+c exit"]).Where(part => part.Length > 0)));
-        screen.Draw(new Frame(title, Status, Body, question, choice, all, Foot, caret, chosen, waiting));
+            ? Line.Of($"press {leaving} again to {(leaving == "ctrl+c" ? Leaving : "exit")}", Tone.Warning)
+            : Hints(string.Join(" · ", ((string[])[keys, Keys, $"ctrl+c {Leaving}"]).Where(part => part.Length > 0)));
+        screen.Draw(new Frame(title, Status, Body, question, choice, all, Foot, caret, chosen, waiting, running));
+    }
+
+    // A key, when one is pressed; null once what the page waits for is done. The page looks for a key again and
+    // again, so that it can draw what changes meanwhile.
+    public async Task<ConsoleKeyInfo?> ReadAsync(Task wake)
+    {
+        while (!device.KeyWaiting())
+        {
+            if (wake.IsCompleted)
+                return null;
+
+            await Task.WhenAny(wake, Task.Delay(Glance, CancellationToken.None));
+        }
+
+        return Read();
     }
 
     // Says what the page waits for, with the dots that run under it, for as long as the work takes, and gives what
@@ -87,15 +106,8 @@ public sealed class Page : IDisposable
         var working = work(stopping.Token);
         try
         {
-            while (!working.IsCompleted)
+            while (!working.IsCompleted && await ReadAsync(working) is { } key)
             {
-                if (!device.KeyWaiting())
-                {
-                    await Task.WhenAny(working, Task.Delay(Glance, CancellationToken.None));
-                    continue;
-                }
-
-                var key = Read();
                 if (key.Key == ConsoleKey.Escape || (back && key.Key == ConsoleKey.Enter))
                     return (false, default);
 

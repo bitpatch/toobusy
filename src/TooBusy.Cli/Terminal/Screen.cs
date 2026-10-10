@@ -21,8 +21,9 @@ public sealed record Line(params Part[] Parts)
 // question, which is what is asked, then under a rule the choice, where the user acts, then under another rule the
 // keys; and the foot. Two things show where the screen waits for the user, and both blink: the cursor, a block at the
 // caret, where a text is typed, and the chosen line of the choice, the one the pointer is on. A frame may have either,
-// both or none. When it is the user who waits, a line of the choice is a row of dots that a light runs along. The foot is as many pieces as it has marks: it goes on to a line of its own when the window is too
-// narrow for them all.
+// both or none. When it is the user who waits, a line of the choice is a row of dots that a light runs along; a
+// screen that shows something going on has such a row in its question instead. The foot is as many pieces as it has
+// marks: it goes on to a line of its own when the window is too narrow for them all.
 public sealed record Frame(
     string Title,
     string Status,
@@ -33,7 +34,8 @@ public sealed record Frame(
     Line Foot,
     Caret? Caret = null,
     int? Chosen = null,
-    int? Waiting = null);
+    int? Waiting = null,
+    int? Running = null);
 
 // A screen of its own in the terminal: the alternate screen that programs like editors use. What the terminal showed
 // before stays untouched under it and is back when the screen is closed. A frame is drawn whole every time; the body
@@ -170,6 +172,8 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 
             if (frame.Waiting is { } dotted && dotted < frame.Choice.Count && choice + dotted - cut >= 0)
                 waiting = (first + choice + dotted - cut + 1, Math.Min(width - 1, frame.Choice[dotted].Parts.Sum(part => part.Text.Length)));
+            else if (frame.Running is { } going && going < frame.Question.Count && going - cut >= 0)
+                waiting = (first + going - cut + 1, Math.Min(width - 1, frame.Question[going].Parts.Sum(part => part.Text.Length)));
 
             text.Append(Pulsing());
             output.Write(text);

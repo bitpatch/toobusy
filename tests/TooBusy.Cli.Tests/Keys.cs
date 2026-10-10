@@ -1,9 +1,14 @@
 namespace TooBusy.Cli.Tests;
 
 // Keys for a test to press, in order. Reading past the last one fails the test instead of waiting for ever.
+// The keys after a hold are not pressed before what the hold waits for has happened: a page that goes on by itself
+// is given time to get there.
 public sealed class Keys
 {
-    readonly Queue<ConsoleKeyInfo> keys = new();
+    // How long a key that is held back is waited for by a page that cannot go on without it.
+    static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+
+    readonly Queue<(ConsoleKeyInfo Key, Func<bool>? Until)> keys = new();
 
     public static ConsoleKeyInfo Enter { get; } = Of(ConsoleKey.Enter, '\r');
 
@@ -38,7 +43,7 @@ public sealed class Keys
     public static ConsoleKeyInfo Escape { get; } = Of(ConsoleKey.Escape, '\u001b');
 
     // Whether a key is pressed and not read yet.
-    public bool Waiting => keys.Count > 0;
+    public bool Waiting => Next() is (true, false);
 
     // A letter pressed together with Ctrl.
     public static ConsoleKeyInfo Control(char letter) =>
@@ -47,18 +52,54 @@ public sealed class Keys
     public Keys Press(params ConsoleKeyInfo[] pressed)
     {
         foreach (var key in pressed)
-            keys.Enqueue(key);
+            keys.Enqueue((key, null));
         return this;
     }
 
     public Keys Type(string text)
     {
         foreach (var character in text)
-            keys.Enqueue(Of(ConsoleKey.NoName, character));
+            keys.Enqueue((Of(ConsoleKey.NoName, character), null));
         return this;
     }
 
-    public ConsoleKeyInfo Read() => keys.Count > 0 ? keys.Dequeue() : throw new InvalidOperationException("The prompt asks for a key that the test did not press.");
+    // Holds the keys that follow back until this is so.
+    public Keys Hold(Func<bool> until)
+    {
+        keys.Enqueue((default, until));
+        return this;
+    }
+
+    public ConsoleKeyInfo Read()
+    {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            var (any, held) = Next();
+            if (!any)
+                throw new InvalidOperationException("The prompt asks for a key that the test did not press.");
+            if (!held)
+                return keys.Dequeue().Key;
+            if (waited.Elapsed > Patience)
+                throw new InvalidOperationException("The prompt asks for a key that the test holds back for something that did not happen.");
+
+            Thread.Sleep(1);
+        }
+    }
+
+    // Whether there is a key, and whether it is held back. A hold whose time has come is gone.
+    (bool Any, bool Held) Next()
+    {
+        while (keys.Count > 0 && keys.Peek().Until is { } until)
+        {
+            if (!until())
+                return (true, true);
+
+            keys.Dequeue();
+        }
+
+        return (keys.Count > 0, false);
+    }
 
     static ConsoleKeyInfo Of(ConsoleKey key, char character = '\0') => new(character, key, shift: false, alt: false, control: false);
 }

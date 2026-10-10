@@ -8,6 +8,8 @@ public static class SettingsKeys
     public const string TrackerBoard = "tracker.board";
     public const string BlockingLabels = "queue.labels.blocking";
     public const string TakeLabels = "queue.labels.take";
+    public const string OwnerLabel = "queue.labels.owner";
+    public const string InterruptedLabel = "queue.labels.interrupted";
     public const string AssistantType = "assistant.type";
 
     public const string GitHubTracker = "github";
@@ -15,7 +17,7 @@ public static class SettingsKeys
 
     public static IReadOnlyList<string> All { get; } =
     [
-        Version, TrackerType, TrackerBoard, BlockingLabels, TakeLabels,
+        Version, TrackerType, TrackerBoard, BlockingLabels, TakeLabels, OwnerLabel, InterruptedLabel,
         AssistantType,
     ];
 }

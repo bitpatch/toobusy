@@ -195,6 +195,57 @@ public sealed class PageTests : IDisposable
     }
 
     [Fact]
+    public void APageThatShowsSomethingGoingOnHasTheDotsInItsQuestion()
+    {
+        var palette = Palette.Dark;
+        using var page = terminal.Open(palette: palette);
+
+        page.Draw([Line.Of("#3 Export the data · 1:24"), Line.Of("•••••••", Tone.Muted)], [Line.Of("/")], "", new Caret(0, 1), running: 1);
+
+        // The light runs along the second line of the question, and the cursor of the line that is typed in stays.
+        var dots = Array.IndexOf(terminal.Frame, " •••••••");
+        Assert.Equal(" #3 Export the data · 1:24", terminal.Frame[dots - 1]);
+        Assert.EndsWith(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"\u001b[{dots + 1};2H") + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Contains(palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task APageThatWaitsForAKeyGivesItAndGivesNothingOnceWhatItWaitsForIsDone()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        using var page = terminal.Open();
+        var wake = new TaskCompletionSource();
+
+        var reading = page.ReadAsync(wake.Task);
+        Assert.False(reading.IsCompleted);
+        terminal.Keys.Press(Keys.Tab);
+        Assert.Equal(ConsoleKey.Tab, (await reading)!.Value.Key);
+
+        var woken = page.ReadAsync(wake.Task);
+        wake.SetResult();
+        Assert.Null(await woken);
+
+        // A key that is pressed goes before what the page waits for.
+        terminal.Keys.Press(Keys.Enter);
+        Assert.Equal(ConsoleKey.Enter, (await page.ReadAsync(wake.Task))!.Value.Key);
+    }
+
+    [Fact]
+    public void WhatLeavingDoesIsSaidAsThePageNamesIt()
+    {
+        terminal.Keys.Press(Keys.ControlC, Keys.Enter);
+        using var page = terminal.Open();
+        page.Leaving = "stop the session and exit";
+
+        page.Draw([], [Line.Of("/")], "enter run");
+        Assert.Equal(" enter run · ctrl+c stop the session and exit", terminal.Frame[^1]);
+
+        page.Read();
+        page.Draw([], [Line.Of("/")], "enter run");
+        Assert.Equal(" press ctrl+c again to stop the session and exit", terminal.Frame[^1]);
+    }
+
+    [Fact]
     public void TheDotsTheLightHasLeftFadeBehindIt()
     {
         // Six beats on the light is on the fourth dot; those behind it are the dimmer the longer ago it left them,

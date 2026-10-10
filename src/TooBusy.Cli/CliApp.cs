@@ -2,6 +2,7 @@ using System.CommandLine;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Run;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Settings;
 
@@ -41,7 +42,8 @@ public static class CliApp
 
     public static async Task<int> RunAsync(string[] args, CliContext context, CancellationToken cancellationToken = default)
     {
-        var configuration = new InvocationConfiguration { Output = context.Output, Error = context.Error };
+        // A run that is stopped from outside stops its session before it leaves, and that takes a moment.
+        var configuration = new InvocationConfiguration { Output = context.Output, Error = context.Error, ProcessTerminationTimeout = TimeSpan.FromSeconds(30) };
         var result = CreateRootCommand(context).Parse(args);
         var exit = await result.InvokeAsync(configuration, cancellationToken);
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
@@ -255,8 +257,8 @@ public static class CliApp
         return ExitCode.Done;
     }
 
-    // The tasks are not run yet: `run` is the entry point that the run grows from. It opens the page on the run,
-    // and it does not start without a milestone to work on, a model and an effort.
+    // Takes the tasks of the queue one after another: on the page of the run in a terminal, and as plain lines
+    // without one. It does not start without a milestone to work on, a model and an effort.
     static Command CreateRunCommand(CliContext context, Option<bool> demo)
     {
         var command = new Command("run", "Takes the tasks of the queue one after another.");
@@ -302,12 +304,13 @@ public static class CliApp
 
             if (context.Terminal is { } terminal)
                 return await HomeAsync(context, terminal, bench, run: true, cancellationToken);
-            if (!bench.Demo)
-                return Fail(context, "toobusy: running the tasks is not built yet");
+            if (bench.OpenRun(settings!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
+                return Fail(context, "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take");
 
-            context.Output.WriteLine("Demo: nothing is changed.");
-            context.Output.WriteLine("Running the tasks is not built yet.");
-            return ExitCode.Done;
+            // Without a terminal the log of the run is printed line by line, and stopping the tool kills the run.
+            if (bench.Demo)
+                context.Output.WriteLine(context.OutputPalette.Muted("Demo: nothing is changed."));
+            return Code(await run.RunAsync(new PlainRun(context.Output, context.OutputPalette), cancellationToken));
         });
         return command;
     }
@@ -331,8 +334,25 @@ public static class CliApp
         context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
         var failed = session.Setup is not null && ReportSetup(context, session.Setup, bench.Demo);
         ReportChoices(context, session, bench.Demo);
+
+        // What the runs said stays in the terminal: it is what the owner comes back to.
+        foreach (var line in session.Runs.SelectMany(run => run.Log))
+            context.Output.WriteLine(RunLook.Painted(line, context.OutputPalette));
+        if (bench.Demo && session.Runs.Count > 0)
+            context.Output.WriteLine(context.OutputPalette.Muted("Demo: the tasks and the sessions were made up, and nothing was changed."));
+
+        if (session.Runs is [.., var last])
+            return last.Result is { } result ? Code(result) : ExitCode.Killed;
         return failed && session.Setup!.Outcome == SetupOutcome.Failed ? ExitCode.Failed : ExitCode.Done;
     }
+
+    // The exit code of a run: a run that stopped because something was wrong failed, and so did one that was killed.
+    static int Code(RunResult result) => result.End switch
+    {
+        RunEnd.Problem => ExitCode.Failed,
+        RunEnd.Killed => ExitCode.Killed,
+        _ => ExitCode.Done,
+    };
 
     // The answers of a setup and how it ended; a setup that never ended was left. Tells whether it failed.
     static bool ReportSetup(CliContext context, SetupResult? setup, bool demo)
@@ -381,7 +401,7 @@ public static class CliApp
             return null;
         }
 
-        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, cancellationToken);
+        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, context.Clock, context.Home, cancellationToken);
     }
 
     // The root of the project around the folder; without a project it says so and gives null.

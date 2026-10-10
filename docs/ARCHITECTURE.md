@@ -1,6 +1,6 @@
 # Architecture
 
-This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings and the setup are the parts that exist; the ports named here are planned and get their final shape with the specification.
+This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings, the setup and the run are the parts that exist.
 
 ## Projects
 
@@ -13,6 +13,7 @@ src/
   TooBusy.Cli/                     composition root, commands, console; the `toobusy` binary
 tests/
   TooBusy.Architecture.Tests/      the dependency rules below
+  TooBusy.Assistants.ClaudeCode.Tests/
   TooBusy.Cli.Tests/
   TooBusy.Core.Tests/
   TooBusy.Infrastructure.Tests/
@@ -31,19 +32,42 @@ A test project is added together with the first code of the project it tests.
 
 ## Core and its ports
 
-`TooBusy.Core` holds the model (task, queue, session state, outcome, limits, settings) and the use cases (read the queue, run it, watch a session). Everything outside the process is reached through an interface that Core defines and another project implements:
+`TooBusy.Core` holds the model (task, queue, outcome, limits, settings) and the use cases (the setup, the queue, the run). Everything outside the process is reached through an interface that Core defines and another project implements:
 
-| Port | What it hides | First implementation |
+| Port | What it hides | Implementations |
 |---|---|---|
-| Task tracker | reading the queue, changing a task's labels and status, commenting | `TooBusy.Trackers.GitHub` |
-| Assistant | starting, polling, resuming and stopping a session; reading its activity and its limits | `TooBusy.Assistants.ClaudeCode` |
-| Workspace | the state of the working copy: branch, changes, sync with the remote | `TooBusy.Infrastructure` |
-| Process runner | running a command with a timeout and cancellation; retries when something needs them | `ProcessRunner` in `TooBusy.Infrastructure`, behind `IProcessRunner` |
-| System services | keeping the machine awake, notifications, the clock | `TooBusy.Infrastructure` |
+| `ITaskTracker` | reading the open tasks, and changing one: its status on the board, its labels, a comment, closing, making a new task | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
+| `IAssistant`, `IAssistantSession` | starting a session with a message, looking at it, telling it something more, asking it something without cutting its turn, stopping it; going on with a session of an earlier run; the limits of usage | `ClaudeCode` in `TooBusy.Assistants.ClaudeCode`; `ImitatedAssistant` in a demo |
+| `IWorkspace` | the working copy: how many files differ from what is committed, how many commits are not pushed | `GitWorkspace` in `TooBusy.Infrastructure` |
+| `IProcessRunner` | running a command with a timeout and cancellation, in a folder | `ProcessRunner` in `TooBusy.Infrastructure` |
+| `IClock` | the time, and waiting | `SystemClock` in `TooBusy.Infrastructure` |
+| `IMachine` | keeping the machine awake, notifying the owner | `LocalMachine` in `TooBusy.Infrastructure` |
+| `IRunState` | what a run leaves for the next one: the task that is paused | `RunStateFile` in `TooBusy.Infrastructure` |
+| `IRunView` | where a run tells what happens: the lines of its log, and what it is doing now | `RunFeed` and `PlainRun` in `TooBusy.Cli` |
 
 Core is tested with hand-written fakes of these ports. A demo is such a fake offered to the user: imitated tracker and sessions behind the same ports.
 
-Sessions are identified by the task they belong to, and nothing in Core assumes that only one runs at a time. The first version runs one; parallel sessions in git worktrees must fit the same ports.
+Sessions are identified by the task they belong to, and nothing in the ports assumes that only one runs at a time. The first version runs one; parallel sessions in git worktrees must fit the same ports.
+
+## Run
+
+`TooBusy.Core/Queue` holds the queue. `TaskLineup.Arrange` is its rules, a function of the open tasks and of `QueueRules`, which come from the settings: the tasks that can be taken now and their order, those that open as others close, and those that are held, each with its reason.
+
+`TooBusy.Core/Run` holds the run:
+
+- `Supervisor` is the run itself, behind `IQueueRun`: the loop over the tasks, the watching of a session, the limits, the pause, and telling the tracker how a task went. It is one flow of control. Commands reach it through `Send`, which only puts them in a line that the run looks at in one place, so nothing in it is shared between threads; a kill is the cancellation of the run. Everything it knows of time comes from `IClock`, so the tests run it start to finish in no time, with a clock that moves only when it is waited on.
+- `Outcome` is the line for toobusy at the end of a reply: the contract with the assistant, read here and written nowhere else.
+- `Briefing` is every text toobusy sends to a session, and what it writes into the tracker from what the session answers. The texts are those of the tool and know nothing of a project.
+- `RunPolicy` is the times and the counts of a run; a demo has its own.
+- `RunLine` and `RunStatus` are what a run tells: a line of its log with the mark of what it tells, and what it is doing now, with the commands that mean something at the moment.
+
+The adapters know their tools and nothing of a run:
+
+- `GitHubTasks` asks `gh` as the other GitHub adapters do, and the tool itself turns the answers into lines of tab-separated fields. The statuses of a board are known by the names GitHub gives them.
+- `ClaudeCode` does a task in a background session of Claude Code. `ClaudeFolders` is where its files are; `SessionSettings` is the settings a session is started with: a hook that prints the request of the run after every step, a status line that writes the state of the session, the limits among it, to a file, and no worktree. `Transcript` reads the conversation Claude Code writes, from where the reading stopped: the steps of the session, its last reply, a usage limit. The session is found in `claude agents --json`.
+- `LocalFolder` is `.toobusy/local` of a project, which keeps itself out of git with a `.gitignore` of its own.
+
+`Workbench.OpenRun` puts a run together: the real adapters, or `ImitatedRun`, the real `Supervisor` over made-up tasks and sessions that are plays written in the code, lasting as long as the clock says.
 
 ## Settings
 
@@ -63,11 +87,11 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 |---|---|---|
 | `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation; waiting for something that is read. Every question can be gone back from, and so can a wait: the reading is told to stop | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests |
 | `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which puts together `GitHubCli` of `TooBusy.Trackers.GitHub` and the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
-| `ISetupTracker` | whether a board can be read, the labels; making a board and linking one to the repository, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
+| `ISetupTracker` | whether a board can be read, the labels; making a board, linking one to the repository and making a label, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
 | `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
 | `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
 
-`TooBusy.Core/Queue` holds the milestone to work on. It is the choice of the user, not a setting of the project. `TooBusy.Core/Assistant` holds two more such choices, the model and the effort the tasks are done with by default: `ModelChoice`, and `ClaudeCodeOptions` with the models and the levels that are offered. The lists are those of Claude Code, the only assistant so far, and they stay in Core until there is a port of the assistant to ask for them. The choices have two ports:
+`TooBusy.Core/Queue` holds the milestone to work on. It is the choice of the user, not a setting of the project. `TooBusy.Core/Assistant` holds two more such choices, the model and the effort the tasks are done with by default: `ModelChoice`, and `ClaudeCodeOptions` with the models and the levels that are offered. The lists are those of Claude Code, the only assistant so far, and they stay in Core until the port of the assistant is asked for them. The choices have two ports:
 
 | Port | What it hides | Implementations |
 |---|---|---|
@@ -92,8 +116,9 @@ The setup never asks for the repository: `ISetupEnvironment` gives the one of th
 - `TerminalDevice` is the terminal as a screen needs it: its keys, its size, taking Ctrl+C as a key, watching the size of the window, and a timer.
 - `Screen` is the alternate screen. It draws a frame whole every time: the bar with the title and the status, the body, the question, the choice and the keys with a rule between them, and the foot, each line cut to the width. What waits for the user is drawn by the screen and blinks: the name on the chosen line of the choice, which is the first piece of that line, and the block where a text is typed. `Pulse` counts the beats, eighty milliseconds each, and rewrites only that line and that cell in the shade of the moment; drawing a frame does not start the count again. The same beat moves the light along the dots of a wait, the line that `Page.WaitAsync` puts under what is being read: `Screen.Spark` says how brightly a dot is lit at a step. The foot is wrapped to the width, never cut. `TerminalDevice.Every` is the timer behind it, so that tests move the pulse by hand. It keeps the last frame to draw it again when the size changes.
 - `Page` is what every screen of the tool shares: it opens and closes the screen, puts the body, the status and the foot it is given around the question of the moment, and reads the keys. Ctrl+C twice in a row throws `OperationCanceledException`, which the command that opened the page catches. While more keys are waiting, as in a paste, it does not draw. `WaitAsync` runs something that takes a moment under the dots of a wait and goes on reading the keys meanwhile, looking for one every thirty milliseconds, so that `Back`, Escape and Ctrl+C work before the work ends; work that is not waited for gets its cancellation and is left behind.
-- `SetupScreen` is the setup on a page, `MilestoneScreen` the list of the milestones, `ModelScreen` and `EffortScreen` the lists of the models and of the levels of effort, `HomeScreen` the menu, `AssistantScreen` the list its `Assistant` opens, and `RunScreen` the run with its commands. `Picker` is the list they all share: a row is a pointer, a name, what explains it and what is to be noticed about it, and a list that does not fit scrolls between marks. Where Escape goes back and does not leave the page, a list ends with `Back`: `Picker` adds the row by itself, and the lists that `SetupScreen` draws on its own ask it whether to. `Prompt` is the question that is answered with a text. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
-- `CliContext` carries the folder, the streams, their palettes, the terminal device, the process runner and the folder of the user's own settings into the commands, so that tests run them with string writers, scripted keys and a faked `git` and `gh`.
+- `SetupScreen` is the setup on a page, `MilestoneScreen` the list of the milestones, `ModelScreen` and `EffortScreen` the lists of the models and of the levels of effort, `HomeScreen` the menu, and `AssistantScreen` the list its `Assistant` opens.
+- `RunScreen` is the page of a run: the log in its body, what the run is doing with the dots of a wait in its question, and the line of the commands. The run goes on by itself on another thread and never touches the page: it speaks into a `RunFeed`, and the page takes from there what was said when it draws. The page waits for a key with `Page.ReadAsync`, which looks for one again and again and gives up when something changed, so that the page is drawn anew; a page that would show the same is not drawn. `RunLook` is what the lines of a run look like, on the page and in the terminal. `PlainRun` prints them where there is no terminal. `Picker` is the list they all share: a row is a pointer, a name, what explains it and what is to be noticed about it, and a list that does not fit scrolls between marks. Where Escape goes back and does not leave the page, a list ends with `Back`: `Picker` adds the row by itself, and the lists that `SetupScreen` draws on its own ask it whether to. `Prompt` is the question that is answered with a text. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
+- `CliContext` carries the folder, the streams, their palettes, the terminal device, the process runner, the clock and the folder of the user's own settings into the commands, so that tests run them with string writers, scripted keys, a faked `git`, `gh` and `claude`, and a clock that makes nobody wait.
 
 The screens are drawn by hand with the escape sequences every terminal knows. Spectre.Console was the first candidate and was not taken: the setup needs the whole window, with a panel that stays at its bottom, and its prompts write below one another.
 
@@ -107,7 +132,7 @@ A new project `TooBusy.Trackers.<Name>` or `TooBusy.Assistants.<Name>` implement
 
 The tool ships as a native binary, so every source project is built with `IsAotCompatible` and warnings are errors. In practice:
 
-- no reflection-based serialisation: JSON goes through `System.Text.Json` source generation;
+- no reflection-based serialisation: JSON is read with `JsonDocument` and written with `Utf8JsonWriter`, and nothing is serialised from objects;
 - no libraries that need runtime code generation or are not trim-safe;
 - command-line parsing with `System.CommandLine`;
 - TOML with the syntax tree of Tomlyn, which publishes without warnings;

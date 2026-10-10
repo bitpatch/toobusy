@@ -1,4 +1,5 @@
 using TooBusy.Core.Processes;
+using TooBusy.Core.Queue;
 using TooBusy.Core.Setup;
 
 namespace TooBusy.Trackers.GitHub.Tests;
@@ -149,6 +150,39 @@ public class GitHubSetupTests
 
         var silent = await Assert.ThrowsAsync<TrackerException>(() => Setup().LinkBoardAsync(Rocket, "acme/rocket", TestContext.Current.CancellationToken));
         Assert.Equal("The project could not be linked to acme/rocket. GitHub did not answer.", silent.Message);
+    }
+
+    [Fact]
+    public async Task ALabelIsMadeInTheRepository()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+
+        await Setup().CreateLabelAsync("acme/rocket", "needs owner", TestContext.Current.CancellationToken);
+
+        var (command, arguments) = Assert.Single(processes.Asked);
+        Assert.Equal("gh", command);
+        Assert.Equal(["label", "create", "needs owner", "--repo", "acme/rocket"], arguments);
+    }
+
+    [Fact]
+    public async Task ALabelThatIsThereAlreadyIsLeftAsItIs()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Failed("label with name \"manual\" already exists; use `--force` to update its color and description"));
+
+        await Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ALabelThatCannotBeMadeSaysSo()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Failed("HTTP 403: Resource not accessible"));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken));
+        var silent = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken));
+
+        Assert.Equal("The label “manual” could not be made in acme/rocket.", refused.Message);
+        Assert.Equal("The label “manual” could not be made in acme/rocket. GitHub did not answer.", silent.Message);
     }
 
     [Theory]

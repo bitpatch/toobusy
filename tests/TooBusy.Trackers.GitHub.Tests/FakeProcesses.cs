@@ -18,4 +18,6 @@ sealed class FakeProcesses : IProcessRunner
         Asked.Add((command, arguments));
         return Task.FromResult(Answers.Count > 0 ? Answers.Dequeue() : new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
     }
+
+    public IProcessRunner Inside(string folder) => this;
 }

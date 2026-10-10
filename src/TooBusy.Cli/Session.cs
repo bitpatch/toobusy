@@ -1,6 +1,7 @@
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Run;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Settings;
 
@@ -25,6 +26,10 @@ public sealed class Session(Page page, Workbench bench)
     public ModelChoice? ChosenModel { get; private set; }
 
     public string? ChosenEffort { get; private set; }
+
+    // The runs that were on the page, in their order: what each said, and how it ended; null is one that was left
+    // before it ended.
+    public List<(IReadOnlyList<RunLine> Log, RunResult? Result)> Runs { get; } = [];
 
     // Opens with the menu or, when asked, with the run. A project that is not set up is set up first, and a user who
     // has no milestone to work on, no model or no effort chooses them; leaving any of these leaves the page.
@@ -54,10 +59,10 @@ public sealed class Session(Page page, Workbench bench)
             switch (action ?? HomeScreen.Ask(page, Assistant(), standing.Name))
             {
                 case HomeAction.Run:
-                    Clear("Running the queue", "Running the tasks is not built yet.");
-                    if (new RunScreen(page).Run() == RunEnd.Exit)
+                    var after = await RunAsync(cancellationToken);
+                    if (after == AfterRun.Exit)
                         return;
-                    note = null;
+                    note = after is null ? "The `origin` remote is not a GitHub repository, so there are no tasks to take." : null;
                     break;
                 case HomeAction.Assistant:
                     ChooseAssistant();
@@ -131,6 +136,26 @@ public sealed class Session(Page page, Workbench bench)
         return true;
     }
 
+    // Runs the queue on the page, until the run is over and the user leaves it; says where to. Null when there is
+    // nothing to run. What the run said is remembered whatever way the page was left.
+    async Task<AfterRun?> RunAsync(CancellationToken cancellationToken)
+    {
+        if (bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
+            return null;
+
+        Clear("Running the queue", null);
+        page.Body = [];
+        var screen = new RunScreen(page, () => bench.Clock.Now);
+        try
+        {
+            return await screen.RunAsync(run, cancellationToken);
+        }
+        finally
+        {
+            Runs.Add((screen.Log, screen.Result));
+        }
+    }
+
     // What `Assistant` of the menu opens, until Escape goes back to the menu: the pointer stays on what was opened,
     // and a choice that was left is said above the list.
     void ChooseAssistant()
@@ -159,7 +184,7 @@ public sealed class Session(Page page, Workbench bench)
     {
         SetupOutcome.Written when demo => (false, $"Demo: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."),
         SetupOutcome.Written when result.SettingsWritten => (false, $"The settings are written to {SettingsFile.DisplayPath}. Commit the file."),
-        SetupOutcome.Written => (false, "The project is linked to the repository."),
+        SetupOutcome.Written => (false, "GitHub is set up as the settings say."),
         SetupOutcome.NothingToChange => (false, "Nothing to change: the settings already say this."),
         SetupOutcome.Declined => (true, "The setup was declined: nothing was changed."),
         SetupOutcome.Failed => (true, $"{result.Failure} The settings were not written."),
@@ -198,6 +223,8 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Project", settings.Tracker.Board ?? "none"));
             body.Add(Picker.Answer("Blocking labels", settings.Queue.Labels.Blocking.Count == 0 ? "none" : string.Join(", ", settings.Queue.Labels.Blocking)));
             body.Add(Picker.Answer("Labels to take", settings.Queue.Labels.Take.Count == 0 ? "any task" : string.Join(", ", settings.Queue.Labels.Take)));
+            body.Add(Picker.Answer("Owner's label", settings.Queue.Labels.Owner));
+            body.Add(Picker.Answer("Interrupt label", settings.Queue.Labels.Interrupted));
         }
 
         if (standing.Ready)

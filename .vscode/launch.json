@@ -24,6 +24,17 @@
       "stopAtEntry": false
     },
     {
+      "name": "toobusy run --demo",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/TooBusy.Cli/bin/Debug/net10.0/toobusy.dll",
+      "args": ["run", "--demo"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    },
+    {
       "name": "toobusy --help",
       "type": "coreclr",
       "request": "launch",

@@ -96,7 +96,32 @@ public static partial class SettingsValidator
                     Refuse(entries[SettingsKeys.TakeLabels], $"the label `{label}` is in `{SettingsKeys.BlockingLabels}` too");
             }
 
-            return new LabelSettings(blocking ?? [], take ?? []);
+            // The labels a run puts on a task must not make it a task to take, and a task that was interrupted
+            // must not be kept out of the next run.
+            var owner = Label(SettingsKeys.OwnerLabel);
+            var interrupted = Label(SettingsKeys.InterruptedLabel);
+            if (owner is not null && Has(take, owner))
+                Refuse(entries[SettingsKeys.OwnerLabel], $"the label `{owner}` is in `{SettingsKeys.TakeLabels}` too");
+            if (interrupted is not null && Has(take, interrupted))
+                Refuse(entries[SettingsKeys.InterruptedLabel], $"the label `{interrupted}` is in `{SettingsKeys.TakeLabels}` too");
+            if (interrupted is not null && Has(blocking, interrupted))
+                Refuse(entries[SettingsKeys.InterruptedLabel], $"the label `{interrupted}` is in `{SettingsKeys.BlockingLabels}` too");
+            if (owner is not null && interrupted is not null && owner.Equals(interrupted, StringComparison.OrdinalIgnoreCase))
+                Refuse(entries[SettingsKeys.InterruptedLabel], $"must not be the label of `{SettingsKeys.OwnerLabel}`");
+
+            return new LabelSettings(blocking ?? [], take ?? [], owner ?? "", interrupted ?? "");
+        }
+
+        static bool Has(string[]? labels, string label) => labels is not null && labels.Contains(label, StringComparer.OrdinalIgnoreCase);
+
+        string? Label(string key)
+        {
+            if (String(key, required: true) is not { } value)
+                return null;
+            if (!string.IsNullOrWhiteSpace(value.Text))
+                return value.Text;
+            Refuse(value.Entry, "a label name must not be empty");
+            return null;
         }
 
         string[]? Labels(string key)

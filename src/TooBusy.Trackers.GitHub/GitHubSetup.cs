@@ -1,9 +1,10 @@
 using TooBusy.Core.Processes;
+using TooBusy.Core.Queue;
 using TooBusy.Core.Setup;
 
 namespace TooBusy.Trackers.GitHub;
 
-// What the setup reads from GitHub and the two things it changes there, through the GitHub command-line tool.
+// What the setup reads from GitHub and what it changes there, through the GitHub command-line tool.
 public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
 {
     const string Scope = "Your GitHub login cannot work with projects. Run `gh auth refresh -s project` and try again.";
@@ -87,6 +88,15 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
             ],
             failed,
             cancellationToken);
+    }
+
+    public async Task CreateLabelAsync(string repository, string name, CancellationToken cancellationToken)
+    {
+        var result = await processes.RunAsync("gh", ["label", "create", name, "--repo", repository], Patience, cancellationToken);
+        if (result is { Status: ProcessStatus.Exited, ExitCode: 0 } || result.Error.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        throw new TrackerException($"The label “{name}” could not be made in {repository}." + (result.Status == ProcessStatus.Exited ? "" : " GitHub did not answer."));
     }
 
     // The one value a request is made for; without it the request failed, and the tracker says so.

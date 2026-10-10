@@ -26,6 +26,37 @@ public class ProcessRunnerTests
     }
 
     [Fact]
+    public async Task ACommandStartsInTheFolderOfItsRunner()
+    {
+        var folder = Directory.CreateTempSubdirectory("toobusy-runner-");
+        try
+        {
+            File.WriteAllText(Path.Combine(folder.FullName, "here.txt"), "");
+
+            var result = await runner.Inside(folder.FullName).RunAsync("ls", [], Long, TestContext.Current.CancellationToken);
+
+            Assert.Equal("here.txt\n", result.Output);
+        }
+        finally
+        {
+            folder.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ACommandWithoutALimitOfTimeRunsUntilItIsStopped()
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var running = runner.RunAsync("sleep", ["30"], Timeout.InfiniteTimeSpan, cancellation.Token);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+        Assert.False(running.IsCompleted);
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+    }
+
+    [Fact]
     public async Task ACommandThatAsksForInputGetsNone()
     {
         var result = await runner.RunAsync("cat", [], Long, TestContext.Current.CancellationToken);

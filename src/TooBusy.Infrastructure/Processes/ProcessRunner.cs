@@ -4,9 +4,12 @@ using TooBusy.Core.Processes;
 
 namespace TooBusy.Infrastructure.Processes;
 
-// Commands are started directly, without a shell. Their input is closed at once, so that none of them waits for an answer.
-public sealed class ProcessRunner : IProcessRunner
+// Commands are started directly, without a shell, in the folder the runner is of, or where the tool was started.
+// Their input is closed at once, so that none of them waits for an answer.
+public sealed class ProcessRunner(string? folder = null) : IProcessRunner
 {
+    public IProcessRunner Inside(string folder) => new ProcessRunner(folder);
+
     public async Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
         using var process = new Process();
@@ -17,6 +20,7 @@ public sealed class ProcessRunner : IProcessRunner
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            WorkingDirectory = folder ?? "",
         };
         foreach (var argument in arguments)
             process.StartInfo.ArgumentList.Add(argument);

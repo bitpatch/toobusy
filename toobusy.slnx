@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TooBusy.Architecture.Tests/TooBusy.Architecture.Tests.csproj" />
+    <Project Path="tests/TooBusy.Assistants.ClaudeCode.Tests/TooBusy.Assistants.ClaudeCode.Tests.csproj" />
     <Project Path="tests/TooBusy.Cli.Tests/TooBusy.Cli.Tests.csproj" />
     <Project Path="tests/TooBusy.Core.Tests/TooBusy.Core.Tests.csproj" />
     <Project Path="tests/TooBusy.Infrastructure.Tests/TooBusy.Infrastructure.Tests.csproj" />

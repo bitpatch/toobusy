@@ -14,6 +14,8 @@ public sealed class CliAppTests : IDisposable
         [queue.labels]
         blocking = ["manual"]
         take = []
+        owner = "manual"
+        interrupted = "interrupted"
 
         [assistant]
         type = "claude-code"
@@ -23,6 +25,9 @@ public sealed class CliAppTests : IDisposable
 
     // Where the choice of the user is kept, in place of the home folder.
     readonly DirectoryInfo personal = Directory.CreateTempSubdirectory("toobusy-personal-");
+
+    // What the command that runs now has written so far.
+    StringWriter? shown;
 
     public void Dispose()
     {
@@ -142,23 +147,29 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.Equal("Demo: nothing is changed." + Environment.NewLine + "Running the tasks is not built yet." + Environment.NewLine, output);
+        Assert.StartsWith("Demo: nothing is changed." + Environment.NewLine + "✻ v0.1.0 (made up) · 5 tasks in the queue", output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task InATerminalARunIsAPageThatExitLeaves()
+    public async Task InATerminalARunIsAPageThatShowsItAndThatExitLeavesWhenItIsOver()
     {
         GitRepository();
         WriteSettings(Settings);
-        var keys = new Keys().Type("/exit").Press(Keys.Enter);
+        var keys = new Keys().Hold(() => Shown("The run is over")).Type("/exit").Press(Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "run", "--demo");
+        var (exit, output, _) = await RunLiveAsync(keys, null, "run", "--demo");
 
         Assert.Equal(0, exit);
         Assert.StartsWith("\u001b[?1049h", output, StringComparison.Ordinal);
         Assert.Contains("Running the queue · demo", output, StringComparison.Ordinal);
-        Assert.Contains("Running the tasks is not built yet.", output, StringComparison.Ordinal);
-        Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}", Report(output));
+        Assert.Contains("The run is over", output, StringComparison.Ordinal);
+
+        // What the run said stays in the terminal when the page is closed.
+        var report = Report(output).Split(Environment.NewLine);
+        Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}", report[0]);
+        Assert.Equal("✻ v0.1.0 (made up) · 5 tasks in the queue · the assistant's own model · high effort", report[1]);
+        Assert.Contains("✔ No task is left · 5 done", report);
+        Assert.Equal("Demo: the tasks and the sessions were made up, and nothing was changed.", report[^2]);
     }
 
     [Fact]
@@ -166,11 +177,13 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
+        var keys = new Keys().Hold(() => Shown("The run is over")).Press(Keys.ControlC, Keys.ControlC);
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.ControlC, Keys.ControlC), "run", "--demo");
+        var (exit, output, _) = await RunLiveAsync(keys, null, "run", "--demo");
 
         Assert.Equal(0, exit);
         Assert.StartsWith("toobusy · ~", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ No task is left · 5 done", Report(output), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -204,16 +217,70 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task WithoutATerminalARunSaysThatItIsNotBuiltYet()
+    public async Task AProjectWithoutAGitHubOriginHasNoTasksToTake()
     {
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        var (exit, _, error) = await RunAsync("run");
+        var (exit, output, error) = await RunAsync("run");
 
         Assert.Equal(1, exit);
-        Assert.Equal("toobusy: running the tasks is not built yet" + Environment.NewLine, error);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task WithoutATerminalARunDoesTheTasksAndPrintsItsLog()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // One open task; Claude Code starts a session for it, which has ended its turn when it is looked at, and
+        // its conversation says that the task is done.
+        var closed = false;
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        {
+            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
+            ("gh", "issue") when arguments[1] == "view" => "Write it as CSV.\n",
+            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
+            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
+            _ => "",
+        }, ""));
+        var context = Context(processes) with { Home = personal.FullName };
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            """
+            ✻ No milestone · 1 task in the queue · the assistant's own model · high effort
+            → #12 Export the data — started · a new session · claude attach abc12345
+            ✔ #12 Export the data — done in 0 s
+              #12 is closed, with the report of the session as its comment
+            ✔ No task is left · 1 done
+              Worked 0 s
+
+            """.ReplaceLineEndings(),
+            output);
+
+        var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
+        Assert.Equal(["--effort", "high", "-n", "#12 Export the data"], started.Skip(7).Take(4));
+        Assert.Contains("# Task #12: Export the data\n\nhttps://github.com/acme/rocket/issues/12\n\nWrite it as CSV.", started[^1], StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(
+            ["issue", "comment", "12", "--repo", "acme/rocket", "--body", "**Done.**\n\nThe export is written.\n\n_Session: `claude attach abc12345`_"]));
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["issue", "close", "12", "--repo", "acme/rocket"]));
+
+        // What a run leaves on the machine lies in a folder that keeps itself out of git.
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "local", ".gitignore")));
     }
 
     [Fact]
@@ -222,15 +289,31 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var keys = new Keys().Type("/menu").Press(Keys.Enter, Keys.Up, Keys.Enter);
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            "gh" => "total\t0\n",
+            _ => "",
+        }, ""));
+        var keys = new Keys()
+            .Hold(() => Shown("The run is over")).Type("/menu").Press(Keys.Enter)
+            .Hold(() => Shown("What to do")).Press(Keys.Up, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, "run");
+        var (exit, output, _) = await RunLiveAsync(keys, processes, "run");
 
         Assert.Equal(0, exit);
         Assert.Contains("Running the queue", output, StringComparison.Ordinal);
         Assert.DoesNotContain("demo", output, StringComparison.Ordinal);
         Assert.Contains("What to do", output, StringComparison.Ordinal);
-        Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}", Report(output));
+        Assert.Equal(
+            [
+                $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}",
+                "✻ No milestone · 0 tasks in the queue · the assistant's own model · high effort",
+                "✔ No task is left · 0 done",
+                "  Worked 0 s",
+                "",
+            ],
+            Report(output).Split(Environment.NewLine));
     }
 
     [Fact]
@@ -579,9 +662,13 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\nmanual\n");
 
-        // No project, no blocking labels, any label, yes; the first milestone; the model after the assistant's own;
-        // the proposed effort; the last of the menu.
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
+        // No project, no blocking labels, any label; a new label for the owner and one for interrupted tasks, each
+        // by the name that is proposed; yes; the first milestone; the model after the assistant's own; the proposed
+        // effort; the last of the menu.
+        var keys = new Keys().Press(
+            Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter,
+            Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter,
+            Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, processes, []);
 
@@ -597,6 +684,8 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
+                "✔ Owner's label    needs-owner",
+                "✔ Interrupt label  interrupted",
                 "✔ Assistant        Claude Code",
                 "✔ The settings are written to .toobusy/settings.toml. Commit the file.",
                 "✔ Milestone        v0.2.0",
@@ -606,6 +695,8 @@ public sealed class CliAppTests : IDisposable
             ],
             Report(output).Split(Environment.NewLine));
         Assert.Contains("type = \"github\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+        Assert.Contains("The label “needs-owner” will be made in acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "create", "needs-owner", "--repo", "acme/rocket"]));
         Assert.Equal("Milestone: v0.2.0", (await ShownAsync(processes)).Output.Trim());
         Assert.Equal("Model: fable", (await RunAsync("model")).Output.Trim());
         Assert.Equal("Effort: high", (await RunAsync("effort")).Output.Trim());
@@ -656,10 +747,13 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
 
-        // Straight to the menu: the run, back to the menu, and out.
-        var keys = new Keys().Press(Keys.Enter).Type("/menu").Press(Keys.Enter, Keys.Up, Keys.Enter);
+        // Straight to the menu: the run, back to the menu when it is over, and out.
+        var keys = new Keys()
+            .Hold(() => Shown("What to do")).Press(Keys.Enter)
+            .Hold(() => Shown("The run is over")).Type("/menu").Press(Keys.Enter)
+            .Hold(() => Shown("What to do", times: 2)).Press(Keys.Up, Keys.Enter);
 
-        var (exit, output, error) = await RunWithKeysAsync(keys, ["--demo"]);
+        var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
@@ -669,8 +763,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
-        Assert.Contains("Running the tasks is not built yet.", output, StringComparison.Ordinal);
-        Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}", Report(output));
+        Assert.Contains("✻ v0.1.0 (made up) · 5 tasks in the queue", Report(output), StringComparison.Ordinal);
+        Assert.Contains("What to do", output.Split("The run is over")[^1], StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
@@ -682,8 +776,49 @@ public sealed class CliAppTests : IDisposable
 
         var (exit, output, _) = await RunAsync("run", "--demo");
 
+        // The whole of a demo: a task that is done, a session that asks and is told to go on alone, a task done in
+        // part whose rest is a new task for the owner, a usage limit that is waited out, a task that opened after
+        // another one, and the tasks that are held.
         Assert.Equal(0, exit);
-        Assert.StartsWith("Demo: nothing is changed.", output, StringComparison.Ordinal);
+        Assert.Equal(
+            """
+            Demo: nothing is changed.
+            ✻ v0.1.0 (made up) · 5 tasks in the queue · the assistant's own model · high effort
+              Opens later: #105 after #102
+              Held: #106 it has the manual label · #107 its status is In Progress
+            → #101 Show the total of an order in its header — started · a new session · claude attach 4f2a101 (made up)
+              #101 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ✔ #101 Show the total of an order in its header — done in 9 s
+              #101 is closed, with the report of the session as its comment
+            → #102 Export the orders as a file — started · a new session · claude attach 4f2a102 (made up)
+              #102 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ▲ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
+              │ The task does not say what kind of file the export is. Should it be CSV or JSON?
+            ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
+              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner goes into the new task for the owner, as the rules of this session say. End your reply with a `TOOBUSY:` line.”
+            ✔ #102 Export the orders as a file — done in 21 s
+              #102 is closed, with the report of the session as its comment
+            → #103 Fix the rounding of a discount — started · a new session · claude attach 4f2a103 (made up)
+              #103 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ◐ #103 Fix the rounding of a discount — done in part in 10 s
+              #103 is closed; what is left is #108 “Decide what a discount of more than the price does”, which waits for the owner with the needs-owner label
+            → #104 Update the dependencies — started · a new session · claude attach 4f2a104 (made up)
+              #104 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ▲ #104 ran into a usage limit: You have hit your usage limit.
+            ‖ #104 waits 7 s for the 5-hour limit to reset, then goes on · /stop pauses it for the next run
+            ▶ #104 goes on after the reset of the limit · claude attach 4f2a104 (made up)
+            ✔ #104 Update the dependencies — done in 16 s
+              #104 is closed, with the report of the session as its comment
+            → #105 Describe the export in the manual — started · a new session · claude attach 4f2a105 (made up)
+              #105 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ✔ #105 Describe the export in the manual — done in 7 s
+              #105 is closed, with the report of the session as its comment
+              Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label
+            ✔ No task is left · 5 done
+              Worked 63 s
+
+            """.ReplaceLineEndings(),
+            output);
     }
 
     [Fact]
@@ -716,15 +851,25 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
 
-        // No project; `manual` blocks; any label; yes.
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter, Keys.Enter, Keys.Enter);
+        // No project; `manual` blocks; any label; `manual` is the label of the owner too, the one above `New label…`;
+        // a new label for interrupted tasks, by the name that is proposed; yes.
+        var keys = new Keys().Press(
+            Keys.Tab, Keys.Tab, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter, Keys.Enter,
+            Keys.Up, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init");
 
         Assert.Equal(0, exit);
         Assert.EndsWith("✔ The settings are written to .toobusy/settings.toml. Commit the file." + Environment.NewLine, Report(output), StringComparison.Ordinal);
-        Assert.Contains("blocking = [\"manual\"]", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("blocking = [\"manual\"]", written, StringComparison.Ordinal);
+        Assert.Contains("owner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Take(4).SequenceEqual(["label", "list", "--repo", "acme/rocket"]));
+
+        // Only the label that the repository does not have is made.
+        Assert.Equal(
+            [["label", "create", "interrupted", "--repo", "acme/rocket"]],
+            processes.Asked.Where(asked => asked.Command == "gh" && asked.Arguments.Take(2).SequenceEqual(["label", "create"])).Select(asked => asked.Arguments));
     }
 
     [Fact]
@@ -790,7 +935,10 @@ public sealed class CliAppTests : IDisposable
     public async Task ADemoOfTheSetupGoesThroughTheStepsAndWritesNothing()
     {
         GitRepository();
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        // The first of the boards, no blocking labels, any label, a new label for the owner by the name that is
+        // proposed, the label `interrupted` of the made-up ones, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -799,6 +947,7 @@ public sealed class CliAppTests : IDisposable
         Assert.StartsWith("\u001b[?1049h", output, StringComparison.Ordinal);
         Assert.Contains("Setting up this project · demo", output, StringComparison.Ordinal);
         Assert.Contains("The answers above will be written to .toobusy/settings.toml.", output, StringComparison.Ordinal);
+        Assert.Contains("The label “needs-owner” will be made in example/project.", output, StringComparison.Ordinal);
         Assert.DoesNotContain("[tracker]", output, StringComparison.Ordinal);
         Assert.Equal(
             [
@@ -807,6 +956,8 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          Rocket (made up)  https://github.com/users/example/projects/1",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
+                "✔ Owner's label    needs-owner",
+                "✔ Interrupt label  interrupted",
                 "✔ Assistant        Claude Code",
                 "Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was.",
                 "",
@@ -821,13 +972,14 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  manual", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ Owner's label    manual", Report(output), StringComparison.Ordinal);
         Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, Report(output), StringComparison.Ordinal);
     }
 
@@ -838,7 +990,10 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        // The board that is linked, no blocking labels, any label, a new label for the owner by the name that is
+        // proposed, the label `interrupted` of the made-up ones, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -847,6 +1002,9 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("owner=bitpatch") && asked.Arguments.Contains("name=toobusy"));
         Assert.Contains("Toobusy  https://github.com/orgs/bitpatch/projects/4  linked to this repository", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          Toobusy  https://github.com/orgs/bitpatch/projects/4", Report(output), StringComparison.Ordinal);
+        Assert.Contains("The label “needs-owner” will be made in bitpatch/toobusy.", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Interrupt label  interrupted", Report(output), StringComparison.Ordinal);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Contains("create"));
     }
 
     [Fact]
@@ -854,7 +1012,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
-        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -870,7 +1028,7 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\torg\tbitpatch\nowner\tuser\tdenis\n", ""));
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -883,7 +1041,7 @@ public sealed class CliAppTests : IDisposable
     public async Task DecliningTheSetupFails()
     {
         GitRepository();
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.No);
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.No);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -922,12 +1080,19 @@ public sealed class CliAppTests : IDisposable
     Task<(int Exit, string Output, string Error)> RunWithKeysAsync(Keys keys, FakeProcesses? processes, params string[] args) =>
         RunAsync(Context(processes) with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) }, args);
 
+    // Runs in a terminal that says whether a key is pressed, as the page of a run asks it: the run goes on by
+    // itself there, and the keys are held back until it has got where the test waits for it.
+    Task<(int Exit, string Output, string Error)> RunLiveAsync(Keys keys, FakeProcesses? processes, params string[] args) =>
+        RunAsync(Context(processes) with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting } }, args);
+
     // The project lies right under the home folder, and the choices of the user are kept in a folder of the test.
+    // A run does not make the test wait: its clock goes on by itself.
     CliContext Context(FakeProcesses? processes) => new(folder.FullName, TextWriter.Null, TextWriter.Null)
     {
         Home = folder.Parent!.FullName,
         Processes = processes,
         PersonalFolder = personal.FullName,
+        Clock = new InstantClock(),
     };
 
     // Chooses everything a run needs: no milestone, the assistant's own model and the proposed effort.
@@ -956,16 +1121,27 @@ public sealed class CliAppTests : IDisposable
         _ => "",
     }, ""));
 
+    // Does something while a command is answered, and answers with nothing.
+    static string Do(Action action)
+    {
+        action();
+        return "";
+    }
+
     // What is left in the terminal when the screen is closed.
     static string Report(string output) => output.Split(Screen.Leave)[^1];
 
-    static async Task<(int Exit, string Output, string Error)> RunAsync(CliContext context, string[] args)
+    async Task<(int Exit, string Output, string Error)> RunAsync(CliContext context, string[] args)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
+        shown = output;
         var exit = await CliApp.RunAsync(args, context with { Output = output, Error = error }, TestContext.Current.CancellationToken);
         return (exit, output.ToString(), error.ToString());
     }
+
+    // Whether the page has shown the text by now, so many times: what keys that are held back wait for.
+    bool Shown(string text, int times = 1) => shown is not null && shown.ToString().Split(text).Length > times;
 
     // Answers every command as it is told to and remembers what it was asked.
     sealed class FakeProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer) : IProcessRunner
@@ -982,5 +1158,7 @@ public sealed class CliAppTests : IDisposable
             Asked.Add((command, arguments));
             return Task.FromResult(answer(command, arguments));
         }
+
+        public IProcessRunner Inside(string folder) => this;
     }
 }

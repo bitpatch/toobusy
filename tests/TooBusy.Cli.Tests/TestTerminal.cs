@@ -51,9 +51,11 @@ public sealed partial class TestTerminal : IDisposable
 
     // Fails unless some frame, the last one or one before it, had the text; a frame is read without its empty lines
     // and its rules.
-    public void AssertSaw(string text) => Assert.True(
-        Output.ToString().Split("\u001b[H").Skip(1).Any(frame => Told(Lines(frame)).Contains(text, StringComparison.Ordinal)),
-        $"No frame had:\n{text}\n\nThe last one was:\n{Text}");
+    public void AssertSaw(string text) => Assert.True(Saw(text), $"No frame had:\n{text}\n\nThe last one was:\n{Text}");
+
+    // Whether some frame had the text, read as `AssertSaw` reads it.
+    public bool Saw(string text) =>
+        Output.ToString().Split("\u001b[H").Skip(1).Any(frame => Told(Lines(frame)).Contains(text, StringComparison.Ordinal));
 
     // The line and the column the cursor was put at, counted from one; null when it is hidden.
     public (int Line, int Column)? Caret =>

@@ -40,5 +40,7 @@ public class GitOriginTests
             Arguments = arguments;
             return Task.FromResult(result);
         }
+
+        public IProcessRunner Inside(string folder) => this;
     }
 }

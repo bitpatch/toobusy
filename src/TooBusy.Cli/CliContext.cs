@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Processes;
+using TooBusy.Core.Run;
+using TooBusy.Infrastructure.Machine;
 using TooBusy.Infrastructure.Processes;
 using TooBusy.Infrastructure.Settings;
 
@@ -26,6 +28,9 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
 
     // The folder of the user's own settings, where the choices of the user are kept; null when there is none.
     public string? PersonalFolder { get; init; }
+
+    // The time a run goes by; a test gives one that does not make it wait.
+    public IClock Clock { get; init; } = new SystemClock();
 
     public static CliContext OfProcess() => new(Environment.CurrentDirectory, Console.Out, Console.Error)
     {

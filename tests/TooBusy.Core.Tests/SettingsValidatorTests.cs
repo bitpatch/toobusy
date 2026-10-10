@@ -10,12 +10,16 @@ public class SettingsValidatorTests
         var result = SettingsValidator.Validate(Document(
             (SettingsKeys.TrackerBoard, "https://github.com/orgs/bitpatch/projects/3"),
             (SettingsKeys.BlockingLabels, Labels("manual", "draft")),
-            (SettingsKeys.TakeLabels, Labels("feature", "bug"))));
+            (SettingsKeys.TakeLabels, Labels("feature", "bug")),
+            (SettingsKeys.OwnerLabel, "manual"),
+            (SettingsKeys.InterruptedLabel, "paused")));
 
         Assert.Empty(result.Errors);
         Assert.Equal(new TrackerSettings("github", "https://github.com/orgs/bitpatch/projects/3"), result.Settings!.Tracker);
         Assert.Equal(["manual", "draft"], result.Settings.Queue.Labels.Blocking);
         Assert.Equal(["feature", "bug"], result.Settings.Queue.Labels.Take);
+        Assert.Equal("manual", result.Settings.Queue.Labels.Owner);
+        Assert.Equal("paused", result.Settings.Queue.Labels.Interrupted);
         Assert.Equal(new AssistantSettings("claude-code"), result.Settings.Assistant);
     }
 
@@ -35,6 +39,8 @@ public class SettingsValidatorTests
     [InlineData(SettingsKeys.TrackerType)]
     [InlineData(SettingsKeys.BlockingLabels)]
     [InlineData(SettingsKeys.TakeLabels)]
+    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.InterruptedLabel)]
     [InlineData(SettingsKeys.AssistantType)]
     public void ARequiredKeyMustBeThere(string key)
     {
@@ -60,6 +66,8 @@ public class SettingsValidatorTests
     [InlineData(SettingsKeys.TrackerBoard, 3L)]
     [InlineData(SettingsKeys.BlockingLabels, "manual")]
     [InlineData(SettingsKeys.TakeLabels, 1L)]
+    [InlineData(SettingsKeys.OwnerLabel, 1L)]
+    [InlineData(SettingsKeys.InterruptedLabel, true)]
     [InlineData(SettingsKeys.AssistantType, 0L)]
     public void AValueOfTheWrongTypeIsRefused(string key, object value)
     {
@@ -196,6 +204,50 @@ public class SettingsValidatorTests
         Assert.Contains("`Draft`", error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.InterruptedLabel)]
+    public void ALabelOfARunNeedsAName(string key)
+    {
+        var error = OnlyError(Document((key, " ")));
+
+        Assert.Equal(new SettingsError(key, LineOf(key), "a label name must not be empty"), error);
+    }
+
+    [Theory]
+    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.InterruptedLabel)]
+    public void ALabelOfARunIsNotALabelToTake(string key)
+    {
+        var error = OnlyError(Document((SettingsKeys.TakeLabels, Labels("bug", "feature")), (key, "Bug")));
+
+        Assert.Equal(new SettingsError(key, LineOf(key), "the label `Bug` is in `queue.labels.take` too"), error);
+    }
+
+    [Fact]
+    public void TheLabelOfTheOwnerMayBeABlockingOne()
+    {
+        var result = SettingsValidator.Validate(Document((SettingsKeys.BlockingLabels, Labels("manual")), (SettingsKeys.OwnerLabel, "manual")));
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void TheLabelOfInterruptedTasksIsNotABlockingOne()
+    {
+        var error = OnlyError(Document((SettingsKeys.BlockingLabels, Labels("manual", "paused")), (SettingsKeys.InterruptedLabel, "paused")));
+
+        Assert.Equal(new SettingsError(SettingsKeys.InterruptedLabel, LineOf(SettingsKeys.InterruptedLabel), "the label `paused` is in `queue.labels.blocking` too"), error);
+    }
+
+    [Fact]
+    public void TheTwoLabelsOfARunDiffer()
+    {
+        var error = OnlyError(Document((SettingsKeys.OwnerLabel, "manual"), (SettingsKeys.InterruptedLabel, "Manual")));
+
+        Assert.Equal(new SettingsError(SettingsKeys.InterruptedLabel, LineOf(SettingsKeys.InterruptedLabel), "must not be the label of `queue.labels.owner`"), error);
+    }
+
     [Fact]
     public void EveryErrorIsReportedInTheOrderOfTheLines()
     {
@@ -224,6 +276,8 @@ public class SettingsValidatorTests
         ("queue.labels", ""),
         (SettingsKeys.BlockingLabels, Array.Empty<object>()),
         (SettingsKeys.TakeLabels, Array.Empty<object>()),
+        (SettingsKeys.OwnerLabel, "needs-owner"),
+        (SettingsKeys.InterruptedLabel, "interrupted"),
         ("assistant", ""),
         (SettingsKeys.AssistantType, "claude-code"),
     ];
