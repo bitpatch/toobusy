@@ -21,7 +21,7 @@ public sealed record Line(params Part[] Parts)
 // question, which is what is asked, then under a rule the choice, where the user acts, then under another rule the
 // keys; and the foot. Two things show where the screen waits for the user, and both blink: the cursor, a block at the
 // caret, where a text is typed, and the chosen line of the choice, the one the pointer is on. A frame may have either,
-// both or none. The foot is as many pieces as it has marks: it goes on to a line of its own when the window is too
+// both or none. When it is the user who waits, a line of the choice is a row of dots that a light runs along. The foot is as many pieces as it has marks: it goes on to a line of its own when the window is too
 // narrow for them all.
 public sealed record Frame(
     string Title,
@@ -32,7 +32,8 @@ public sealed record Frame(
     Line Keys,
     Line Foot,
     Caret? Caret = null,
-    int? Chosen = null);
+    int? Chosen = null,
+    int? Waiting = null);
 
 // A screen of its own in the terminal: the alternate screen that programs like editors use. What the terminal showed
 // before stays untouched under it and is back when the screen is closed. A frame is drawn whole every time; the body
@@ -42,6 +43,9 @@ public sealed record Frame(
 // chosen line blinks with it, between the accent and the colour of any text. The blink is smooth and keeps its time
 // whatever is drawn: a key does not start it again. The cursor of the terminal is hidden, because whether it blinks is up to the
 // terminal. Only a palette without colours leaves the terminal's cursor in its place.
+//
+// The dots of a wait are lit by a light that runs from the first of them to the last and back: the dot it is on is in
+// the accent, and those it has left fade behind it to the colour of the rest. Without colours the dots stand still.
 public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, int Height)> size)
 {
     // The alternate screen, with a cursor that blinks.
@@ -56,6 +60,13 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     public static readonly TimeSpan Beat = TimeSpan.FromMilliseconds(80);
     const int Beats = 20;
 
+    // The dots of a wait: how many there are, what a dot is, how far the light goes in a beat, and for how many beats a dot it has
+    // left goes on fading.
+    public const int Dots = 7;
+    public const char Dot = '•';
+    const double Pace = 0.5;
+    const int Fading = 6;
+
     readonly Lock drawing = new();
     Frame? last;
 
@@ -63,7 +74,9 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     // null when there is none.
     (int Row, int Column, string Cell)? cursor;
     (int Row, Line Line, int Width)? chosen;
+    (int Row, int Count)? waiting;
     int beat;
+    int step;
 
     public void Open()
     {
@@ -75,7 +88,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     {
         lock (drawing)
         {
-            (last, cursor, chosen) = (null, null, null);
+            (last, cursor, chosen, waiting) = (null, null, null, null);
             output.Write(Leave);
             output.Flush();
         }
@@ -96,10 +109,11 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     {
         lock (drawing)
         {
-            if ((cursor is null && chosen is null) || !palette.DrawsCursor)
+            if ((cursor is null && chosen is null && waiting is null) || !palette.DrawsCursor)
                 return;
 
             beat = (beat + 1) % Beats;
+            step++;
             output.Write(Pulsing());
             output.Flush();
         }
@@ -110,7 +124,7 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
         lock (drawing)
         {
             last = frame;
-            (cursor, chosen) = (null, null);
+            (cursor, chosen, waiting) = (null, null, null);
             var (width, height) = size();
             width = Math.Max(20, width);
 
@@ -154,10 +168,30 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
                 cursor = (first + shown + 1, column + 2, column < under.Length ? under[column].ToString() : " ");
             }
 
+            if (frame.Waiting is { } dotted && dotted < frame.Choice.Count && choice + dotted - cut >= 0)
+                waiting = (first + choice + dotted - cut + 1, Math.Min(width - 1, frame.Choice[dotted].Parts.Sum(part => part.Text.Length)));
+
             text.Append(Pulsing());
             output.Write(text);
             output.Flush();
         }
+    }
+
+    // How brightly a dot of a wait is lit at a step, from 0, the colour of the rest, to 1, the accent. The light is
+    // at its brightest on the dot it is on, and a dot goes on fading for a few beats after the light has left it.
+    public static double Spark(int dot, int count, int step)
+    {
+        // The way of the light is there and back: as far again as the row is long.
+        var way = Math.Max(1, 2 * (count - 1));
+        var glow = 0.0;
+        for (var ago = 0; ago <= Fading; ago++)
+        {
+            var gone = (((step - ago) * Pace % way) + way) % way;
+            var at = gone <= count - 1 ? gone : way - gone;
+            glow = Math.Max(glow, (1 - ((double)ago / (Fading + 1))) * Math.Max(0, 1 - Math.Abs(at - dot)));
+        }
+
+        return glow;
     }
 
     // The chosen line and the cursor as the blink has them at the moment. Without colours nothing blinks: the cursor
@@ -182,6 +216,14 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 
         if (cursor is { } typed)
             text.Append(At(typed.Row, typed.Column)).Append(palette.Cursor(typed.Cell, glow));
+
+        if (waiting is var (line, count))
+        {
+            text.Append(At(line, 2));
+            for (var dot = 0; dot < count; dot++)
+                text.Append(palette.Spark(Dot.ToString(), Spark(dot, count, step)));
+        }
+
         return text.ToString();
     }
 

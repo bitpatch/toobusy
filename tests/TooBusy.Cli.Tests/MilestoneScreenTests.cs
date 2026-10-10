@@ -67,9 +67,19 @@ public sealed class MilestoneScreenTests : IDisposable
     }
 
     [Fact]
+    public void WhereThereIsSomewhereToGoBackToTheListEndsWithBack()
+    {
+        terminal.Keys.Press(Keys.Up, Keys.Enter);
+
+        using var page = terminal.Open();
+        Assert.Null(MilestoneScreen.Ask(page, Open, MilestoneStanding.Of(null, Open)));
+        terminal.AssertSaw("   No milestone  take tasks whatever their milestone\n ❯ Back\n ↑↓ move · enter choose");
+    }
+
+    [Fact]
     public void EscapeChoosesNothing()
     {
-        terminal.Keys.Press(Keys.Escape);
+        terminal.Keys.Press(Keys.Escape, Keys.Escape);
 
         Assert.Null(Ask(Open, null));
     }
@@ -77,6 +87,8 @@ public sealed class MilestoneScreenTests : IDisposable
     MilestoneChoice? Ask(IReadOnlyList<Milestone>? open, MilestoneChoice? chosen)
     {
         using var page = terminal.Open();
+        // As on the first run, where Escape leaves the page: there is nowhere to go back to, and no `Back`.
+        page.EscapeLeaves = true;
         return MilestoneScreen.Ask(page, open, MilestoneStanding.Of(chosen, open));
     }
 }

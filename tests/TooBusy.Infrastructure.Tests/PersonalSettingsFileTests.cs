@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Infrastructure.Settings;
 
@@ -13,6 +14,8 @@ public sealed class PersonalSettingsFileTests : IDisposable
     public void WithoutAFileNothingIsChosen()
     {
         Assert.Null(Of("/work/rocket").LoadMilestone());
+        Assert.Null(Of("/work/rocket").LoadModel());
+        Assert.Null(Of("/work/rocket").LoadEffort());
     }
 
     [Fact]
@@ -46,18 +49,86 @@ public sealed class PersonalSettingsFileTests : IDisposable
     [Fact]
     public void TheFileIsTomlThatAPersonCanRead()
     {
+        Of("/work/rocket").SaveEffort("high");
+        Of("/work/rocket").SaveModel(new ModelChoice("opus"));
         Of("/work/rocket").SaveMilestone(new MilestoneChoice("v0.3.0"));
 
         Assert.Equal(
             """
             # What you chose for each project you run toobusy in. toobusy writes this file.
-            # An empty milestone means working without one.
+            # An empty milestone means working without one; an empty model means the assistant's own.
 
             ["/work/rocket"]
             milestone = "v0.3.0"
+            model = "opus"
+            effort = "high"
 
             """.ReplaceLineEndings("\n"),
             File.ReadAllText(Of("/work/rocket").Path));
+    }
+
+    [Fact]
+    public void AModelAndAnEffortAreReadBackByAnotherRun()
+    {
+        Of("/work/rocket").SaveModel(new ModelChoice("claude-opus-4"));
+        Of("/work/rocket").SaveEffort("xhigh");
+
+        Assert.Equal(new ModelChoice("claude-opus-4"), Of("/work/rocket").LoadModel());
+        Assert.Equal("xhigh", Of("/work/rocket").LoadEffort());
+    }
+
+    [Fact]
+    public void TheAssistantsOwnModelIsAChoiceToo()
+    {
+        Of("/work/rocket").SaveModel(ModelChoice.AssistantsOwn);
+
+        Assert.Equal(ModelChoice.AssistantsOwn, Of("/work/rocket").LoadModel());
+        Assert.Contains("model = \"\"", File.ReadAllText(Of("/work/rocket").Path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SavingOneChoiceKeepsTheOthers()
+    {
+        Of("/work/rocket").SaveMilestone(new MilestoneChoice("v1"));
+        Of("/work/rocket").SaveModel(new ModelChoice("sonnet"));
+        Of("/work/rocket").SaveEffort("low");
+        Of("/work/rocket").SaveMilestone(MilestoneChoice.None);
+
+        Assert.Equal(MilestoneChoice.None, Of("/work/rocket").LoadMilestone());
+        Assert.Equal("sonnet", Of("/work/rocket").LoadModel()?.Name);
+        Assert.Equal("low", Of("/work/rocket").LoadEffort());
+    }
+
+    [Fact]
+    public void AFileWithOnlyAMilestoneSaysNothingOfTheModelAndTheEffort()
+    {
+        File.WriteAllText(Of("/work/rocket").Path, "[\"/work/rocket\"]\nmilestone = \"v1\"\n");
+
+        Assert.Null(Of("/work/rocket").LoadModel());
+        Assert.Null(Of("/work/rocket").LoadEffort());
+        Of("/work/rocket").SaveEffort("max");
+        Assert.Equal("v1", Of("/work/rocket").LoadMilestone()?.Title);
+    }
+
+    [Fact]
+    public void AProjectWithoutAMilestoneKeepsItsModel()
+    {
+        Of("/work/rocket").SaveModel(new ModelChoice("haiku"));
+        Of("/work/moon").SaveMilestone(new MilestoneChoice("v1"));
+
+        Assert.Equal("haiku", Of("/work/rocket").LoadModel()?.Name);
+        Assert.Null(Of("/work/rocket").LoadMilestone());
+    }
+
+    [Theory]
+    [InlineData("effort = \"ultra\"")]
+    [InlineData("effort = 3")]
+    public void AnEffortThatIsNotALevelCountsAsNotChosen(string line)
+    {
+        File.WriteAllText(Of("/work/rocket").Path, $"[\"/work/rocket\"]\nmilestone = \"v1\"\n{line}\n");
+
+        Assert.Null(Of("/work/rocket").LoadEffort());
+        Assert.Equal("v1", Of("/work/rocket").LoadMilestone()?.Title);
     }
 
     [Fact]

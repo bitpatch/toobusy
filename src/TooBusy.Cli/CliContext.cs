@@ -24,7 +24,7 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
     // Runs the commands of the machine; null when there are none to run.
     public IProcessRunner? Processes { get; init; }
 
-    // The folder of the user's own settings, where the choice of the milestone is kept; null when there is none.
+    // The folder of the user's own settings, where the choices of the user are kept; null when there is none.
     public string? PersonalFolder { get; init; }
 
     public static CliContext OfProcess() => new(Environment.CurrentDirectory, Console.Out, Console.Error)

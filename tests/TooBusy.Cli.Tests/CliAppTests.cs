@@ -208,7 +208,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        await RunAsync("milestone", "--none");
+        await ChooseAllAsync();
 
         var (exit, _, error) = await RunAsync("run");
 
@@ -221,7 +221,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        await RunAsync("milestone", "--none");
+        await ChooseAllAsync();
         var keys = new Keys().Type("/menu").Press(Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "run");
@@ -231,6 +231,254 @@ public sealed class CliAppTests : IDisposable
         Assert.DoesNotContain("demo", output, StringComparison.Ordinal);
         Assert.Contains("What to do", output, StringComparison.Ordinal);
         Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}", Report(output));
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartBeforeTheModelIsChosen()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await RunAsync("milestone", "--none");
+        await RunAsync("effort", "high");
+
+        var (exit, output, error) = await RunAsync("run");
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal(
+            "toobusy: the model is not chosen." + Environment.NewLine + "Run `toobusy model` to choose it." + Environment.NewLine,
+            error);
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartBeforeTheEffortIsChosen()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await RunAsync("milestone", "--none");
+        await RunAsync("model", "--default");
+
+        var (exit, output, error) = await RunAsync("run");
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal(
+            "toobusy: the effort is not chosen." + Environment.NewLine + "Run `toobusy effort` to choose it." + Environment.NewLine,
+            error);
+    }
+
+    [Fact]
+    public async Task AModelIsChosenByItsNameFromAScript()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("model", " claude-opus-4 ");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal("Model: claude-opus-4" + Environment.NewLine, output);
+        Assert.Equal("Model: claude-opus-4" + Environment.NewLine, (await RunAsync("model")).Output);
+        Assert.Contains("model = \"claude-opus-4\"", File.ReadAllText(Path.Combine(personal.FullName, "projects.toml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheAssistantsOwnModelIsChosenFromAScriptToo()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("model", "--default");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("Model: the assistant's own." + Environment.NewLine, output);
+        Assert.Equal("Model: the assistant's own" + Environment.NewLine, (await RunAsync("model")).Output);
+        Assert.Contains("model = \"\"", File.ReadAllText(Path.Combine(personal.FullName, "projects.toml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameAndDefaultTogetherAreAWrongCommandLine()
+    {
+        GitRepository();
+
+        var (exit, _, error) = await RunAsync("model", "opus", "--default");
+
+        Assert.Equal(2, exit);
+        Assert.Contains("not both", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnEmptyModelNameIsRefused()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("model", " ");
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: the name of the model is empty" + Environment.NewLine, error);
+        Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
+    }
+
+    [Fact]
+    public async Task WithoutATerminalAModelThatIsNotChosenSaysHowToChooseIt()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("model");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            "Model: not chosen" + Environment.NewLine + "Choose it with `toobusy model <name>` or `toobusy model --default`." + Environment.NewLine,
+            output);
+    }
+
+    [Fact]
+    public async Task InATerminalTheModelIsChosenFromAList()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter).Type("claude-opus-4").Press(Keys.Enter), "model");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Choosing the model", output, StringComparison.Ordinal);
+        Assert.Equal(
+            $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}✔ Model            claude-opus-4{Environment.NewLine}",
+            Report(output));
+        Assert.Equal("Model: claude-opus-4", (await RunAsync("model")).Output.Trim());
+    }
+
+    [Fact]
+    public async Task LeavingTheQuestionAboutTheModelLeavesItAsItWas()
+    {
+        GitRepository();
+        await RunAsync("model", "opus");
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Escape, Keys.Escape), "model");
+
+        Assert.Equal(0, exit);
+        Assert.EndsWith("The model is left as it was." + Environment.NewLine, Report(output), StringComparison.Ordinal);
+        Assert.Equal("Model: opus", (await RunAsync("model")).Output.Trim());
+    }
+
+    [Fact]
+    public async Task ADemoRemembersNoModelAndNoEffort()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("model", "opus", "--demo");
+        var (_, effort, _) = await RunAsync("effort", "max", "--demo");
+        var (_, page, _) = await RunWithKeysAsync(new Keys().Press(Keys.Enter), "effort", "--demo");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("Model: opus" + Environment.NewLine, output);
+        Assert.Equal("Effort: max" + Environment.NewLine, effort);
+        Assert.EndsWith($"✔ Effort           high{Environment.NewLine}Demo: what was chosen is not remembered.{Environment.NewLine}", Report(page), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
+    }
+
+    [Fact]
+    public async Task AnEffortIsChosenByItsLevelFromAScript()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("effort", "XHigh");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal("Effort: xhigh" + Environment.NewLine, output);
+        Assert.Equal("Effort: xhigh" + Environment.NewLine, (await RunAsync("effort")).Output);
+    }
+
+    [Fact]
+    public async Task AnEffortThatIsNotALevelIsRefusedWithTheLevels()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("effort", "ultra");
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: there is no effort “ultra”." + Environment.NewLine + "The levels: low, medium, high, xhigh, max" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task WithoutATerminalAnEffortThatIsNotChosenSaysHowToChooseIt()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("effort");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            "Effort: not chosen" + Environment.NewLine + "Choose it with `toobusy effort <level>`: low, medium, high, xhigh, max." + Environment.NewLine,
+            output);
+    }
+
+    [Fact]
+    public async Task InATerminalTheEffortIsChosenFromAList()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Down, Keys.Enter), "effort");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("❯ high", output, StringComparison.Ordinal);
+        Assert.Equal(
+            $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}✔ Effort           xhigh{Environment.NewLine}",
+            Report(output));
+        Assert.Equal("Effort: xhigh", (await RunAsync("effort")).Output.Trim());
+    }
+
+    [Fact]
+    public async Task LeavingTheQuestionAboutTheModelOnTheFirstRunLeavesThePage()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await RunAsync("milestone", "--none");
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Escape, Keys.Escape), []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("The model the tasks are done with by default.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("What to do", output, StringComparison.Ordinal);
+        Assert.Equal("Model: not chosen", (await RunAsync("model")).Output.Split(Environment.NewLine)[0]);
+    }
+
+    [Fact]
+    public async Task TheAssistantOfTheMenuChangesTheModelAndTheEffort()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // The assistant; the model: opus; the effort: one above; a look at the model that is left with Escape; `Back`
+        // of the list, and out. On the first run there was nowhere to go back to, and here there is.
+        var keys = new Keys().Press(
+            Keys.Down, Keys.Enter,
+            Keys.Enter, Keys.Down, Keys.Down, Keys.Enter,
+            Keys.Down, Keys.Enter, Keys.Down, Keys.Enter,
+            Keys.Up, Keys.Enter, Keys.Escape,
+            Keys.Up, Keys.Enter, Keys.Up, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Model   the assistant's own", output, StringComparison.Ordinal);
+        Assert.Contains("Model   opus", output, StringComparison.Ordinal);
+        Assert.Contains("Effort  xhigh", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant  opus · xhigh", output, StringComparison.Ordinal);
+        Assert.Contains("  haiku\u001b[K\r\n   Other…", output, StringComparison.Ordinal);
+        Assert.Contains("Back", output, StringComparison.Ordinal);
+        Assert.Contains("The model is left as it was.", output, StringComparison.Ordinal);
+        Assert.Equal(
+            [
+                $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}",
+                "✔ Model            opus",
+                "✔ Effort           xhigh",
+                "",
+            ],
+            Report(output).Split(Environment.NewLine));
+        Assert.Equal("Model: opus", (await RunAsync("model")).Output.Trim());
+        Assert.Equal("Effort: xhigh", (await RunAsync("effort")).Output.Trim());
     }
 
     [Fact]
@@ -326,20 +574,22 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task WithoutACommandAProjectIsSetUpAMilestoneIsChosenAndTheMenuOpens()
+    public async Task WithoutACommandAProjectIsSetUpTheChoicesAreMadeAndTheMenuOpens()
     {
         GitRepository();
         var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\nmanual\n");
 
-        // No project, no blocking labels, any label, yes; the first milestone; the last of the menu.
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
+        // No project, no blocking labels, any label, yes; the first milestone; the model after the assistant's own;
+        // the proposed effort; the last of the menu.
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, processes, []);
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         Assert.Contains("What to do", output, StringComparison.Ordinal);
-        Assert.Contains("Change milestone  v0.2.0", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant  fable · high", output, StringComparison.Ordinal);
+        Assert.Contains("Milestone  v0.2.0", output, StringComparison.Ordinal);
         Assert.Equal(
             [
                 $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}",
@@ -350,11 +600,15 @@ public sealed class CliAppTests : IDisposable
                 "✔ Assistant        Claude Code",
                 "✔ The settings are written to .toobusy/settings.toml. Commit the file.",
                 "✔ Milestone        v0.2.0",
+                "✔ Model            fable",
+                "✔ Effort           high",
                 "",
             ],
             Report(output).Split(Environment.NewLine));
         Assert.Contains("type = \"github\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
         Assert.Equal("Milestone: v0.2.0", (await ShownAsync(processes)).Output.Trim());
+        Assert.Equal("Model: fable", (await RunAsync("model")).Output.Trim());
+        Assert.Equal("Effort: high", (await RunAsync("effort")).Output.Trim());
     }
 
     [Fact]
@@ -362,18 +616,39 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        await RunAsync("milestone", "--none");
+        await ChooseAllAsync();
 
         // Settings, back out of them, then leave with Escape twice.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
         Assert.Equal(0, exit);
         Assert.Contains("✔ Milestone        none: tasks are taken whatever their milestone", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant  own model · high", output, StringComparison.Ordinal);
         Assert.Contains("Setting up this project", output, StringComparison.Ordinal);
         Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
         Assert.Contains("press esc again to exit", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BackOfTheSettingsGoesToTheMenuAsEscapeDoes()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Settings; the tab without a project, and `Back` under it; the last of the menu.
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Tab, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("❯ Back", output, StringComparison.Ordinal);
+        Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("press esc again to exit", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -392,6 +667,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Project          https://github.com/users/example/projects/1", output, StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  manual, draft", output, StringComparison.Ordinal);
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
         Assert.Contains("Running the tasks is not built yet.", output, StringComparison.Ordinal);
         Assert.Equal($"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}", Report(output));
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
@@ -652,6 +929,14 @@ public sealed class CliAppTests : IDisposable
         Processes = processes,
         PersonalFolder = personal.FullName,
     };
+
+    // Chooses everything a run needs: no milestone, the assistant's own model and the proposed effort.
+    async Task ChooseAllAsync()
+    {
+        await RunAsync("milestone", "--none");
+        await RunAsync("model", "--default");
+        await RunAsync("effort", "high");
+    }
 
     // What `toobusy milestone` prints without a terminal, and its exit code.
     async Task<(string Output, int Exit)> ShownAsync(FakeProcesses? processes)

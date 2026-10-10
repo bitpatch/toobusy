@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. So far it covers setting a project up and choosing what to work on: the settings file, `toobusy init`, the milestone of the user, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. Running the tasks is not described yet, and `doctor` and the options of `init` that answer without questions are described but not built.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. So far it covers setting a project up and choosing what to work on: the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. Running the tasks is not described yet, and `doctor` and the options of `init` that answer without questions are described but not built.
 
 ## Setting a project up
 
@@ -11,6 +11,7 @@ In scope:
 - the settings file in `.toobusy/`: its format, its first sections, reading and validating it;
 - `toobusy init`: an interactive setup, and the same setup driven by options alone;
 - the milestone to work on: the choice of the user, kept on their machine, and `toobusy milestone`;
+- the model and the effort the tasks are done with by default: choices of the user too, `toobusy model` and `toobusy effort`;
 - `toobusy` without a command: the page with the menu;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
 - the message of `toobusy` and `toobusy run` in a project that is not set up.
@@ -20,7 +21,7 @@ Out of scope, each a later part of this specification:
 - reading the queue and running tasks; the settings below are written and validated, and nothing consumes them yet;
 - the board's statuses, the order of tasks, blocking links between tasks;
 - the prompts and the contract with the assistant; Claude Code skills are not used;
-- the assistant's model, effort and permissions;
+- the assistant's permissions, and giving it the model and the effort: they are chosen and kept, and nothing consumes them yet;
 - choosing an assistant per task, for example by a label;
 - the checks of the working copy before and after a task;
 - local state of a run and the `.gitignore` that keeps it out of the repository.
@@ -70,9 +71,11 @@ The choice is personal. It is not a setting of the project and is not committed:
 ```toml
 ["/Users/ann/Projects/rocket"]
 milestone = "v0.3.0"    # an empty title means working without a milestone
+model = "opus"          # an empty name means the assistant's own model
+effort = "high"
 ```
 
-A project is known by the path of its root, so a second clone and a worktree have choices of their own. The milestone is kept by its title. toobusy writes the file whole; a file it cannot read counts as one that says nothing.
+A project is known by the path of its root, so a second clone and a worktree have choices of their own. The milestone is kept by its title. The file holds every personal choice of a project, the model and the effort among them, each under its own key; a key that is not there is a choice that is not made. toobusy writes the file whole; a file it cannot read counts as one that says nothing.
 
 A choice is checked against the open milestones whenever it is used:
 
@@ -85,6 +88,15 @@ A choice is checked against the open milestones whenever it is used:
 | a milestone, while the milestones cannot be read | the choice stands, and the page says that it was not checked |
 
 Where milestones are listed, those with a version in the title come first, the lowest version first, and the rest follow by their titles. The version is the first run of dot-separated numbers in the title (`v.0.2.0`, `v1.4`, `Release 2.0`), compared number by number. Each is shown with its due date, when it has one, and the number of its open tasks. `No milestone` is the last of the list.
+
+#### The model and the effort
+
+The model and the effort a task is done with by default are choices of the user as well: they are kept in the same file, for each project apart, and are not committed. Nothing can be run before both are chosen.
+
+- **The model** is the assistant's own, which names no model and leaves the choice to the assistant, or a model by its name. The list offers `Assistant's own`, the names `fable`, `opus`, `sonnet` and `haiku`, and `Other…`, where any name is typed as the assistant takes it. A name is not checked.
+- **The effort** is one of the levels `low`, `medium`, `high`, `xhigh` and `max`. A user who has not chosen is proposed `high`. A level is taken whatever the case of its letters; an effort in the file that is not a level counts as one that is not chosen.
+
+They are not given to the assistant yet: that comes with running the tasks.
 
 ### Not set up
 
@@ -101,7 +113,7 @@ In a terminal `toobusy` without a command does not stop there: it opens its page
 
 ### The screen
 
-In a terminal `toobusy`, `init`, `milestone` and `run` open a screen of their own, the alternate screen that editors use. What the terminal showed before stays untouched under it. When the command ends, however it ends, the screen is closed, the terminal is back as it was, and under its old lines the command leaves a short report of what was done.
+In a terminal `toobusy`, `init`, `milestone`, `model`, `effort` and `run` open a screen of their own, the alternate screen that editors use. What the terminal showed before stays untouched under it. When the command ends, however it ends, the screen is closed, the terminal is back as it was, and under its old lines the command leaves a short report of what was done.
 
 From top to bottom the screen is:
 
@@ -130,6 +142,7 @@ From top to bottom the screen is:
   - A screen may have both, as the list of the boards has under its filter.
   - The blink keeps its time: a key or a change of the chosen line does not start it again.
   - The cursor of the terminal is hidden, because whether it blinks is up to the terminal. A terminal of sixteen colours has the two ends of the blink without the fade, and without colours nothing blinks: the terminal's own cursor stands in the text or on the pointer.
+- While toobusy reads something from the tracker, the choice says what it reads and, under it, shows seven dots that a light runs along, from the first to the last and back, a second each way: the dot it is on is in the accent, and those it has left fade behind it to the muted colour of the rest. A terminal of sixteen colours has the lit dot without the fade, and without colours the dots stand still. Nobody has to wait: the keys work while toobusy reads. Where there is somewhere to go back to, `Back` stands under the dots from the first moment, and Enter or Escape goes back at once; where Escape leaves the page it leaves it from here too, asked twice, and so does Ctrl+C twice. What was being read is told to stop and is not waited for, so a tracker that never answers holds nobody.
 - The keys are hints of the form `enter choose`: the name of each key is a little lighter than what it does, so that the eye finds it.
 - Choices stand one under another, never side by side.
 - The body between the bar and the question gives way when the window is short, its oldest lines first.
@@ -188,10 +201,11 @@ After writing, `init` says that the file is to be committed.
 
 Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a board that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
 
-**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, and the settings and the milestone that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, and the first of the milestones is the chosen one, so that the menu opens at once; the setup and the choice of the milestone are tried from the menu, or with `init --demo` and `milestone --demo`. The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
+**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`. The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
 
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
 
+- **`Back`.** Wherever Escape goes back and does not leave the page, a list ends with a row `Back` that does what Escape does: in the lists the menu opens and in the steps of a setup opened from it, in a selection, a multiple choice, a confirmation and the lists of the boards. Where Escape would leave the page there is no `Back`: in the menu, which has `Exit`, in the first question of `init`, on the first run and in `toobusy milestone`, `model` and `effort`. A page that waits for the tracker has it under its dots. A question that is answered with a text has no list to end with it, and a list of the boards that a filter has emptied has none either; Escape goes back from them.
 - A selection moves with Up and Down, a multiple choice marks with the space bar, a confirmation is `Yes` over `No` and also takes `y` and `n`. A list that does not fit shows eight rows, five for the boards, and says above and below how many rows are beyond them: `↑ 2 more`, `↓ 4 more`.
 - A text is edited where the cursor is: Left, Right, Home and End move it, Backspace and Delete remove a character, and Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W do what they do in a shell. A pasted text is drawn once.
 
@@ -228,18 +242,22 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 
 1. **A project that is not set up** is set up: the steps of `init`, on the same page. Leaving them, or declining at the end, leaves the page.
 2. **A user without a milestone to work on**, one who has not chosen or whose milestone is not open any more, chooses one from the list. Leaving the list leaves the page.
-3. **The menu.** Above it stand the settings and the milestone as they are; the milestone stands again, in the colour of success, after the choice that changes it.
+3. **A user who has not chosen the model or the effort** chooses them, the model first. Leaving either list leaves the page.
+4. **The menu.** Above it stand the settings, the milestone, the model and the effort as they are; the milestone stands again, in the colour of success, after the choice that changes it.
 
 ```
  ✔ Project          https://github.com/orgs/bitpatch/projects/4
  ✔ Blocking labels  manual, draft
  ✔ Labels to take   any task
  ✔ Milestone        v0.3.0 · due 2030-01-15 · 12 open tasks
+ ✔ Model            opus
+ ✔ Effort           high
 
  What to do
  ────────────────────────────────────────────────────────────
- ❯ Run               take the tasks one after another
-   Change milestone  v0.3.0
+ ❯ Run        take the tasks one after another
+   Assistant  opus · high
+   Milestone  v0.3.0
    Settings
    Exit
  ────────────────────────────────────────────────────────────
@@ -249,11 +267,33 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 | Choice | Opens |
 |---|---|
 | `Run` | the run, as `toobusy run` does |
-| `Change milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
+| `Assistant` | the model and the effort, described below; Escape goes back to the menu |
+| `Milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
 | `Settings` | the steps of `init` with the current values proposed; Escape from the first of them goes back to the menu, and so does the end of the setup, whose last line is shown above the menu |
 | `Exit` | nothing: it leaves the page, as Escape twice and Ctrl+C twice do |
 
-When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone when one was chosen. The exit code is 0, and 1 when a setup failed on GitHub.
+After `Assistant` stand the model and the effort that are chosen; the assistant's own model is `own model` there. It opens a list of the two, each with what is chosen after its name:
+
+```
+ Assistant
+ ────────────────────────────────────────────────────────────
+ ❯ Model   opus
+   Effort  high
+   Back
+ ────────────────────────────────────────────────────────────
+ ↑↓ move · enter choose · esc back · ctrl+c exit
+```
+
+| Choice | Opens |
+|---|---|
+| `Model` | the list of the models; Escape goes back with the model as it was |
+| `Effort` | the list of the levels; Escape goes back with the effort as it was |
+
+Both lists end with `Back`, as every list does that there is somewhere to go back from.
+
+The answers of `Settings` are written to the settings of the project and are to be committed; the milestone, the model and the effort are kept on the machine of the user.
+
+When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone, the model and the effort when they were chosen. The exit code is 0, and 1 when a setup failed on GitHub.
 
 Without a terminal there is nobody to ask: `toobusy` prints its help in a project that is set up and the "not set up" message in one that is not.
 
@@ -277,6 +317,27 @@ The open ones: v0.2.0, v0.3.0
 
 It fails in the same way when the milestones cannot be read. A title together with `--none` is a wrong command line.
 
+### `toobusy model` and `toobusy effort`
+
+`model` and `effort` choose the model and the effort the tasks are done with by default, or show what is chosen. Like `milestone`, they need no settings: only a project.
+
+| Command | Does |
+|---|---|
+| `toobusy model <name>` | chooses the model with that name, as it is written, and prints `Model: <name>`. An empty name fails with exit code 1 |
+| `toobusy model --default` | chooses the assistant's own model |
+| `toobusy model` in a terminal | opens the list of the models on a page; Escape leaves the choice as it was |
+| `toobusy model` without a terminal | prints the choice: `Model: opus`, `Model: the assistant's own` or `Model: not chosen` |
+| `toobusy effort <level>` | chooses the level, whatever the case of its letters, and prints `Effort: <level>` |
+| `toobusy effort` in a terminal | opens the list of the levels on a page; Escape leaves the choice as it was |
+| `toobusy effort` without a terminal | prints the choice: `Effort: high` or `Effort: not chosen` |
+
+A name together with `--default` is a wrong command line. A level that the assistant does not have fails with exit code 1 and names the levels:
+
+```
+toobusy: there is no effort “ultra”.
+The levels: low, medium, high, xhigh, max
+```
+
 ### `toobusy run`
 
 The tasks are not run yet; `run` is the entry point that the run grows from.
@@ -286,6 +347,13 @@ The tasks are not run yet; `run` is the entry point that the run grows from.
 ```
 toobusy: the milestone to work on is not chosen.
 Run `toobusy milestone` to choose it.
+```
+
+Nor does it start before the model and the effort are chosen. The first that is missing is named, in the same way and with the same exit code:
+
+```
+toobusy: the model is not chosen.
+Run `toobusy model` to choose it.
 ```
 
 In a terminal `run` opens the page of `toobusy` on the run, with the menu behind it. The run says `Running the tasks is not built yet.`, and its choice is a line where commands are typed:
@@ -343,13 +411,13 @@ A command of a package manager is proposed only when that manager is on the path
 | Code | Meaning |
 |---|---|
 | 0 | done |
-| 1 | failed: a check did not pass, a value was refused, the setup was declined or left, the milestone to work on is not chosen |
+| 1 | failed: a check did not pass, a value was refused, the setup was declined or left, the milestone to work on, the model or the effort is not chosen |
 | 2 | there is no project, the project is not set up, or the command line is wrong |
 
 ### Tests
 
 - The settings: reading, every validation rule, writing, and that a rewrite keeps unknown comments.
-- The choice of the milestone against made-up lists of open milestones, the order of the milestones, and the file the choice is kept in.
+- The choice of the milestone against made-up lists of open milestones, the order of the milestones, and the file the choices are kept in: the milestone, the model and the effort, each apart.
 - What is asked of `gh`, argument by argument, and what is made of its answers and its failures, with the commands of the machine faked.
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn.

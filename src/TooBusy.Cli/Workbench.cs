@@ -1,4 +1,5 @@
 using TooBusy.Cli.Imitation;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
@@ -23,10 +24,11 @@ public sealed record Workbench(
     IMilestones Milestones,
     IPersonalSettings Personal)
 {
-    // `personalFolder` is where the choice of the user is kept. A demo keeps nothing. What it reads is real where
+    // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
     // reading changes nothing: the `origin` remote, the boards and the milestones; what it would make, link, write
-    // and remember is imitated. A demo that is `ready` shows a project that is set up and has its milestone chosen,
-    // whatever the project is: where there are no settings they are made up, and the first milestone is the chosen one.
+    // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,
+    // whatever the project is: where there are no settings they are made up, the first milestone is the chosen one,
+    // the model is the assistant's own and the effort is the proposed one.
     public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, CancellationToken cancellationToken)
     {
         if (demo)
@@ -45,7 +47,10 @@ public sealed record Workbench(
                 new ImitatedBoards(processes is null ? null : new GitHubBoards(processes)),
                 new UnwrittenSettings(new SettingsFile(root), madeUp: ready),
                 milestones,
-                new UnsavedChoice(first is null ? null : new MilestoneChoice(first.Title)));
+                new UnsavedChoice(
+                    first is null ? null : new MilestoneChoice(first.Title),
+                    ready ? ModelChoice.AssistantsOwn : null,
+                    ready ? ClaudeCodeOptions.ProposedEffort : null));
         }
 
         processes ??= new NoProcesses();

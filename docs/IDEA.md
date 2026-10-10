@@ -21,10 +21,12 @@ The folder lives in the project's repository and holds everything that is specif
 
 - the task tracker and the project, board or repository in it;
 - the queue rules: which labels mark a task type, which labels keep a task out, which status means "ready", how tasks are ordered, what blocks a task;
-- the assistant and how it is started: model, effort, permissions;
+- the assistant and how it is started: its permissions;
 - the prompts the assistant gets, as editable templates;
 - the checks of the working copy before a task and after it: branch, clean tree, sync with the remote, project-specific commands;
 - local state of a run, which is not committed.
+
+What is one person's own is not in the folder: the milestone to work on, and the model and the effort the tasks are done with by default, are chosen by each user and kept on their machine.
 
 ## What it does during a run
 

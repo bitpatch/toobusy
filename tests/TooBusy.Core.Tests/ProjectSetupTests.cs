@@ -368,7 +368,32 @@ public class ProjectSetupTests
     {
         await RunAsync();
 
-        Assert.Equal(["Reading your projects from GitHub…", "Reading the labels…"], dialog.Waited);
+        Assert.Equal(["Reading your projects from GitHub", "Reading the labels"], dialog.Waited);
+    }
+
+    [Fact]
+    public async Task GoingBackWhileTheProjectsAreReadLeavesTheSetup()
+    {
+        dialog.Unwaited.Add("Reading your projects from GitHub");
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Left, result.Outcome);
+        Assert.Empty(dialog.Asked);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task GoingBackWhileTheLabelsAreReadGoesToTheStepBefore()
+    {
+        dialog.Unwaited.Add("Reading the labels");
+
+        await RunAsync();
+
+        // The labels are asked for again when the step comes back.
+        Assert.Equal(["Reading your projects from GitHub", "Reading the labels", "Reading the labels"], dialog.Waited);
+        Assert.Equal([0, 0, 1, 0, 1], dialog.Places.Take(5));
+        Assert.NotNull(store.Saved);
     }
 
     Task<SetupResult> RunAsync() => new ProjectSetup(dialog, machine, tracker, boards, store).RunAsync(TestContext.Current.CancellationToken);
@@ -418,7 +443,15 @@ public class ProjectSetupTests
 
         public void Show(SetupProgress progress) => Seen.Add(progress);
 
-        public void Wait(string text) => Waited.Add(text);
+        // What the user does not wait for, by the text of the wait.
+        public HashSet<string> Unwaited { get; } = [];
+
+        public async Task<T?> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+            where T : class
+        {
+            Waited.Add(text);
+            return Unwaited.Remove(text) ? null : await work(cancellationToken);
+        }
 
         public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed)
         {

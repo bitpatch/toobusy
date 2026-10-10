@@ -10,12 +10,23 @@ public static class Picker
     // A list longer than this scrolls.
     public const int Rows = 8;
 
+    // The last row of every list that there is somewhere to go back from.
+    public const string Back = "Back";
+
     const int LabelWidth = 16;
 
+    // Whether a list on the page is to end with `Back`: it is, unless Escape leaves the page from here.
+    public static bool GoesBack(Page page) => !page.EscapeLeaves;
+
     // Asks to choose one of the choices, one under another, starting at the given one. Gives the index of the
-    // chosen one, or null when Escape is pressed. `shortcut` lets a key choose at once.
+    // chosen one, or null when Escape is pressed. `shortcut` lets a key choose at once. Wherever Escape goes back
+    // and does not leave the page, the list ends with `Back`, which does what Escape does.
     public static int? Pick(Page page, IReadOnlyList<Line> question, IReadOnlyList<Choice> choices, string keys = "", int at = 0, Func<ConsoleKey, int?>? shortcut = null)
     {
+        var back = GoesBack(page);
+        if (back)
+            choices = [.. choices, new Choice(Back)];
+
         at = Math.Clamp(at, 0, choices.Count - 1);
         var top = 0;
         // Names that something follows are as wide as the widest of them, so that what follows stands in a column.
@@ -33,7 +44,7 @@ public static class Picker
             else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J or ConsoleKey.Tab)
                 at = (at + 1) % choices.Count;
             else if (key.Key == ConsoleKey.Enter)
-                return at;
+                return back && at == choices.Count - 1 ? null : at;
             else if (key.Key == ConsoleKey.Escape)
                 return null;
             else if (shortcut?.Invoke(key.Key) is { } chosen)

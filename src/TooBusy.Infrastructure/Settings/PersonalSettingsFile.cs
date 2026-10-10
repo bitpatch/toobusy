@@ -1,7 +1,9 @@
 using System.Text;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Infrastructure.Settings;
 
@@ -11,6 +13,11 @@ namespace TooBusy.Infrastructure.Settings;
 public sealed class PersonalSettingsFile(string folder, string projectRoot) : IPersonalSettings
 {
     const string Milestone = "milestone";
+    const string Model = "model";
+    const string Effort = "effort";
+
+    // The choices a table holds, in the order they are written.
+    static readonly string[] Keys = [Milestone, Model, Effort];
 
     public string Path { get; } = System.IO.Path.Combine(folder, "projects.toml");
 
@@ -25,27 +32,46 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
         return string.IsNullOrEmpty(settings) ? null : System.IO.Path.Combine(settings, "toobusy");
     }
 
-    public MilestoneChoice? LoadMilestone() =>
-        Read().TryGetValue(projectRoot, out var title) ? new MilestoneChoice(title.Length == 0 ? null : title) : null;
+    public MilestoneChoice? LoadMilestone() => Load(Milestone) is { } title ? new MilestoneChoice(title.Length == 0 ? null : title) : null;
 
-    public void SaveMilestone(MilestoneChoice choice)
+    public void SaveMilestone(MilestoneChoice choice) => Save(Milestone, choice.Title ?? "");
+
+    public ModelChoice? LoadModel() => Load(Model) is { } name ? new ModelChoice(name.Length == 0 ? null : name) : null;
+
+    public void SaveModel(ModelChoice choice) => Save(Model, choice.Name ?? "");
+
+    // An effort that is not a level of the assistant counts as one that is not chosen.
+    public string? LoadEffort() => Load(Effort) is { } effort ? ClaudeCodeOptions.FindEffort(effort) : null;
+
+    public void SaveEffort(string effort) => Save(Effort, effort);
+
+    string? Load(string key) => Read().TryGetValue(projectRoot, out var choices) ? choices.GetValueOrDefault(key) : null;
+
+    void Save(string key, string value)
     {
         var projects = Read();
-        projects[projectRoot] = choice.Title ?? "";
+        if (!projects.TryGetValue(projectRoot, out var choices))
+            projects[projectRoot] = choices = [];
+        choices[key] = value;
 
         var text = new StringBuilder("# What you chose for each project you run toobusy in. toobusy writes this file.\n");
-        text.Append("# An empty milestone means working without one.\n");
-        foreach (var (root, title) in projects.OrderBy(project => project.Key, StringComparer.Ordinal))
-            text.Append("\n[").Append(SettingsToml.Quoted(root)).Append("]\n").Append(Milestone).Append(" = ").Append(SettingsToml.Quoted(title)).Append('\n');
+        text.Append("# An empty milestone means working without one; an empty model means the assistant's own.\n");
+        foreach (var (root, chosen) in projects.OrderBy(project => project.Key, StringComparer.Ordinal))
+        {
+            text.Append("\n[").Append(SettingsToml.Quoted(root)).Append("]\n");
+            foreach (var name in Keys.Where(chosen.ContainsKey))
+                text.Append(name).Append(" = ").Append(SettingsToml.Quoted(chosen[name])).Append('\n');
+        }
 
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path, text.ToString());
     }
 
-    // The title of the milestone of every project the file knows; an empty title is working without a milestone.
-    Dictionary<string, string> Read()
+    // What is chosen for every project the file knows: the texts of the choices under their keys. A project with no
+    // choice is left out.
+    Dictionary<string, Dictionary<string, string>> Read()
     {
-        var projects = new Dictionary<string, string>(StringComparer.Ordinal);
+        var projects = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         if (!File.Exists(Path))
             return projects;
 
@@ -61,12 +87,15 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
                 BareKeySyntax bare => bare.Key?.Text,
                 _ => null,
             };
-            var title = table.Items
-                .Where(pair => pair.Key is { DotKeys.ChildrenCount: 0, Key: BareKeySyntax { Key.Text: Milestone } })
-                .Select(pair => (pair.Value as StringValueSyntax)?.Value)
-                .FirstOrDefault();
-            if (root is not null && title is not null)
-                projects[root] = title;
+            var chosen = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var pair in table.Items)
+            {
+                if (pair is { Key: { DotKeys.ChildrenCount: 0, Key: BareKeySyntax { Key.Text: { } key } }, Value: StringValueSyntax { Value: { } value } } && Keys.Contains(key))
+                    chosen.TryAdd(key, value);
+            }
+
+            if (root is not null && chosen.Count > 0)
+                projects[root] = chosen;
         }
 
         return projects;

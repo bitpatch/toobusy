@@ -50,7 +50,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         page.Keys = leaves ? "esc exit" : "esc back";
     }
 
-    public void Wait(string text) => page.Draw([], [Line.Of(text, Tone.Muted)], "");
+    public async Task<T?> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+        where T : class =>
+        await page.WaitAsync(text, work, cancellationToken) is (true, var value) ? value : null;
 
     public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
         Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);
@@ -61,49 +63,37 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         var at = chosen.FirstOrDefault();
         var top = 0;
         var widest = options.Select(option => option.Length).DefaultIfEmpty().Max();
+
+        // After the options stands `Back`, where there is somewhere to go back to: Enter on it goes back.
+        var rows = options.Count + (options.Count > 0 && Picker.GoesBack(page) ? 1 : 0);
         while (true)
         {
             var lines = new List<Line>();
             if (options.Count == 0)
                 lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
-            top = Window(lines, options.Count, at, top, Picker.Rows, out var pointer, index => Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
+            top = Window(lines, rows, at, top, Picker.Rows, out var pointer, index => index == options.Count
+                ? Row(index == at, Picker.Back)
+                : Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
             page.Draw(Head(label, hint), lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer);
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Enter)
-                return [.. chosen];
+                return at < options.Count || options.Count == 0 ? [.. chosen] : null;
             if (key.Key == ConsoleKey.Escape)
                 return null;
             if (options.Count == 0)
                 continue;
 
             if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
-                at = (at + options.Count - 1) % options.Count;
+                at = (at + rows - 1) % rows;
             else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
-                at = (at + 1) % options.Count;
-            else if (key.Key == ConsoleKey.Spacebar && !chosen.Remove(at))
+                at = (at + 1) % rows;
+            else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !chosen.Remove(at))
                 chosen.Add(at);
         }
     }
 
-    public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse)
-    {
-        var editor = new LineEditor(proposed);
-        string? reason = null;
-        while (true)
-        {
-            var (field, column) = Field(editor, "");
-            page.Draw(Head(label, hint, reason), [field], "enter confirm", new Caret(0, column));
-
-            var key = page.Read();
-            if (key.Key == ConsoleKey.Escape)
-                return null;
-            if (key.Key != ConsoleKey.Enter)
-                editor.Press(key);
-            else if ((reason = refuse(editor.Text)) is null)
-                return editor.Text.Trim();
-        }
-    }
+    public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse);
 
     public bool? Confirm(string question) => Picker.Pick(page, [Line.Of(question, Tone.Strong)], [new Choice("Yes"), new Choice("No")], "y yes · n no", shortcut: key => key switch
     {
@@ -166,6 +156,11 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         ];
         var way = 0;
 
+        // The lists of the tabs end with `Back`, where there is somewhere to go back to. A tab where a text is typed
+        // has no list to put it in: Escape goes back from there.
+        var back = Picker.GoesBack(page) ? 1 : 0;
+        var without = 0;
+
         var filter = new LineEditor("");
         var at = Math.Max(0, question.Known.ToList().FindIndex(board => board.Address == question.Current?.Address));
         var top = 0;
@@ -178,7 +173,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         // and the line where a text is typed, with what is said about it, stands at its bottom.
         static int Rows(int count) => Math.Min(count, BoardRows) + (count > BoardRows ? 2 : 0);
         var height = Math.Max(
-            Math.Max(3, question.Known.Count > 0 ? Rows(question.Known.Count) + 1 : 0),
+            Math.Max(3, question.Known.Count > 0 ? Rows(question.Known.Count + back) + 1 : 0),
             question.Owners.Count > 0 ? Rows(question.Owners.Count) + 4 : 0);
         var ownersTop = 0;
 
@@ -201,7 +196,9 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             {
                 case Way.Known:
                     fitting = BoardSuggestions.Matching(question.Known, filter.Text);
-                    at = Math.Clamp(at, 0, Math.Max(0, fitting.Count - 1));
+                    // A filter that fits nothing leaves no list, and so no `Back` for Enter to fall on.
+                    var listed = fitting.Count == 0 ? 0 : fitting.Count + back;
+                    at = Math.Clamp(at, 0, Math.Max(0, listed - 1));
                     var (typed, column) = Field(filter, "Filter  ");
                     caret = new Caret(0, column);
                     lines.Add(typed);
@@ -209,10 +206,12 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                         lines.Add(Line.Of("  No project fits.", Tone.Muted));
                     var widest = Math.Min(30, fitting.Select(board => board.Title.Length).DefaultIfEmpty().Max());
                     var shown = fitting;
-                    top = Window(lines, shown.Count, at, top, BoardRows, out var pointer, index => shown[index].Title.Length == 0
-                        ? Row(index == at, shown[index].Address, "", shown[index].Linked ? "linked" : "")
-                        : Row(index == at, shown[index].Title.PadRight(widest), shown[index].Address, shown[index].Linked ? "linked" : ""));
-                    pointed = fitting.Count > 0 ? pointer : null;
+                    top = Window(lines, listed, at, top, BoardRows, out var pointer, index => index == shown.Count
+                        ? Row(index == at, Picker.Back)
+                        : shown[index].Title.Length == 0
+                            ? Row(index == at, shown[index].Address, "", shown[index].Linked ? "linked" : "")
+                            : Row(index == at, shown[index].Title.PadRight(widest), shown[index].Address, shown[index].Linked ? "linked" : ""));
+                    pointed = listed > 0 ? pointer : null;
                     keys = "type to filter · ↑↓ move · enter choose";
                     break;
 
@@ -241,9 +240,11 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
 
                 default:
                     lines.Add(Line.Of("  The tasks are taken from the repository, and no board keeps their statuses.", Tone.Muted));
-                    pointed = 1;
-                    lines.Add(Row(true, "Go on without a project"));
-                    keys = "enter confirm";
+                    pointed = 1 + without;
+                    lines.Add(Row(without == 0, "Go on without a project"));
+                    if (back > 0)
+                        lines.Add(Row(without == 1, Picker.Back));
+                    keys = back > 0 ? "↑↓ move · enter confirm" : "enter confirm";
                     break;
             }
 
@@ -272,14 +273,16 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             switch (ways[way].Way)
             {
                 case Way.Known when key.Key == ConsoleKey.UpArrow && fitting.Count > 0:
-                    at = (at + fitting.Count - 1) % fitting.Count;
+                    at = (at + fitting.Count + back - 1) % (fitting.Count + back);
                     break;
                 case Way.Known when key.Key == ConsoleKey.DownArrow && fitting.Count > 0:
-                    at = (at + 1) % fitting.Count;
+                    at = (at + 1) % (fitting.Count + back);
                     break;
                 case Way.Known when key.Key == ConsoleKey.Enter:
-                    if (fitting.Count > 0)
+                    if (at < fitting.Count)
                         return new BoardAnswer.Existing(fitting[at].Address);
+                    if (fitting.Count > 0)
+                        return null;
                     break;
                 case Way.Known:
                     var before = filter.Text;
@@ -310,8 +313,11 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                     title.Press(key);
                     break;
 
+                case Way.None when key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow && back > 0:
+                    without = 1 - without;
+                    break;
                 case Way.None when key.Key == ConsoleKey.Enter:
-                    return new BoardAnswer.None();
+                    return without == 0 ? new BoardAnswer.None() : null;
             }
         }
     }
@@ -323,10 +329,5 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     static int Window(List<Line> lines, int count, int at, int top, int rows, out int pointer, Func<int, Line> row) =>
         Picker.Window(lines, count, at, top, rows, out pointer, row);
 
-    // The line where a text is typed, and the column of the caret in it.
-    (Line Line, int Column) Field(LineEditor editor, string prompt)
-    {
-        var (shown, caret) = editor.View(Math.Max(4, page.Width - 3 - prompt.Length));
-        return (new Line(new Part(prompt, Tone.Muted), new Part(shown)), prompt.Length + caret);
-    }
+    (Line Line, int Column) Field(LineEditor editor, string prompt) => Prompt.Field(page, editor, prompt);
 }

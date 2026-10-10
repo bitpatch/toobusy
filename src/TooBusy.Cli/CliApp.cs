@@ -1,5 +1,6 @@
 using System.CommandLine;
 using TooBusy.Cli.Terminal;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Settings;
@@ -19,10 +20,12 @@ public static class CliApp
         root.Options.Add(demo);
         root.Subcommands.Add(CreateInitCommand(context, demo));
         root.Subcommands.Add(CreateMilestoneCommand(context, demo));
+        root.Subcommands.Add(CreateModelCommand(context, demo));
+        root.Subcommands.Add(CreateEffortCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
 
-        // Without a command the tool opens its page in a terminal: the setup when the project needs it, the choice
-        // of the milestone when the user has none, and then the menu. Without a terminal there is nobody to ask,
+        // Without a command the tool opens its page in a terminal: the setup when the project needs it, the choices
+        // of the milestone, the model and the effort when the user has none, and then the menu. Without a terminal there is nobody to ask,
         // so in a project that is set up it shows its help.
         root.SetAction(async (result, cancellationToken) =>
         {
@@ -134,29 +137,126 @@ public static class CliApp
                 return ExitCode.Done;
             }
 
-            Session session;
-            using (var page = OpenPage(context, terminal, root))
-            {
-                session = new Session(page, bench);
-                try
-                {
-                    await session.ChooseMilestoneAsync(leavesPage: true, cancellationToken);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                }
-            }
-
-            context.Output.WriteLine($"toobusy · {context.Shorten(root)}");
-            if (!ReportMilestone(context, session, bench.Demo))
-                context.Output.WriteLine("The milestone is left as it was.");
-            return ExitCode.Done;
+            return await ChooseOnPageAsync(context, terminal, bench, session => session.ChooseMilestoneAsync(leavesPage: true, cancellationToken), "The milestone is left as it was.", cancellationToken);
         });
         return command;
     }
 
+    // The model the tasks are done with by default is the choice of the user too.
+    static Command CreateModelCommand(CliContext context, Option<bool> demo)
+    {
+        var name = new Argument<string?>("name") { Description = "The name of the model, as the assistant takes it.", Arity = ArgumentArity.ZeroOrOne };
+        var own = new Option<bool>("--default") { Description = "Name no model: the assistant takes its own default." };
+        var command = new Command("model", "Chooses the model the tasks are done with by default, or shows the one that is chosen.");
+        command.Arguments.Add(name);
+        command.Options.Add(own);
+        command.SetAction(async (result, cancellationToken) =>
+        {
+            var named = result.GetValue(name);
+            if (named is not null && result.GetValue(own))
+            {
+                Fail(context, "toobusy: give the name of a model or `--default`, not both");
+                return ExitCode.NotReady;
+            }
+
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+                return ExitCode.NotReady;
+
+            if (result.GetValue(own))
+            {
+                bench.Personal.SaveModel(ModelChoice.AssistantsOwn);
+                context.Output.WriteLine("Model: the assistant's own.");
+                return ExitCode.Done;
+            }
+
+            if (named is not null)
+            {
+                if (named.Trim().Length == 0)
+                    return Fail(context, "toobusy: the name of the model is empty");
+
+                bench.Personal.SaveModel(new ModelChoice(named.Trim()));
+                context.Output.WriteLine($"Model: {named.Trim()}");
+                return ExitCode.Done;
+            }
+
+            if (context.Terminal is not { } terminal)
+            {
+                var chosen = bench.Personal.LoadModel();
+                context.Output.WriteLine($"Model: {ModelScreen.Describe(chosen)}");
+                if (chosen is null)
+                    context.Output.WriteLine("Choose it with `toobusy model <name>` or `toobusy model --default`.");
+                return ExitCode.Done;
+            }
+
+            return await ChooseOnPageAsync(context, terminal, bench, session => Task.FromResult(session.ChooseModel(leavesPage: true)), "The model is left as it was.", cancellationToken);
+        });
+        return command;
+    }
+
+    // And so is the effort.
+    static Command CreateEffortCommand(CliContext context, Option<bool> demo)
+    {
+        var levels = string.Join(", ", ClaudeCodeOptions.Efforts);
+        var level = new Argument<string?>("level") { Description = $"The level of effort: {levels}.", Arity = ArgumentArity.ZeroOrOne };
+        var command = new Command("effort", "Chooses the effort the tasks are done with by default, or shows the one that is chosen.");
+        command.Arguments.Add(level);
+        command.SetAction(async (result, cancellationToken) =>
+        {
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+                return ExitCode.NotReady;
+
+            if (result.GetValue(level) is { } named)
+            {
+                if (ClaudeCodeOptions.FindEffort(named) is not { } found)
+                {
+                    Fail(context, $"toobusy: there is no effort “{named}”.");
+                    return Fail(context, $"The levels: {levels}");
+                }
+
+                bench.Personal.SaveEffort(found);
+                context.Output.WriteLine($"Effort: {found}");
+                return ExitCode.Done;
+            }
+
+            if (context.Terminal is not { } terminal)
+            {
+                var chosen = bench.Personal.LoadEffort();
+                context.Output.WriteLine($"Effort: {chosen ?? "not chosen"}");
+                if (chosen is null)
+                    context.Output.WriteLine($"Choose it with `toobusy effort <level>`: {levels}.");
+                return ExitCode.Done;
+            }
+
+            return await ChooseOnPageAsync(context, terminal, bench, session => Task.FromResult(session.ChooseEffort(leavesPage: true)), "The effort is left as it was.", cancellationToken);
+        });
+        return command;
+    }
+
+    // A page that is opened for one question, and what is left in the terminal when it is closed: what was chosen,
+    // or that nothing was.
+    static async Task<int> ChooseOnPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task<bool>> ask, string left, CancellationToken cancellationToken)
+    {
+        Session session;
+        using (var page = OpenPage(context, terminal, bench.Root))
+        {
+            session = new Session(page, bench);
+            try
+            {
+                await ask(session);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+
+        context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
+        if (!ReportChoices(context, session, bench.Demo))
+            context.Output.WriteLine(left);
+        return ExitCode.Done;
+    }
+
     // The tasks are not run yet: `run` is the entry point that the run grows from. It opens the page on the run,
-    // and it does not start without a milestone to work on.
+    // and it does not start without a milestone to work on, a model and an effort.
     static Command CreateRunCommand(CliContext context, Option<bool> demo)
     {
         var command = new Command("run", "Takes the tasks of the queue one after another.");
@@ -186,6 +286,18 @@ public static class CliApp
                     ? $"toobusy: the milestone “{standing.Name}” is not open any more."
                     : "toobusy: the milestone to work on is not chosen.");
                 return Fail(context, "Run `toobusy milestone` to choose it.");
+            }
+
+            if (bench.Personal.LoadModel() is null)
+            {
+                Fail(context, "toobusy: the model is not chosen.");
+                return Fail(context, "Run `toobusy model` to choose it.");
+            }
+
+            if (bench.Personal.LoadEffort() is null)
+            {
+                Fail(context, "toobusy: the effort is not chosen.");
+                return Fail(context, "Run `toobusy effort` to choose it.");
             }
 
             if (context.Terminal is { } terminal)
@@ -218,7 +330,7 @@ public static class CliApp
 
         context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
         var failed = session.Setup is not null && ReportSetup(context, session.Setup, bench.Demo);
-        ReportMilestone(context, session, bench.Demo);
+        ReportChoices(context, session, bench.Demo);
         return failed && session.Setup!.Outcome == SetupOutcome.Failed ? ExitCode.Failed : ExitCode.Done;
     }
 
@@ -239,22 +351,27 @@ public static class CliApp
         return failed;
     }
 
-    // The milestone that was chosen on the page; false when none was.
-    static bool ReportMilestone(CliContext context, Session session, bool demo)
+    // What was chosen on the page: the milestone, the model, the effort; false when nothing was.
+    static bool ReportChoices(CliContext context, Session session, bool demo)
     {
-        if (session.Chosen is not { } chosen)
-            return false;
-
-        context.Output.WriteLine($"{context.OutputPalette.Success("✔")} {"Milestone",-16} {chosen.Title ?? "none"}");
-        if (demo)
-            context.Output.WriteLine(context.OutputPalette.Muted("Demo: the choice of the milestone is not remembered."));
-        return true;
+        (string Label, string? Value)[] choices =
+        [
+            ("Milestone", session.Chosen is { } milestone ? milestone.Title ?? "none" : null),
+            ("Model", session.ChosenModel is { } model ? ModelScreen.Describe(model) : null),
+            ("Effort", session.ChosenEffort),
+        ];
+        var chosen = choices.Where(choice => choice.Value is not null).ToList();
+        foreach (var (label, value) in chosen)
+            context.Output.WriteLine($"{context.OutputPalette.Success("✔")} {label,-16} {value}");
+        if (demo && chosen.Count > 0)
+            context.Output.WriteLine(context.OutputPalette.Muted("Demo: what was chosen is not remembered."));
+        return chosen.Count > 0;
     }
 
     static Page OpenPage(CliContext context, TerminalDevice terminal, string root) =>
         new(context.Output, context.OutputPalette, terminal, $"toobusy · {context.Shorten(root)}");
 
-    // What the commands work with in the project. Outside a demo the choice of the user needs a place on the
+    // What the commands work with in the project. Outside a demo the choices of the user need a place on the
     // machine; without one it says so and gives null.
     static async Task<Workbench?> OpenAsync(CliContext context, string root, bool demo, bool ready, CancellationToken cancellationToken)
     {

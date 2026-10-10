@@ -7,7 +7,8 @@ namespace TooBusy.Cli.Terminal;
 // done, and after them working without a milestone.
 public static class MilestoneScreen
 {
-    // `open` is null when the milestones cannot be read. Gives the choice, or null when Escape is pressed.
+    // `open` is null when the milestones cannot be read. Gives the choice, or null when Escape is pressed or `Back`
+    // is chosen.
     public static MilestoneChoice? Ask(Page page, IReadOnlyList<Milestone>? open, MilestoneStanding standing)
     {
         var offered = MilestoneOrder.Sorted(open ?? []);

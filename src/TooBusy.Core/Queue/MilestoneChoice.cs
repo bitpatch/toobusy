@@ -7,15 +7,6 @@ public sealed record MilestoneChoice(string? Title)
     public static MilestoneChoice None { get; } = new((string?)null);
 }
 
-// Where the choice of the user is kept for the project.
-public interface IPersonalSettings
-{
-    // Null when the user has not chosen yet.
-    MilestoneChoice? LoadMilestone();
-
-    void SaveMilestone(MilestoneChoice choice);
-}
-
 // The open milestones of a repository of the tracker.
 public interface IMilestones
 {

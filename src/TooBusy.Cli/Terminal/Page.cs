@@ -16,6 +16,9 @@ public sealed class Page : IDisposable
     // A key that means nothing to any question: what the first Escape that would leave the page is read as.
     static readonly ConsoleKeyInfo Nothing = new('\0', ConsoleKey.NoName, shift: false, alt: false, control: false);
 
+    // How often a page that waits for something looks whether a key was pressed.
+    static readonly TimeSpan Glance = TimeSpan.FromMilliseconds(30);
+
     // The key that was pressed to leave and waits to be pressed again; null when none was.
     string? leaving;
 
@@ -51,8 +54,9 @@ public sealed class Page : IDisposable
 
     // Draws the page with what is asked, the lines where the user acts, and the keys that act there. The caret is
     // where a text is typed among those lines, and `chosen` the line the pointer is on.
-    // While more keys are waiting, as in a paste, it does not draw.
-    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null)
+    // `waiting` is the line of dots that run while the page waits for something. While more keys are waiting, as in
+    // a paste, it does not draw.
+    public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null)
     {
         if (device.KeyWaiting())
             return;
@@ -60,7 +64,56 @@ public sealed class Page : IDisposable
         var all = leaving is not null
             ? Line.Of($"press {leaving} again to exit", Tone.Warning)
             : Hints(string.Join(" · ", ((string[])[keys, Keys, "ctrl+c exit"]).Where(part => part.Length > 0)));
-        screen.Draw(new Frame(title, Status, Body, question, choice, all, Foot, caret, chosen));
+        screen.Draw(new Frame(title, Status, Body, question, choice, all, Foot, caret, chosen, waiting));
+    }
+
+    // Says what the page waits for, with the dots that run under it, for as long as the work takes, and gives what
+    // the work gives. The user does not have to wait: where there is somewhere to go back to, `Back` stands under
+    // the dots from the first moment, and Enter or Escape goes back; where Escape leaves the page it does so here
+    // too, asked twice, and so does Ctrl+C. `Done` is false when the user did not wait: the work is told to stop
+    // then, and nobody waits for it.
+    public async Task<(bool Done, T? Value)> WaitAsync<T>(string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+    {
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var back = Picker.GoesBack(this);
+        void Show() => Draw(
+            [],
+            [Line.Of(text, Tone.Muted), Line.Of(new string(Screen.Dot, Screen.Dots), Tone.Muted), .. back ? [Picker.Row(true, Picker.Back)] : (Line[])[]],
+            back ? "enter choose" : "",
+            chosen: back ? 2 : null,
+            waiting: 1);
+
+        Show();
+        var working = work(stopping.Token);
+        try
+        {
+            while (!working.IsCompleted)
+            {
+                if (!device.KeyWaiting())
+                {
+                    await Task.WhenAny(working, Task.Delay(Glance, CancellationToken.None));
+                    continue;
+                }
+
+                var key = Read();
+                if (key.Key == ConsoleKey.Escape || (back && key.Key == ConsoleKey.Enter))
+                    return (false, default);
+
+                Show();
+            }
+
+            return (true, await working);
+        }
+        finally
+        {
+            // Work that was not waited for may never end: it is told to stop and left to it, and what it fails with
+            // is nobody's any more.
+            if (!working.IsCompleted)
+            {
+                await stopping.CancelAsync();
+                _ = working.ContinueWith(static left => _ = left.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            }
+        }
     }
 
     // Hints as `key what it does · key what it does`: the name of each key is a little lighter than the rest,

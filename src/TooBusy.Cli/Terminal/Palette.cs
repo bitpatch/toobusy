@@ -111,6 +111,20 @@ public sealed class Palette
             : $"\u001b[38;2;{Mix((226, 226, 226), (212, 80, 63), glow)}m{text}{Reset}";
     }
 
+    // A dot of a wait as the light that runs along the dots has it: in the accent at 1 and in the muted colour of
+    // the rest at 0. A terminal of sixteen colours has the accent for the brighter half.
+    public string Spark(string text, double glow)
+    {
+        if (code is null)
+            return text;
+        if (glow <= Faint || ReferenceEquals(this, Basic))
+            return glow >= 0.5 ? Accent(text) : Muted(text);
+
+        return ReferenceEquals(this, Light)
+            ? $"\u001b[38;2;{Mix((118, 118, 118), (176, 58, 46), glow)}m{text}{Reset}"
+            : $"\u001b[38;2;{Mix((128, 128, 128), (212, 80, 63), glow)}m{text}{Reset}";
+    }
+
     // Below this the blink is off: what blinks is drawn as it is, in the colours the terminal itself has.
     const double Faint = 0.02;
 

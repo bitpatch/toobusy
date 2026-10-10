@@ -10,6 +10,10 @@ public sealed class PageTests : IDisposable
 
     public void Dispose() => terminal.Dispose();
 
+    // The dots of a wait as they are drawn at a step of the light.
+    static string Dots(Palette palette, int step) =>
+        string.Concat(Enumerable.Range(0, Screen.Dots).Select(dot => palette.Spark("•", Screen.Spark(dot, Screen.Dots, step))));
+
     void Tick(int beats)
     {
         for (var beat = 0; beat < beats; beat++)
@@ -164,6 +168,133 @@ public sealed class PageTests : IDisposable
         var closed = terminal.Output.ToString();
         terminal.Tick!();
         Assert.Equal(closed, terminal.Output.ToString());
+    }
+
+    [Fact]
+    public void WhileThePageWaitsALightRunsAlongTheDotsAndBack()
+    {
+        var palette = Palette.Dark;
+        using var page = terminal.Open(palette: palette);
+
+        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••", Tone.Muted)], "", waiting: 1);
+
+        Assert.Equal([" Reading the milestones", " •••••••"], terminal.Frame[8..10]);
+        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
+
+        // The light is on the first dot, in the accent, and the last one is in the colour of the rest.
+        Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 0), StringComparison.Ordinal);
+        Assert.EndsWith(palette.Muted("•"), Dots(palette, 0), StringComparison.Ordinal);
+
+        Tick(12);
+        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 12), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(palette.Spark("•", 1), Dots(palette, 12), StringComparison.Ordinal);
+        Tick(12);
+        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 24), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 24), StringComparison.Ordinal);
+        Assert.Equal(1, terminal.Frames);
+    }
+
+    [Fact]
+    public void TheDotsTheLightHasLeftFadeBehindIt()
+    {
+        // Six beats on the light is on the fourth dot; those behind it are the dimmer the longer ago it left them,
+        // and those ahead of it are not lit yet.
+        double[] glows = [.. Enumerable.Range(0, Screen.Dots).Select(dot => Screen.Spark(dot, Screen.Dots, 6))];
+
+        Assert.Equal(1, glows[3]);
+        Assert.True(glows[3] > glows[2] && glows[2] > glows[1] && glows[1] > glows[0] && glows[0] > 0);
+        Assert.Equal([0, 0, 0], glows[4..]);
+    }
+
+    [Fact]
+    public void TheLightTurnsAtTheLastDotWithItsTrailStillBehindIt()
+    {
+        // Two beats after the turn the light is on the sixth dot again, and the fifth one still fades from the way there.
+        Assert.Equal(1, Screen.Spark(5, Screen.Dots, 14));
+        Assert.True(Screen.Spark(6, Screen.Dots, 14) > Screen.Spark(4, Screen.Dots, 14));
+        Assert.True(Screen.Spark(4, Screen.Dots, 14) > 0);
+    }
+
+    [Fact]
+    public void WithoutColoursTheDotsStandStill()
+    {
+        using var page = terminal.Open();
+        page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••", Tone.Muted)], "", waiting: 1);
+        var waiting = terminal.Output.ToString();
+
+        terminal.Tick!();
+
+        Assert.Equal(waiting, terminal.Output.ToString());
+        Assert.Contains(" •••••••", terminal.Frame);
+    }
+
+    [Fact]
+    public async Task AWaitGivesWhatTheWorkGives()
+    {
+        using var page = terminal.Open();
+
+        var (done, value) = await page.WaitAsync("Reading the milestones", _ => Task.FromResult("read"), TestContext.Current.CancellationToken);
+
+        Assert.True(done);
+        Assert.Equal("read", value);
+        Assert.Equal([" Reading the milestones", " •••••••", " ❯ Back", Rule, " enter choose · ctrl+c exit"], terminal.Frame[^5..]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BackStandsUnderTheDotsFromTheFirstMomentAndStopsTheWork(bool escape)
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        using var page = terminal.Open();
+        var never = new TaskCompletionSource<string>();
+        CancellationToken told = default;
+
+        // The work never ends; `Back` is there before any key is pressed.
+        var waiting = page.WaitAsync("Reading the milestones", stopping => { told = stopping; return never.Task; }, TestContext.Current.CancellationToken);
+        Assert.Contains(" ❯ Back", terminal.Frame);
+        Assert.False(waiting.IsCompleted);
+
+        terminal.Keys.Press(Keys.Down, escape ? Keys.Escape : Keys.Enter);
+        var (done, value) = await waiting;
+
+        Assert.False(done);
+        Assert.Null(value);
+        Assert.True(told.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task WhereEscapeLeavesThePageAWaitHasNoBackAndEscapeIsAskedTwice()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        using var page = terminal.Open();
+        page.EscapeLeaves = true;
+        var never = new TaskCompletionSource<string>();
+
+        var waiting = page.WaitAsync("Reading the milestones", _ => never.Task, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(" ❯ Back", terminal.Frame);
+
+        // Enter is not a way back here, and one Escape only asks.
+        terminal.Keys.Press(Keys.Enter, Keys.Escape);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.False(waiting.IsCompleted);
+        Assert.Equal(" press esc again to exit", terminal.Frame[^1]);
+
+        terminal.Keys.Press(Keys.Escape);
+        Assert.False((await waiting).Done);
+    }
+
+    [Fact]
+    public async Task CtrlCTwiceLeavesAWaitToo()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        using var page = terminal.Open();
+        var never = new TaskCompletionSource<string>();
+
+        var waiting = page.WaitAsync("Reading the milestones", _ => never.Task, TestContext.Current.CancellationToken);
+        terminal.Keys.Press(Keys.ControlC, Keys.ControlC);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => waiting);
     }
 
     [Fact]

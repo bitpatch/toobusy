@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
@@ -77,12 +78,20 @@ public sealed class ImitatedMilestones(IMilestones? real) : IMilestones
     }
 }
 
-// The choice of the user in a demo: it is remembered until the demo ends, and nowhere else.
-public sealed class UnsavedChoice(MilestoneChoice? chosen) : IPersonalSettings
+// The choices of the user in a demo: they are remembered until the demo ends, and nowhere else.
+public sealed class UnsavedChoice(MilestoneChoice? milestone, ModelChoice? model, string? level) : IPersonalSettings
 {
-    public MilestoneChoice? LoadMilestone() => chosen;
+    public MilestoneChoice? LoadMilestone() => milestone;
 
-    public void SaveMilestone(MilestoneChoice choice) => chosen = choice;
+    public void SaveMilestone(MilestoneChoice choice) => milestone = choice;
+
+    public ModelChoice? LoadModel() => model;
+
+    public void SaveModel(ModelChoice choice) => model = choice;
+
+    public string? LoadEffort() => level;
+
+    public void SaveEffort(string effort) => level = effort;
 }
 
 // The settings of a demo: the file is read as it is and never written; what the demo saves is remembered until it
