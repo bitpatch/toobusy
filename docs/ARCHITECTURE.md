@@ -88,6 +88,8 @@ The setup never asks for the repository: `ISetupEnvironment` gives the one of th
 
 The screens are drawn by hand with the escape sequences every terminal knows. Spectre.Console was the first candidate and was not taken: the setup needs the whole window, with a panel that stays at its bottom, and its prompts write below one another.
 
+The tests read a screen as text. What it looks like is checked with `tools/screenshot.py`: it runs the real binary in a pseudo-terminal, presses the keys of a scenario and draws the screen to pictures in `artifacts/screens`, the rows that blink at several moments of a blink. It is a Python script with its own environment for a terminal emulator and a drawing library; nothing of it is part of toobusy.
+
 ## Adding a tracker or an assistant
 
 A new project `TooBusy.Trackers.<Name>` or `TooBusy.Assistants.<Name>` implements the port, gets a rule in the architecture tests, and is registered in `TooBusy.Cli` under the name the settings use. Core does not change.
