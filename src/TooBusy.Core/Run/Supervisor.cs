@@ -232,10 +232,23 @@ public sealed class Supervisor(
         // The session works from here on, so it is written down before the tracker is told anything more: a
         // tracker that refuses, or a kill, stops the session as it stops the run, and the next run goes on with it.
         state.Save(record = new TaskRecord(number, session.Trace));
+        string? unassigned = null;
         try
         {
             if (goesOn)
                 await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
+
+            // The one who runs toobusy is the one whose task it is now, with a board and without one. A task that
+            // nobody is named on is still worked on: a tracker that refuses this is said, and the run goes on.
+            try
+            {
+                await tracker.AssignAsync(number, kill);
+            }
+            catch (TrackerException refused)
+            {
+                unassigned = refused.Message;
+            }
+
             if (again)
                 await tracker.RemoveLabelAsync(number, plan.Rules.Interrupted, kill);
         }
@@ -253,8 +266,11 @@ public sealed class Supervisor(
         }
 
         Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
-        if (plan.Rules.Board)
-            Say(RunMark.Note, $"#{number} is In Progress on the board; the session is told that toobusy keeps the tracker");
+        string?[] taken = [plan.Rules.Board ? "In Progress on the board" : null, unassigned is null ? "assigned to the current user" : null];
+        if (taken.Any(how => how is not null))
+            Say(RunMark.Note, $"#{number} is {string.Join(" and ", taken.Where(how => how is not null))}; the session is told that toobusy keeps the tracker");
+        if (unassigned is not null)
+            Say(RunMark.Attention, $"{unassigned} · the run goes on");
 
         // However the task ends for this run, it is told once: as one that failed, unless more is known of it.
         var mark = RunMark.Failed;

@@ -33,24 +33,62 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal(["status 3 InProgress", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
         Assert.Equal((3, "**Done.**\n\nDid it.\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
         var start = Assert.Single(assistant.Started);
         Assert.Equal((3, "#3 Task 3", ModelChoice.AssistantsOwn, "high"), (start.Task, start.Name, start.Model, start.Effort));
         Assert.Contains("# Task #3: Task 3\n\nhttps://example.com/3\n\nRead the task and its comments before you start", start.Message, StringComparison.Ordinal);
-        Assert.Contains("It has already moved the task to In Progress.", start.Message, StringComparison.Ordinal);
+        Assert.Contains("It has already moved the task to In Progress, and it assigns the task to the user who runs it.", start.Message, StringComparison.Ordinal);
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Equal(
             """
             ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort
             → #3 Task 3 — started · a new session · fake attach 3
-              #3 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ✔ #3 Task 3 — done in 3 s
               #3 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
               Worked 3 s
             """.ReplaceLineEndings("\n"),
             log.Text);
+    }
+
+    [Fact]
+    public async Task WithoutABoardATaskThatIsTakenIsAssignedAllTheSame()
+    {
+        plan = plan with { Rules = Rules with { Board = false } };
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Contains("assign 3", tracker.Did);
+        Assert.Contains("  #3 is assigned to the current user; the session is told that toobusy keeps the tracker", log.Lines);
+    }
+
+    [Theory]
+    [InlineData(true, "  #3 is In Progress on the board; the session is told that toobusy keeps the tracker")]
+    [InlineData(false, null)]
+    public async Task ATrackerThatRefusesTheAssignmentDoesNotStopTheRun(bool board, string? note)
+    {
+        plan = plan with { Rules = Rules with { Board = board } };
+        tracker.Add(3, labels: ["feature", "interrupted"]);
+        tracker.Add(5);
+        tracker.Refused.Add("assign");
+
+        var result = await RunAsync();
+
+        // What follows the assignment is done as it is with one: the label is taken off, and the tasks are done.
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal(["status 3 InProgress", "label 3 -interrupted", "comment 3", "close 3", "status 3 Done"], tracker.Did.Take(5));
+        Assert.Empty(assistant.Session(3).Told);
+        Assert.Contains("▲ The tracker refused: assign 3. · the run goes on", log.Lines);
+        Assert.Contains("▲ The tracker refused: assign 5. · the run goes on", log.Lines);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("assigned to the current user", StringComparison.Ordinal));
+        if (note is not null)
+            Assert.Contains(note, log.Lines);
+        else
+            Assert.DoesNotContain(log.Lines, line => line.Contains("keeps the tracker", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -169,7 +207,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
         Assert.Null(state.Record);
-        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
             (3, "**Failed.** The run stopped over this task: its session left changes in the working tree. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nDid it.\n\n_Session: `fake attach 3`_"),
             Assert.Single(tracker.Comments));
@@ -187,7 +225,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal("#3 left 2 commits that are not pushed · fake attach 3", result.Why);
-        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.StartsWith("**Failed.** The run stopped over this task: its session left 2 commits that are not pushed.", tracker.Comments[0].Text, StringComparison.Ordinal);
     }
 
@@ -221,7 +259,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal("v0.2.0", made.Milestone);
         Assert.StartsWith("The dates are left.\n- [ ] ISO?\n\n---\n\nLeft from #3 “Task 3”", made.Description, StringComparison.Ordinal);
         Assert.Contains("<summary>The description of #3</summary>\n\nExport the data.", made.Description, StringComparison.Ordinal);
-        Assert.Equal(["status 3 InProgress", "create 100", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "create 100", "comment 3", "close 3", "status 3 Done"], tracker.Did);
         Assert.StartsWith("**Done in part.** What is left is #100, which waits for the owner.\n\nDid the half.\n\n", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("◐ #3 Task 3 — done in part in 3 s", log.Lines);
         Assert.Contains("  #3 is closed; what is left is #100 “Choose the format”, which waits for the owner with the needs-owner label", log.Lines);
@@ -253,7 +291,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did.Take(4));
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did.Take(5));
         Assert.StartsWith("**Waits for the owner.** Nothing could be done without you. Take the label `needs-owner` off", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("◇ #3 Task 3 — waits for the owner after 3 s", log.Lines);
         Assert.Equal([3, 5], assistant.Started.Select(start => start.Task));
@@ -272,7 +310,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
         Assert.Contains("✖ #3 Task 3 — failed after 3 s: the tests do not pass", log.Lines);
         Assert.Contains("  │ I tried twice.", log.Lines);
-        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
             (3, "**Failed.** The run stopped over this task: its session failed: the tests do not pass. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI tried twice.\n\n_Session: `fake attach 3`_"),
             Assert.Single(tracker.Comments));
@@ -294,7 +332,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
         Assert.Contains("✖ #3 Task 3 — ended after 3 s without saying how the task went", log.Lines);
         Assert.Null(state.Record);
-        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
             (3, "**Failed.** The run stopped over this task: its session ended without saying how the task went. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI was about to\n\n_Session: `fake attach 3`_"),
             Assert.Single(tracker.Comments));
@@ -336,8 +374,8 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Theory]
-    [InlineData("label", "▲ #3 is not left to the owner as it should be: The tracker refused: label 3 +needs-owner. · set it right by hand before the next run", "status 3 InProgress|comment 3")]
-    [InlineData("comment", "▲ #3 is not left to the owner as it should be: The tracker refused: comment 3. · set it right by hand before the next run", "status 3 InProgress|label 3 +needs-owner|status 3 Todo")]
+    [InlineData("label", "▲ #3 is not left to the owner as it should be: The tracker refused: label 3 +needs-owner. · set it right by hand before the next run", "status 3 InProgress|assign 3|comment 3")]
+    [InlineData("comment", "▲ #3 is not left to the owner as it should be: The tracker refused: comment 3. · set it right by hand before the next run", "status 3 InProgress|assign 3|label 3 +needs-owner|status 3 Todo")]
     public async Task ATrackerThatRefusesToLeaveATaskToTheOwnerDoesNotHideWhyTheRunStopped(string refused, string said, string did)
     {
         tracker.Add(3);
@@ -384,7 +422,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([(3, RunMark.Failed)], Ended);
 
         // The record is forgotten, so the task is left to the owner: nothing else keeps the next run from it.
-        Assert.Equal(["status 3 InProgress", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.StartsWith("**Failed.** The run stopped over this task: the tracker refused something after its session: The tracker refused: close 3.", tracker.Comments[^1].Text, StringComparison.Ordinal);
     }
 
@@ -606,7 +644,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
         Assert.Equal([Briefing.WrapUp(3)], session.Asked);
         Assert.Empty(session.Told);
-        Assert.Equal(["status 3 InProgress", "label 3 +interrupted", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.StartsWith("**Interrupted.** Nothing is committed; a run takes the task again.\n\nUndone: a.cs.\nLeft: the export.", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
         Assert.Contains("■ Asked #3 to wrap up after its current step: nothing committed, a report in the task, the interrupted label", log.Lines);
@@ -722,7 +760,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress, and the next run goes on with its session · fake attach 3"), result);
         Assert.Equal(1, session.Stopped);
-        Assert.Equal(["status 3 InProgress"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
         Assert.Contains("■ Killed the session of #3: the task stays In Progress, and the next run goes on with its session · fake attach 3", log.Lines);
 
         // The record of the task stays: it is what the next run goes on by.
@@ -740,7 +778,7 @@ public sealed class SupervisorTests : IDisposable
         await RunAsync();
 
         Assert.Equal([5, 3], assistant.Started.Select(start => start.Task));
-        Assert.Equal(["status 5 InProgress", "label 5 -interrupted"], tracker.Did.Take(2));
+        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted"], tracker.Did.Take(3));
         Assert.Contains("- This task was interrupted before.", assistant.Started[0].Message, StringComparison.Ordinal);
         Assert.DoesNotContain("interrupted before", assistant.Started[1].Message, StringComparison.Ordinal);
         Assert.Contains("→ #5 Task 5 — started · a new session; the task was interrupted before · fake attach 5", log.Lines);
@@ -847,7 +885,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Limited, 0, "#3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session"), result);
         Assert.Equal(2, session.Told.Count);
-        Assert.Equal(["status 3 InProgress", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Equal([(3, RunMark.Paused)], Ended);
         Assert.StartsWith("**Stopped by a usage limit** (the limit did not reset after 2 waits).", tracker.Comments[0].Text, StringComparison.Ordinal);
@@ -961,7 +999,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([Record(5).Session], assistant.Found);
         Assert.Empty(session.Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(4));
+        Assert.Equal(["status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(5));
         Assert.Equal(
             [
                 "✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort",
@@ -985,7 +1023,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session ended while nobody watched · fake attach 5", log.Lines);
         Assert.Contains("◐ #5 Task 5 — done in part in 0 s", log.Lines);
-        Assert.Equal(["status 5 InProgress", "create 100", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Equal(["status 5 InProgress", "assign 5", "create 100", "comment 5", "close 5", "status 5 Done"], tracker.Did);
         Assert.Null(state.Record);
     }
 
@@ -1060,7 +1098,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
         Assert.Equal([Briefing.AfterLimit(5)], assistant.Session(5).Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(5));
+        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(6));
         Assert.Null(state.Record);
         Assert.Contains("→ #5 Task 5 — taken again · its session goes on after the usage limit · fake attach 5", log.Lines);
     }
@@ -1078,7 +1116,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
         Assert.Equal([Briefing.AfterAbort(5)], session.Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "label 5 -interrupted"], tracker.Did.Take(2));
+        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted"], tracker.Did.Take(3));
         Assert.Contains("→ #5 Task 5 — taken again · its session goes on after /abort · fake attach 5", log.Lines);
     }
 
@@ -1191,7 +1229,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Single(assistant.Started);
         Assert.Equal([Briefing.AfterStop(5)], session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session was stopped, and goes on · fake attach 5", log.Lines);
-        Assert.Equal(["status 5 InProgress", "status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Equal(["status 5 InProgress", "assign 5", "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
         Assert.Null(state.Record);
     }
 
@@ -1232,7 +1270,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Empty(assistant.Started);
         Assert.Equal([first, Briefing.AfterStop(5)], session.Told);
-        Assert.Equal(["status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
         Assert.Null(state.Record);
     }
 

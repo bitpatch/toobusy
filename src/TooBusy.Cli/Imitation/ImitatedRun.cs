@@ -111,6 +111,8 @@ public sealed class ImitatedTasks : ITaskTracker
         return Task.CompletedTask;
     }
 
+    public Task AssignAsync(int number, CancellationToken cancellationToken) => Task.CompletedTask;
+
     public Task AddLabelAsync(int number, string label, CancellationToken cancellationToken)
     {
         Change(number, task => task with { Labels = [.. task.Labels, label] });

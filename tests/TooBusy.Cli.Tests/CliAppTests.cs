@@ -522,6 +522,7 @@ public sealed class CliAppTests : IDisposable
             """
             ✻ No milestone · 1 task in the queue · the assistant's own model · high effort
             → #12 Export the data — started · a new session · claude attach abc12345
+              #12 is assigned to the current user; the session is told that toobusy keeps the tracker
             ✔ #12 Export the data — done in 0 s
               #12 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
@@ -1156,15 +1157,15 @@ public sealed class CliAppTests : IDisposable
               Opens later: #105 after #102
               Held: #106 it has the manual label · #107 its status is In Progress
             → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
-              #100 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ✔ #100 Rename the settings page — done in 6 s
               #100 is closed, with the report of the session as its comment
             → #101 Show the total of an order in its header — started · a new session · claude attach 4f2a101 (made up)
-              #101 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ✔ #101 Show the total of an order in its header — done in 9 s
               #101 is closed, with the report of the session as its comment
             → #102 Export the orders as a file — started · a new session · claude attach 4f2a102 (made up)
-              #102 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #102 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
               │ The task does not say what kind of file the export is. Should it be CSV or JSON?
             ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
@@ -1172,18 +1173,18 @@ public sealed class CliAppTests : IDisposable
             ✔ #102 Export the orders as a file — done in 21 s
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session · claude attach 4f2a103 (made up)
-              #103 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ◐ #103 Fix the rounding of a discount — done in part in 10 s
               #103 is closed; what is left is #108 “Decide what a discount of more than the price does”, which waits for the owner with the needs-owner label
             → #104 Update the dependencies — started · a new session · claude attach 4f2a104 (made up)
-              #104 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #104 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ‖ #104 ran into a usage limit: You have hit your usage limit.
             ‖ #104 waits 7 s for the 5-hour limit to reset, then goes on · /stop pauses it for the next run
             ▶ #104 goes on after the reset of the limit · claude attach 4f2a104 (made up)
             ✔ #104 Update the dependencies — done in 16 s
               #104 is closed, with the report of the session as its comment
             → #105 Describe the export in the manual — started · a new session · claude attach 4f2a105 (made up)
-              #105 is In Progress on the board; the session is told that toobusy keeps the tracker
+              #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
               Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label

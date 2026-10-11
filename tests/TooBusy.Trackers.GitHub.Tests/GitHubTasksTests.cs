@@ -238,6 +238,36 @@ public class GitHubTasksTests
     }
 
     [Fact]
+    public async Task ATaskIsAssignedToTheUserTheToolIsLoggedInAs()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+
+        await Tasks().AssignAsync(12, TestContext.Current.CancellationToken);
+
+        Assert.Equal([["issue", "edit", "12", "--repo", "acme/rocket", "--add-assignee", "@me"]], processes.Asked.Select(asked => asked.Arguments));
+    }
+
+    [Fact]
+    public async Task WithoutABoardATaskIsAssignedInTheSameWay()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+
+        await new GitHubTasks(processes, "acme/rocket", null).AssignAsync(12, TestContext.Current.CancellationToken);
+
+        Assert.Equal([["issue", "edit", "12", "--repo", "acme/rocket", "--add-assignee", "@me"]], processes.Asked.Select(asked => asked.Arguments));
+    }
+
+    [Fact]
+    public async Task AnAssignmentThatIsRefusedSaysSo()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Failed("failed to update https://github.com/acme/rocket/issues/12: 'rocketeer' not found"));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AssignAsync(12, TestContext.Current.CancellationToken));
+
+        Assert.Equal("#12 could not be assigned to the current user. failed to update https://github.com/acme/rocket/issues/12: 'rocketeer' not found", refused.Message);
+    }
+
+    [Fact]
     public async Task AChangeThatIsRefusedSaysWhatWasNotDone()
     {
         processes.Answers.Enqueue(FakeProcesses.Failed("could not add label: 'needs owner' not found"));

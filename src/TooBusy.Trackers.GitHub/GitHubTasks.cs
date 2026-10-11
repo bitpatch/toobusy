@@ -125,6 +125,10 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
             cancellationToken);
     }
 
+    // The tool itself knows who it is logged in as, and calls them `@me`.
+    public Task AssignAsync(int number, CancellationToken cancellationToken) =>
+        AskAsync(["issue", "edit", Text(number), "--repo", repository, "--add-assignee", "@me"], $"#{number} could not be assigned to the current user.", cancellationToken);
+
     public Task AddLabelAsync(int number, string label, CancellationToken cancellationToken) =>
         AskAsync(["issue", "edit", Text(number), "--repo", repository, "--add-label", label], $"The label {label} could not be put on #{number}.", cancellationToken);
 

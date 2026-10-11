@@ -21,7 +21,7 @@ public class BriefingTests
             StringComparison.Ordinal);
         Assert.Contains("Where the instructions of the project (CLAUDE.md, AGENTS.md, its skills and the like) tell you to ask the owner", message, StringComparison.Ordinal);
         Assert.Contains("Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.\n", message, StringComparison.Ordinal);
-        Assert.Contains("The tracker is kept by toobusy. It has already moved the task to In Progress. Do not change the status or the labels of the task, do not close it and do not comment on it", message, StringComparison.Ordinal);
+        Assert.Contains("The tracker is kept by toobusy. It has already moved the task to In Progress, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it", message, StringComparison.Ordinal);
         Assert.Contains("make no worktree", message, StringComparison.Ordinal);
         Assert.Contains("- Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done", message, StringComparison.Ordinal);
         Assert.Contains("- `TOOBUSY: done`", message, StringComparison.Ordinal);

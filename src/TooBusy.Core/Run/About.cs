@@ -60,7 +60,7 @@ public static class About
 
             ## The tracker is kept by toobusy
 
-            A session changes nothing in the tracker: not the status of its task and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to `In Progress`; once the session has started, it takes {interrupted} off a task that had it. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
+            A session changes nothing in the tracker: not the status of its task, not its assignee and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to `In Progress`; once the session has started, it assigns the task to the user who runs it, with a board and without one, and takes {interrupted} off a task that had it. A tracker that refuses the assignment does not stop the run. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
 
             ## What a session is told
 
@@ -144,6 +144,8 @@ public static class About
             | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
             | `{Outcome.Mark} failed <the reason>` | nothing | puts {owner} on the task and a comment that says what went wrong, moves it back to `Todo` and stops the run; the working copy is left as it is, for the owner to look at, and no run takes the task while it has the label |
 
+            The assignee stays however the task ends: on a task that is done or done in part it says who did it, and on one that goes back to `Todo` whose task it is. The task made of what is left is assigned to nobody until a run takes it.
+
             The run stops in the same way, with {owner} and such a comment on the task, when a check does not pass, and when a session ended its turn without such a line and telling it to go on brought none. The owner looks at the task and takes the label off, and a run takes it as any other. The next task is never started on a doubt.
 
             A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**`, `**Interrupted.**` or `**Failed.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
@@ -153,7 +155,7 @@ public static class About
             The assistant does the work as the instructions of the project say, `CLAUDE.md`, `AGENTS.md`, its skills and the like: how the work is done, how it is checked, how it is committed and pushed. toobusy says nothing of that. Where they differ from the rules of the session, the rules of the session hold, and the session is told so:
 
             - An instruction to ask the owner, to wait for an approval or a confirmation, or to show a plan first is not followed: the session decides and goes on.
-            - An instruction to move the task, to label it, to comment on it or to close it is not followed: toobusy keeps the tracker.
+            - An instruction to move the task, to assign it, to label it, to comment on it or to close it is not followed: toobusy keeps the tracker.
             - An instruction to work in a worktree or in another copy is not followed: the work is done in the working copy the session is started in.
 
             What a session without its owner should do in another way than one with the owner, such as the checks it runs by itself, is the project's to say in its instructions.

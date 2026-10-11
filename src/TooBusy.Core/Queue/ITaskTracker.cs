@@ -15,6 +15,9 @@ public interface ITaskTracker
     // Moves the task on the board, putting it there when it is not; does nothing in a project without a board.
     Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken);
 
+    // Makes the user who runs toobusy an assignee of the task, beside those it has; with a board and without one.
+    Task AssignAsync(int number, CancellationToken cancellationToken);
+
     Task AddLabelAsync(int number, string label, CancellationToken cancellationToken);
 
     Task RemoveLabelAsync(int number, string label, CancellationToken cancellationToken);

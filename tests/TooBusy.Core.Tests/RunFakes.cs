@@ -40,7 +40,7 @@ sealed class FakeTracker : ITaskTracker
 
     public Dictionary<int, string> Descriptions { get; } = [];
 
-    // What was done, as `status 12 InProgress`, `label 12 +manual`, `comment 12`, `close 12`, `create 31`.
+    // What was done, as `status 12 InProgress`, `assign 12`, `label 12 +manual`, `comment 12`, `close 12`, `create 31`.
     public List<string> Did { get; } = [];
 
     public List<(int Number, string Text)> Comments { get; } = [];
@@ -49,7 +49,7 @@ sealed class FakeTracker : ITaskTracker
 
     public List<string?> Read { get; } = [];
 
-    // What the tracker refuses, by the first word of what is done: `status`, `close`, `read`, or `status 12 Done`.
+    // What the tracker refuses, by the first word of what is done: `status`, `assign`, `close`, `read`, or `status 12 Done`.
     public HashSet<string> Refused { get; } = [];
 
     // What happens as something is done, before it is: a kill that comes in the middle of it, for one.
@@ -84,6 +84,12 @@ sealed class FakeTracker : ITaskTracker
     {
         Do($"status {number} {status}");
         Change(number, task => task with { Status = status, StatusName = status.ToString() });
+        return Task.CompletedTask;
+    }
+
+    public Task AssignAsync(int number, CancellationToken cancellationToken)
+    {
+        Do($"assign {number}");
         return Task.CompletedTask;
     }
 
