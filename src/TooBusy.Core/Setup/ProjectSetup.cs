@@ -236,8 +236,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         while (true)
         {
             // What the project has now: the board that was chosen a moment ago, the one of the settings,
-            // or one that is linked to the repository already.
-            var proposed = board ?? offeredBoard;
+            // or one that is linked to the repository already. Settings that name no board say that there is
+            // none: only a first setup takes the linked one.
+            var proposed = board ?? offeredBoard ?? (current is { Tracker.Board: null } ? new BoardAnswer.None() : null);
             var address = proposed switch
             {
                 BoardAnswer.Existing existing => existing.Address,

@@ -370,6 +370,22 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task AnExistingSetupWithoutABoardProposesNoneAndNotTheLinkedOne()
+    {
+        store.Current = Existing with { Tracker = new TrackerSettings("github", null) };
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true), new(Moon, "Moon", false)], []);
+
+        var result = await RunAsync();
+
+        Assert.Null(dialog.Question!.Current);
+        Assert.Equal(new BoardAnswer.None(), dialog.Question.Proposed);
+        Assert.Equal(boards.Read.Boards, dialog.Question.Known);
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Linked);
+    }
+
+    [Fact]
     public async Task AnExistingSetupWhoseBoardIsNotLinkedOffersOnlyToLinkIt()
     {
         store.Current = Existing;
@@ -671,6 +687,26 @@ public class ProjectSetupTests
         Assert.Empty(store.Saved.Queue.Labels.Take);
         Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
         Assert.Empty(result.Done);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAnExistingSetupWithoutABoardStaysWithoutOne()
+    {
+        store.Current = Existing with { Tracker = new TrackerSettings("github", null) };
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+
+        var result = await RunUnaskedAsync(SetupProposals.None);
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Contains(new SetupAnswer("Project", "none"), result.Answers);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Linked);
+
+        // An option still names a board.
+        result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Existing(Rocket)));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(Rocket, store.Saved!.Tracker.Board);
     }
 
     [Theory]

@@ -1048,8 +1048,8 @@ public sealed class CliAppTests : IDisposable
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        // Settings; the tab without a project, and `Back` under it; the last of the menu.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Tab, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter);
+        // Settings, which open on the tab without a project; `Back` under it; the last of the menu.
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
@@ -1584,7 +1584,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 

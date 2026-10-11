@@ -63,8 +63,8 @@ public sealed record SetupBoards(IReadOnlyList<SetupBoard> Boards, IReadOnlyList
 
 // Current is the board the project has now, when it has one: the user keeps it or changes it.
 // A new board can be made only when there are owners to make it for. Proposed is an answer that names no board
-// there is, a new one or none, when that is what an option said or what was answered before: the question opens
-// with it, and there is no Current then.
+// there is, a new one or none, when that is what an option said, what was answered before or, for none, what the
+// settings that exist say: the question opens with it, and there is no Current then.
 public sealed record BoardQuestion(
     string Label,
     string Hint,
