@@ -22,6 +22,8 @@ public class GitHubTasksTests
         Assert.Equal(["api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-f", "milestone=4", "-f"], arguments.Take(9));
         Assert.StartsWith("query=query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100,", arguments[9], StringComparison.Ordinal);
         Assert.Contains("filterBy: {milestoneNumber: $milestone}", arguments[9], StringComparison.Ordinal);
+        Assert.Contains("nodes { number title url milestone { title } labels(first: 50)", arguments[9], StringComparison.Ordinal);
+        Assert.Contains("(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv", arguments[11], StringComparison.Ordinal);
         Assert.Equal("--jq", arguments[10]);
     }
 
@@ -50,9 +52,9 @@ public class GitHubTasksTests
     {
         processes.Answers.Enqueue(FakeProcesses.Answered(
             "total\t3\n"
-            + "12\tAdd\\tthe \\\\ thing\thttps://github.com/acme/rocket/issues/12\tIn progress\t4,9\t13\tfeature\tgood first issue\n"
-            + "13\tA part\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\r\n"
-            + "14\tNot there\thttps://github.com/acme/rocket/issues/14\t\t\t\tbug\n"));
+            + "12\tAdd\\tthe \\\\ thing\thttps://github.com/acme/rocket/issues/12\tIn progress\t4,9\t13\tv0.2.0 \\\\ next\tfeature\tgood first issue\n"
+            + "13\tA part\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\t\r\n"
+            + "14\tNot there\thttps://github.com/acme/rocket/issues/14\t\t\t\t\tbug\n"));
 
         var tasks = await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
 
@@ -62,6 +64,7 @@ public class GitHubTasksTests
         Assert.Equal((BoardStatus.InProgress, "In progress"), (tasks[0].Status, tasks[0].StatusName));
         Assert.Equal([4, 9], tasks[0].BlockedBy);
         Assert.Equal([13], tasks[0].Parts);
+        Assert.Equal(["v0.2.0 \\ next", null, null], tasks.Select(task => task.Milestone));
         Assert.Equal(BoardStatus.Todo, tasks[1].Status);
         Assert.Empty(tasks[1].Labels);
         Assert.Equal(BoardStatus.Missing, tasks[2].Status);
@@ -76,7 +79,7 @@ public class GitHubTasksTests
     [InlineData("Review", BoardStatus.Other)]
     public async Task AStatusIsKnownByWhatTheBoardCallsIt(string name, BoardStatus status)
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t1\n1\tOne\thttps://github.com/acme/rocket/issues/1\t{name}\t\t\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t1\n1\tOne\thttps://github.com/acme/rocket/issues/1\t{name}\t\t\t\n"));
 
         Assert.Equal(status, Assert.Single(await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken)).Status);
     }

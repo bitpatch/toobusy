@@ -118,6 +118,20 @@ public sealed class SupervisorTests : IDisposable
         Assert.DoesNotContain(log.Lines, line => line.Contains("on the board", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("v0.3.0")]
+    [InlineData(null)]
+    public async Task WithoutAMilestoneWhatIsLeftOfATaskHasTheMilestoneOfThatTask(string? milestone)
+    {
+        plan = plan with { Milestone = null };
+        tracker.Add(3, milestone: milestone);
+        assistant.Session(3).Works().Ends("Did the half.\nTOOBUSY-REST: Choose the format\nThe dates are left.\nTOOBUSY: partial");
+
+        await RunAsync();
+
+        Assert.Equal(milestone, Assert.Single(tracker.Made).Milestone);
+    }
+
     [Fact]
     public async Task ADirtyTreeStopsTheRunBeforeATask()
     {
@@ -175,7 +189,7 @@ public sealed class SupervisorTests : IDisposable
     [Fact]
     public async Task WhatIsLeftOfATaskDoneInPartBecomesANewTaskForTheOwner()
     {
-        tracker.Add(3, labels: ["Feature", "urgent"]);
+        tracker.Add(3, labels: ["Feature", "urgent"], milestone: "v0.2.0");
         tracker.Descriptions[3] = "Export the data.";
         assistant.Session(3).Works().Ends("Did the half.\nTOOBUSY-REST: Choose the format\nThe dates are left.\n- [ ] ISO?\nTOOBUSY: partial");
 

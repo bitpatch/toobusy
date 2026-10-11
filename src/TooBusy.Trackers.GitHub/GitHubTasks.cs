@@ -14,7 +14,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
     const int Page = 100;
 
     const string Issues = """
-        query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}, filterBy: {milestoneNumber: $milestone}) { totalCount nodes { number title url labels(first: 50) { nodes { name } } blockedBy(first: 50) { nodes { number state } } subIssues(first: 50) { nodes { number state } } projectItems(first: 20) { nodes { project { url } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
+        query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}, filterBy: {milestoneNumber: $milestone}) { totalCount nodes { number title url milestone { title } labels(first: 50) { nodes { name } } blockedBy(first: 50) { nodes { number state } } subIssues(first: 50) { nodes { number state } } projectItems(first: 20) { nodes { project { url } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
         """;
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
@@ -36,13 +36,15 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         }
 
         // A task is on the board when one of its project items is of that board; what the board calls its status
-        // is the fourth field, empty for a task that is not there.
+        // is the fourth field, empty for a task that is not there. The seventh is the title of its milestone, empty
+        // for a task without one, and the labels follow it.
         var status = board is null
             ? "\"\""
             : $"([.projectItems.nodes[] | select((.project.url | ascii_downcase) == {Quoted(board.ToLowerInvariant())})] | if length == 0 then \"\" else (.[0].fieldValueByName.name // \"No status\") end)";
         var lines = $".data.repository.issues | \"total\\t\\(.totalCount)\", (.nodes[] | [.number, .title, .url, {status}, "
             + "([.blockedBy.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\")), "
-            + "([.subIssues.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\"))] + [.labels.nodes[].name] | @tsv)";
+            + "([.subIssues.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\")), "
+            + "(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv)";
         var answer = await AskAsync(
             ["api", "graphql", "-f", $"owner={owner}", "-f", $"name={name}", .. filter, "-f", $"query={Issues.Trim()}", "--jq", lines],
             $"The tasks of {repository} cannot be read.",
@@ -56,10 +58,11 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
                 if (int.Parse(total, CultureInfo.InvariantCulture) > Page)
                     throw new TrackerException($"{(milestone is null ? repository : $"The milestone “{milestone}”")} has {total} open tasks, and the queue reads only the first {Page}.");
             }
-            else if (fields.Length >= 6 && int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+            else if (fields.Length >= 7 && int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
             {
                 var named = Unescaped(fields[3]);
-                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(6).Select(Unescaped)], StatusOf(named), named, Numbers(fields[4]), Numbers(fields[5])));
+                var of = Unescaped(fields[6]);
+                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(7).Select(Unescaped)], StatusOf(named), named, Numbers(fields[4]), Numbers(fields[5]), of.Length == 0 ? null : of));
             }
         }
 

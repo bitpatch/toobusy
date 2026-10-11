@@ -591,7 +591,7 @@ The session is told to do everything that does not depend on the owner, to leave
 
 - its title and its description are those the session wrote after `TOOBUSY-REST:`: what is left, what is done already and where, and the questions for the owner with the answers the session sees. They are written for a session that has never seen this one. A session that named nothing gives a task called `What is left of “<title>”` with its report as the description;
 - under the description stand the task it comes from and, folded, the description of that task;
-- it has the label of the owner, the labels of the first task that are labels to take, and the milestone the user works on, which is the one of the first task; for a user who works without a milestone it has none, whatever the first task has. It stands on the board as one to do.
+- it has the label of the owner, the labels of the first task that are labels to take, and the same milestone as the first task, or none when that task has none, whatever milestone the user works on. It stands on the board as one to do.
 
 No run takes the new task while it has the label of the owner. The owner answers in it, takes the label off, and a run takes it as any other task.
 

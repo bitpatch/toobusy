@@ -57,9 +57,9 @@ sealed class FakeTracker : ITaskTracker
     // A tracker that says a task is closed and goes on listing it among the open ones.
     public bool ForgetsClosing { get; set; }
 
-    public QueueTask Add(int number, string[]? labels = null, BoardStatus status = BoardStatus.Todo, int[]? blockedBy = null, string? title = null)
+    public QueueTask Add(int number, string[]? labels = null, BoardStatus status = BoardStatus.Todo, int[]? blockedBy = null, string? title = null, string? milestone = null)
     {
-        var task = new QueueTask(number, title ?? $"Task {number}", $"https://example.com/{number}", labels ?? ["feature"], status, status.ToString(), blockedBy ?? [], []);
+        var task = new QueueTask(number, title ?? $"Task {number}", $"https://example.com/{number}", labels ?? ["feature"], status, status.ToString(), blockedBy ?? [], [], milestone);
         Open.Add(task);
         return task;
     }
@@ -122,7 +122,7 @@ sealed class FakeTracker : ITaskTracker
         var number = Next++;
         Do($"create {number}");
         Made.Add(task);
-        Open.Add(new QueueTask(number, task.Title, $"https://example.com/{number}", task.Labels, BoardStatus.Todo, "Todo", [], []));
+        Open.Add(new QueueTask(number, task.Title, $"https://example.com/{number}", task.Labels, BoardStatus.Todo, "Todo", [], [], task.Milestone));
         return Task.FromResult(number);
     }
 

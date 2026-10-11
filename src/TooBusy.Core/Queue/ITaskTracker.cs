@@ -28,7 +28,8 @@ public interface ITaskTracker
 }
 
 // A task as the queue reads it. Status is where it stands on the board, and StatusName what the board calls that.
-// BlockedBy and Parts are the open tasks it waits for: those that block it and its own sub-tasks.
+// BlockedBy and Parts are the open tasks it waits for: those that block it and its own sub-tasks. Milestone is the
+// title of its own milestone, null when it has none: in a run without a milestone the tasks differ in it.
 public sealed record QueueTask(
     int Number,
     string Title,
@@ -37,7 +38,8 @@ public sealed record QueueTask(
     BoardStatus Status,
     string StatusName,
     IReadOnlyList<int> BlockedBy,
-    IReadOnlyList<int> Parts)
+    IReadOnlyList<int> Parts,
+    string? Milestone = null)
 {
     public bool Has(string label) => Labels.Contains(label, StringComparer.OrdinalIgnoreCase);
 }

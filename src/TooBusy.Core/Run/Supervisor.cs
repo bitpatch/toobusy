@@ -585,11 +585,12 @@ public sealed class Supervisor(
 
             case OutcomeKind.Partial:
                 // What is left is a task of its own: what the session wrote of it, and the description of the task
-                // it comes from. It has the labels that make the task a task to take, and the one of the owner.
+                // it comes from. It has the labels that make the task a task to take, the one of the owner, and
+                // the milestone of that task, which a run without a milestone does not know otherwise.
                 var rest = outcome.Rest ?? new RestTask("", outcome.Report);
                 var title = rest.Title.Length > 0 ? rest.Title : Briefing.RestTitle(task);
                 string[] labels = [rules.Owner, .. task.Labels.Where(label => rules.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(rules.Owner, StringComparison.OrdinalIgnoreCase))];
-                var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, await tracker.ReadDescriptionAsync(number, kill)), labels, plan.Milestone), kill);
+                var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, await tracker.ReadDescriptionAsync(number, kill)), labels, task.Milestone), kill);
                 await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open, made), kill);
                 await CloseAsync(number, kill);
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");

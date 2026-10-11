@@ -243,7 +243,7 @@ public sealed class CliAppTests : IDisposable
         {
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
+            ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
             ("gh", "label") => Labels,
             ("gh", "issue") => "Write it as CSV.\n",
             ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
@@ -502,7 +502,7 @@ public sealed class CliAppTests : IDisposable
         {
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
+            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
             ("gh", "label") => Labels,
             ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
             ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
@@ -989,8 +989,8 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
-            "gh" when arguments[1] == "graphql" => "total\t3\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n"
-                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\n14\tMove the site\thttps://github.com/acme/rocket/issues/14\t\t\t\tmanual\n",
+            "gh" when arguments[1] == "graphql" => "total\t3\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n"
+                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\t\n14\tMove the site\thttps://github.com/acme/rocket/issues/14\t\t\t\t\tmanual\n",
             _ => "",
         }, ""));
 
@@ -1013,8 +1013,8 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
-            "gh" when arguments[1] == "graphql" => "total\t2\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n"
-                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\n",
+            "gh" when arguments[1] == "graphql" => "total\t2\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n"
+                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\t\n",
             _ => "",
         }, ""));
 

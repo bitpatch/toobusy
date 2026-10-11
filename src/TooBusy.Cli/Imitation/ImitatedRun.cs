@@ -137,7 +137,7 @@ public sealed class ImitatedTasks : ITaskTracker
     {
         var number = next++;
         var status = open.Any(other => other.Status != BoardStatus.Missing) ? BoardStatus.Todo : BoardStatus.Missing;
-        open.Add(new QueueTask(number, task.Title, $"https://github.com/example/project/issues/{number}", task.Labels, status, "Todo", [], []));
+        open.Add(new QueueTask(number, task.Title, $"https://github.com/example/project/issues/{number}", task.Labels, status, "Todo", [], [], task.Milestone));
         descriptions[number] = task.Description;
         return Task.FromResult(number);
     }
