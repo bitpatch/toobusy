@@ -88,7 +88,14 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     static UsageWindow? Window(JsonElement limits, string key, string name) =>
         limits.ValueKind == JsonValueKind.Object && limits.TryGetProperty(key, out var window) && window.ValueKind == JsonValueKind.Object
         && window.TryGetProperty("used_percentage", out var used) && used.ValueKind == JsonValueKind.Number
-            ? new UsageWindow(name, used.GetDouble(), window.TryGetProperty("resets_at", out var reset) && reset.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null)
+            ? new UsageWindow(name, used.GetDouble(), window.TryGetProperty("resets_at", out var reset) ? Time(reset) : null)
+            : null;
+
+    // The time of a reset is Unix seconds; anything else is a time that is not known.
+    static DateTimeOffset? Time(JsonElement reset) =>
+        reset.ValueKind == JsonValueKind.Number && reset.TryGetInt64(out var seconds)
+        && seconds >= DateTimeOffset.MinValue.ToUnixTimeSeconds() && seconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds()
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
 
     // A request that waits for a session is for the one before: a new session starts without it.

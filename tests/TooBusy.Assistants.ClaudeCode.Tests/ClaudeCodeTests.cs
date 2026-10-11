@@ -472,6 +472,21 @@ public sealed class ClaudeCodeTests : IDisposable
     }
 
     [Theory]
+    [InlineData("null")]
+    [InlineData("\"2026-10-11T12:00:00Z\"")]
+    [InlineData("1791675600.5")]
+    [InlineData("99999999999999999")]
+    [InlineData("{}")]
+    public void AResetThatIsNotATimeLeavesTheLimitWithoutOne(string reset)
+    {
+        File.WriteAllText(folders.Usage, """{"rate_limits":{"five_hour":{"used_percentage":97,"resets_at":RESET}}}""".Replace("RESET", reset, StringComparison.Ordinal));
+
+        var limits = Assistant().ReadLimits();
+        Assert.Equal(new UsageWindow("5-hour", 97, null), limits.Near);
+        Assert.Null(limits.Far);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("not json")]
     [InlineData("""{"model":"opus"}""")]
