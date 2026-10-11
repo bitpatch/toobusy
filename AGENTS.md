@@ -42,6 +42,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 
 - Work is planned as issues of `bitpatch/toobusy` on the organisation's `toobusy` project board.
 - Issue types are the labels `feature`, `bug`, `chore` and `docs`.
+- A new issue goes into a milestone. When there is one open milestone, add the issue to it. When there are several, ask the owner which one before creating the issue.
 - When an issue is taken into work, move it to `In Progress` on the board. When the work is finished, commit the result, push it to `develop` and close the issue. In a conversation with the owner, ask before committing, as described in Reporting.
 - All development happens on `develop`, the default branch. `main` is protected and holds released code only: it changes through a release pull request from `develop`. Never commit or push to `main`.
 - CI runs only for release pull requests into `main`, not for `develop`. Run the build, the tests and the format check locally before pushing.
