@@ -339,11 +339,24 @@ public static class CliApp
 
     // Takes the tasks of the queue one after another: on a tape in a terminal, which the tool leaves when the run is
     // over, and as plain lines without one. It does not start without a milestone to work on, a model and an effort.
+    // `--task` makes it a run of one task, and `--max` one of so many tasks at most.
     static Command CreateRunCommand(CliContext context, Option<bool> demo)
     {
-        var command = new Command("run", "Takes the tasks of the queue one after another.");
+        var task = new Option<int?>("--task") { Description = "Do this task and no other: the number of an open task that a run would take now.", HelpName = "number" };
+        var max = new Option<int?>("--max") { Description = "Take so many tasks at most, then stop.", HelpName = "count" };
+        var command = new Command("run", "Takes the tasks of the queue one after another.") { task, max };
         command.SetAction(async (result, cancellationToken) =>
         {
+            var (only, most) = (result.GetValue(task), result.GetValue(max));
+            if ((only is not null && most is not null ? "toobusy: give `--task` or `--max`, not both"
+                : only <= 0 ? "toobusy: `--task` takes the number of a task, which is 1 or more"
+                : most <= 0 ? "toobusy: `--max` takes a number of tasks, which is 1 or more"
+                : null) is { } wrong)
+            {
+                Fail(context, wrong);
+                return ExitCode.NotReady;
+            }
+
             // A demo shows the run in any project: where there are no settings it makes them up.
             if ((result.GetValue(demo) ? FindProject(context) : FindSettings(context)?.Path) is null)
                 return ExitCode.NotReady;
@@ -374,7 +387,7 @@ public static class CliApp
                 return Fail(context, "Run `toobusy effort` to choose it.");
             }
 
-            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
+            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, only, most) is not { } run)
                 return Fail(context, NoTasks);
             if (context.Terminal is { } terminal)
                 return await OnPageAsync(context, terminal, bench, session => session.RunAsync(run, cancellationToken), cancellationToken);

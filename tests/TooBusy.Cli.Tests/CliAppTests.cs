@@ -251,6 +251,136 @@ public sealed class CliAppTests : IDisposable
         Assert.StartsWith("Demo: nothing is changed." + Environment.NewLine + "✻ v0.1.0 (made up) · 6 tasks in the queue", output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("toobusy: give `--task` or `--max`, not both", "--task", "3", "--max", "2")]
+    [InlineData("toobusy: `--task` takes the number of a task, which is 1 or more", "--task", "0")]
+    [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max", "0")]
+    [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max=-2")]
+    [InlineData("--task", "--task", "twelve")]
+    [InlineData("--max", "--max")]
+    public async Task ARunOfATaskAndOfANumberOfTasksTogetherOrWithANumberThatIsNotPositiveIsAWrongCommandLine(string said, params string[] options)
+    {
+        GitRepository();
+        WriteSettings(Settings);
+
+        var (exit, output, error) = await RunAsync(["run", "--demo", .. options]);
+
+        Assert.Equal(2, exit);
+        Assert.Contains(said, error, StringComparison.Ordinal);
+        Assert.DoesNotContain("✻", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoOfARunOfOneTaskDoesThatTaskAndNoOther()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--task", "101");
+
+        // The task a run was killed over is not among the tasks of such a demo: its record would hold the run.
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            """
+            Demo: nothing is changed.
+            ✻ v0.1.0 (made up) · #101 and no other task · the assistant's own model · high effort
+            → #101 Show the total of an order in its header — started · a new session with the skill task-auto · claude attach 4f2a101 (made up)
+              #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #101 Show the total of an order in its header — done in 9 s
+              #101 is closed, with the report of the session as its comment
+            ‖ Stopped after #101, as you asked · 1 done
+              Worked 9 s
+
+            """.ReplaceLineEndings(),
+            output);
+    }
+
+    [Fact]
+    public async Task ADemoOfARunOfTheTaskARunWasKilledOverGoesOnWithItsSession()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--task", "100");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("→ #100 Rename the settings page — taken again · its session was stopped, and goes on", output, StringComparison.Ordinal);
+        Assert.Contains("‖ Stopped after #100, as you asked · 1 done", output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("105", "it waits for #102")]
+    [InlineData("106", "it has the manual label")]
+    [InlineData("107", "its status is In Progress")]
+    [InlineData("999", "it is not among the open tasks of the milestone v0.1.0 (made up)")]
+    public async Task ARunOfATaskThatARunWouldNotTakeStartsNothingAndFails(string number, string why)
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--task", number);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(
+            $"Demo: nothing is changed.{Environment.NewLine}✖ Stopped: #{number} is not taken: {why} · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}",
+            output);
+    }
+
+    [Fact]
+    public async Task ADemoOfARunOfANumberOfTasksStopsAfterThem()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--max", "2");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✻ v0.1.0 (made up) · 6 tasks in the queue, 2 at most · the assistant's own model · high effort", output, StringComparison.Ordinal);
+        Assert.Contains("✔ #100 Rename the settings page — done", output, StringComparison.Ordinal);
+        Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("#102 Export the orders as a file —", output, StringComparison.Ordinal);
+        Assert.EndsWith($"‖ Stopped after 2 tasks, as you asked · 2 done{Environment.NewLine}  Worked 15 s{Environment.NewLine}", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InATerminalTheTapeOfARunOfANumberOfTasksSaysWhatEndedIt()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunLiveAsync(new Keys(), null, "run", "--demo", "--max", "1");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            [
+                "",
+                " ✔ #100 Rename the settings page  0:06",
+                "",
+                " 1 task in 6 s · 1 done",
+                " ‖ Stopped after 1 task, as you asked",
+                "Demo: the tasks and the sessions were made up, and nothing was changed.",
+            ],
+            Scroll.Read(output).Written.Skip(3));
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskOfAProjectSaysThatTheNumberIsNoOpenTaskAndStartsNoSession()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        {
+            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+            ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
+            _ => "",
+        }, ""));
+
+        var (exit, output, _) = await RunAsync(Context(processes) with { Home = personal.FullName }, ["run", "--task", "40"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal($"✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}", output);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments[0] == "issue");
+    }
+
     [Fact]
     public async Task InATerminalARunIsATapeAndTheToolIsLeftWhenTheRunIsOver()
     {

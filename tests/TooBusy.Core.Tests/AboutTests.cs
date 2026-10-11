@@ -50,6 +50,7 @@ public class AboutTests
         Assert.Contains("| `TOOBUSY: failed <the reason>` | nothing | puts the `needs-owner` label on the task and a comment that says what went wrong, moves it back to `Todo` and stops the run;", text, StringComparison.Ordinal);
         Assert.Contains("The run stops in the same way, with the `needs-owner` label and such a comment on the task, when a check does not pass", text, StringComparison.Ordinal);
         Assert.Contains("A task that was closed since, or got the `needs-owner` label or a label that keeps a task out, is not taken.", text, StringComparison.Ordinal);
+        Assert.Contains("- `toobusy run` takes tasks until none is left. `toobusy run --max 3` takes three at most: a task counts when it is done, done in part or left to the owner. `toobusy run --task 12` does task #12 and no other, and only when a run would take it now:", text, StringComparison.Ordinal);
         Assert.Contains("- `toobusy queue` shows which tasks a run takes as things are, in the order it takes them, those that open later and those that are held, each with the reason, and changes nothing.", text, StringComparison.Ordinal);
     }
 

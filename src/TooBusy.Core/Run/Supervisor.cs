@@ -49,6 +49,10 @@ public sealed class Supervisor(
     int done;
     int partial;
 
+    // The tasks of this run that came to an outcome: done, done in part or left to the owner. A run that was
+    // started for a number of tasks counts them.
+    int taken;
+
     // What the pause of a task or a kill said last: it is why the run ended.
     string? left;
 
@@ -99,6 +103,14 @@ public sealed class Supervisor(
                 return Ended(RunEnd.Stopped);
             }
 
+            // A run that was started for one task, or for a number of them, ends as one that its owner stopped.
+            if (Asked() is { } asked)
+            {
+                Say(RunMark.Paused, $"{asked} · {Went()}");
+                machine.Notify($"{asked}: {Went()}");
+                return Ended(RunEnd.Stopped, asked);
+            }
+
             // The record of an earlier run is looked at before the queue. A task that has one left its changes in
             // the working tree, and they are the only ones a run starts over; a session that wrapped up left none.
             Show(new RunStatus(RunPhase.Preparing, "Checking the working tree…"));
@@ -125,6 +137,19 @@ public sealed class Supervisor(
                 lineup = lineup.Taking(kept);
             }
 
+            // A run of one task takes it only as a run of the queue would take it now, and says why when it would
+            // not. The task of a record comes before any other, and its changes may be in the working tree, so
+            // another task is not started over it.
+            if (plan.Only is { } only)
+            {
+                if (before is not null && before.Number != only)
+                    return Refuse(only, $"an earlier run left #{before.Number} with a session, and a run goes on with that task before any other");
+                if (lineup.Ready.FirstOrDefault(ready => ready.Number == only) is not { } one)
+                    return Refuse(only, lineup.Holds(only) ?? (plan.Milestone is null ? "it is not among the open tasks" : $"it is not among the open tasks of the milestone {plan.Milestone}"));
+
+                lineup = TaskLineup.Of(one);
+            }
+
             if (first)
                 Head(lineup);
             if (lineup.Ready.Count == 0)
@@ -143,9 +168,28 @@ public sealed class Supervisor(
                 return Stop($"#{task.Number} came up again after its session");
 
             last = task.Number;
-            if (await DoAsync(task, before, lineup.Ready.Count + lineup.Later.Count - 1, kill) is { } ended)
+            var queued = lineup.Ready.Count + lineup.Later.Count - 1;
+            if (await DoAsync(task, before, plan.Most is { } most ? Math.Min(queued, most - taken - 1) : queued, kill) is { } ended)
                 return ended;
+
+            taken++;
         }
+    }
+
+    // What ends a run that was started for one task or for a number of them, once it has done as much; null while
+    // it goes on, and in a run of the whole queue.
+    string? Asked() =>
+        plan.Only is { } only && taken > 0 ? $"Stopped after #{only}, as you asked"
+        : plan.Most is { } most && taken >= most ? $"Stopped after {Spoken.Tasks(taken)}, as you asked"
+        : null;
+
+    // The one task of a run is not taken: nothing is started, and the run says why.
+    RunResult Refuse(int number, string why)
+    {
+        var problem = $"#{number} is not taken: {why}";
+        Say(RunMark.Failed, $"Stopped: {problem} · no task was started");
+        machine.Notify($"Stopped: {problem}");
+        return Ended(RunEnd.Problem, problem);
     }
 
     // A task of the record that is not gone on with: its session is stopped, so that nothing works on with nobody
@@ -806,7 +850,9 @@ public sealed class Supervisor(
     // The first lines of a run: what it works on, and what it will not take as things are.
     void Head(TaskLineup lineup)
     {
-        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {Spoken.Tasks(lineup.Ready.Count + lineup.Later.Count)} in the queue · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort");
+        var queue = plan.Only is { } only ? $"#{only} and no other task"
+            : $"{Spoken.Tasks(lineup.Ready.Count + lineup.Later.Count)} in the queue" + (plan.Most is { } most ? $", {most} at most" : "");
+        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {queue} · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort");
         if (lineup.Later.Count > 0)
             Say(RunMark.Note, "Opens later: " + string.Join(" · ", lineup.Later.Select(later => $"#{later.Task.Number} after {string.Join(", ", later.After.Select(before => $"#{before}"))}")));
         if (lineup.Held.Count > 0)

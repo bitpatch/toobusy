@@ -1528,6 +1528,278 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal((RunPhase.Ended, RunCommands.None), (log.Statuses[^1].Phase, log.Statuses[^1].Available));
     }
 
+    [Fact]
+    public async Task ARunOfOneTaskDoesItAndNoOtherAndEndsAsOneThatItsOwnerStopped()
+    {
+        plan = plan with { Only = 5 };
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1, "Stopped after #5, as you asked"), result);
+        Assert.Equal([5], assistant.Started.Select(start => start.Task));
+        Assert.Equal(
+            """
+            ✻ v0.2.0 · #5 and no other task · the assistant's own model · high effort
+            → #5 Task 5 — started · a new session · fake attach 5
+              #5 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #5 Task 5 — done in 3 s
+              #5 is closed, with the report of the session as its comment
+            ‖ Stopped after #5, as you asked · 1 done
+              Worked 3 s
+            """.ReplaceLineEndings("\n"),
+            log.Text);
+        Assert.Equal(["Stopped after #5, as you asked: 1 done"], machine.Notified);
+
+        // The queue is not read again: nothing is taken after the task.
+        Assert.Single(tracker.Read);
+        Assert.Equal(0, log.Statuses.First(status => status.Phase == RunPhase.Working).Queued);
+    }
+
+    [Theory]
+    [InlineData("Done.\nTOOBUSY: done", "1 done")]
+    [InlineData("Half of it; the rest is #9.\nTOOBUSY: partial", "0 done · 1 done in part")]
+    [InlineData("What is the colour?\nTOOBUSY: owner", "0 done")]
+    public async Task ARunOfOneTaskEndsSoWhateverTheOutcomeOfTheTask(string reply, string went)
+    {
+        plan = plan with { Only = 3 };
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works().Ends(reply);
+
+        var result = await RunAsync();
+
+        Assert.Equal((RunEnd.Stopped, "Stopped after #3, as you asked"), (result.End, result.Why));
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+        Assert.Contains($"‖ Stopped after #3, as you asked · {went}", log.Lines);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskDoesNotTakeATaskThatItsSessionMakes()
+    {
+        plan = plan with { Only = 3 };
+        tracker.Add(3);
+        assistant.Session(3).Works(and: () => tracker.Add(4)).Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Stopped, result.End);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+    }
+
+    [Theory]
+    [InlineData(3, "it has the manual label")]
+    [InlineData(4, "it waits for the owner: it has the needs-owner label")]
+    [InlineData(5, "it has none of the labels to take: feature, bug")]
+    [InlineData(6, "its status is InProgress")]
+    [InlineData(7, "it waits for #8")]
+    [InlineData(9, "it waits for #3 (it has the manual label)")]
+    [InlineData(40, "it is not among the open tasks of the milestone v0.2.0")]
+    public async Task ARunOfOneTaskStartsNothingWhenARunWouldNotTakeTheTaskAndSaysWhyInTheWordsOfTheQueue(int number, string why)
+    {
+        plan = plan with { Only = number };
+        tracker.Add(3, labels: ["feature", "manual"]);
+        tracker.Add(4, labels: ["feature", "needs-owner"]);
+        tracker.Add(5, labels: ["docs"]);
+        tracker.Add(6, status: BoardStatus.InProgress);
+        tracker.Add(7, blockedBy: [8]);
+        tracker.Add(8);
+        tracker.Add(9, blockedBy: [3]);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, $"#{number} is not taken: {why}"), result);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(tracker.Did);
+        Assert.Empty(log.Ends);
+        Assert.Equal([$"✖ Stopped: #{number} is not taken: {why} · no task was started", "  Worked 0 s"], log.Lines);
+        Assert.Equal([$"Stopped: #{number} is not taken: {why}"], machine.Notified);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskWithoutAMilestoneSaysThatTheNumberIsNoOpenTask()
+    {
+        plan = plan with { Milestone = null, Only = 40 };
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#40 is not taken: it is not among the open tasks"), result);
+        Assert.Empty(assistant.Started);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskIsNotStartedOverTheTaskAnEarlierRunLeftWithASession()
+    {
+        plan = plan with { Only = 3 };
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 is not taken: an earlier run left #5 with a session, and a run goes on with that task before any other"), result);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(tracker.Did);
+
+        // The session of the other task and its record are left as they are, for the run that goes on with it.
+        Assert.Empty(assistant.Found);
+        Assert.Equal((0, 0), (session.Stopped, session.Told.Count));
+        Assert.Equal(Record(5), state.Record);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskGoesOnWithTheSessionAnEarlierRunLeftForThatTask()
+    {
+        plan = plan with { Only = 5 };
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        assistant.Session(5).Works(2).Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1, "Stopped after #5, as you asked"), result);
+        Assert.Empty(assistant.Started);
+        Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskTakesItOnceTheRecordOfATaskThatIsNotGoneOnWithIsForgotten()
+    {
+        // The task of the record was closed since: its record is forgotten, as in any run, and holds nothing back.
+        plan = plan with { Only = 3 };
+        state.Record = Record(5);
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1, "Stopped after #3, as you asked"), result);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskThatIsStoppedOrFailsEndsAsAnyOther()
+    {
+        plan = plan with { Only = 3 };
+        tracker.Add(3);
+        assistant.Session(3).Works().Ends("No way.\nTOOBUSY: failed the tests do not pass");
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Problem, result.End);
+        Assert.Contains("✖ Stopped: #3 failed · fake attach 3 · the next task did not start · 0 done", log.Lines);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("as you asked", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(1, "1 task")]
+    [InlineData(2, "2 tasks")]
+    public async Task ARunOfANumberOfTasksTakesSoManyAndEndsAsOneThatItsOwnerStopped(int most, string tasks)
+    {
+        plan = plan with { Most = most };
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, most, $"Stopped after {tasks}, as you asked"), result);
+        Assert.Equal(most == 1 ? [3] : [3, 5], assistant.Started.Select(start => start.Task));
+        Assert.Equal($"✻ v0.2.0 · 3 tasks in the queue, {most} at most · the assistant's own model · high effort", log.Lines[0]);
+        Assert.Equal($"‖ Stopped after {tasks}, as you asked · {most} done", log.Lines[^2]);
+        Assert.Equal([$"Stopped after {tasks}, as you asked: {most} done"], machine.Notified);
+
+        // The queue is read before each task, and not after the last one. A task is followed by those the run
+        // still takes, and by no more.
+        Assert.Equal(most, tracker.Read.Count);
+        Assert.Equal(
+            Enumerable.Range(0, most).Reverse(),
+            log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Queued).Distinct());
+    }
+
+    [Fact]
+    public async Task ATaskCountsWhenItIsDoneDoneInPartOrLeftToTheOwner()
+    {
+        plan = plan with { Most = 3 };
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+        tracker.Add(8);
+        assistant.Session(3).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
+        assistant.Session(5).Works().Ends("What is the colour?\nTOOBUSY: owner");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1, "Stopped after 3 tasks, as you asked") { Partial = 1 }, result);
+        Assert.Equal([3, 5, 7], assistant.Started.Select(start => start.Task));
+        Assert.Contains("‖ Stopped after 3 tasks, as you asked · 1 done · 1 done in part", log.Lines);
+    }
+
+    [Fact]
+    public async Task ATaskThatIsGoneOnWithCountsAsOne()
+    {
+        // The task of a record is gone on with, and the session of the next one asks and is told to go on alone.
+        plan = plan with { Most = 2 };
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        tracker.Add(7);
+        assistant.Session(5).Works(2).Ends(Done);
+        assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 2, "Stopped after 2 tasks, as you asked"), result);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+        Assert.Equal([(5, RunMark.Done), (3, RunMark.Done)], Ended);
+    }
+
+    [Fact]
+    public async Task ARunOfANumberOfTasksTakesATaskThatASessionMakesInItsTurn()
+    {
+        plan = plan with { Most = 2 };
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works(and: () => tracker.Add(4)).Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal([3, 4], assistant.Started.Select(start => start.Task));
+    }
+
+    [Fact]
+    public async Task ARunOfANumberOfTasksRunsOutOfTasksAsAnyOther()
+    {
+        plan = plan with { Most = 5 };
+        tracker.Add(3);
+        tracker.Add(5);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Contains("✔ No task is left · 2 done", log.Lines);
+    }
+
+    [Fact]
+    public async Task ARunOfANumberOfTasksIsStoppedByItsOwnerAsAnyOther()
+    {
+        plan = plan with { Most = 2 };
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works(4).Ends(Done);
+        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1), result);
+        Assert.Contains("‖ Stopped by /stop · 1 done", log.Lines);
+    }
+
     // The tasks that were told to be over, each with its mark.
     IEnumerable<(int Task, RunMark Mark)> Ended => log.Ends.Select(ended => (ended.Task, ended.Mark));
 

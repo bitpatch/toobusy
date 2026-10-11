@@ -178,6 +178,29 @@ public class TaskLineupTests
     }
 
     [Fact]
+    public void ALineupSaysWhyARunDoesNotTakeATaskNow()
+    {
+        var lineup = TaskLineup.Arrange([Task(2, blockedBy: [3, 9]), Task(3), Task(5, labels: ["bug", "manual"]), Task(9)], Rules);
+
+        Assert.Equal("it waits for #3, #9", lineup.Holds(2));
+        Assert.Equal("it has the manual label", lineup.Holds(5));
+
+        // A task that can be taken is not kept, and nothing is said of a number that is no task.
+        Assert.Null(lineup.Holds(3));
+        Assert.Null(lineup.Holds(40));
+    }
+
+    [Fact]
+    public void TheLineupOfOneTaskHasNoOther()
+    {
+        var lineup = TaskLineup.Of(Task(3));
+
+        Assert.Equal([3], lineup.Ready.Select(task => task.Number));
+        Assert.Empty(lineup.Later);
+        Assert.Empty(lineup.Held);
+    }
+
+    [Fact]
     public void TheRulesComeFromTheSettings()
     {
         var settings = new Settings.ProjectSettings(

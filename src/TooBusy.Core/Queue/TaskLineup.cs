@@ -90,6 +90,15 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
         [.. Later.Where(later => later.Task.Number != task.Number)],
         [.. Held.Where(held => held.Task.Number != task.Number)]);
 
+    // Why a run does not take the task with this number now, in the words of the queue: what it waits for, or why
+    // it is held. Null for a task that can be taken, and for a number that is not among the tasks.
+    public string? Holds(int number) =>
+        Later.FirstOrDefault(later => later.Task.Number == number) is { } later ? $"it waits for {string.Join(", ", later.After.Select(before => $"#{before}"))}"
+        : Held.FirstOrDefault(held => held.Task.Number == number)?.Reason;
+
+    // The lineup of a run that does this task and no other.
+    public static TaskLineup Of(QueueTask task) => new([task], [], []);
+
     static List<int> Before(QueueTask task) => [.. task.BlockedBy.Concat(task.Parts).Distinct().Order()];
 
     // Why the task is not taken whatever closes before it; null when nothing speaks against it.

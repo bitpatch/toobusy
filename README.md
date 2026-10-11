@@ -119,6 +119,13 @@ toobusy run
 
 Either way a run starts with the checks of `toobusy doctor`: while one fails it does not start, and says what failed and how to fix it.
 
+A run takes tasks until none is left. Two options of `toobusy run` make it shorter:
+
+```sh
+toobusy run --task 12    # task #12 and no other; a task that a run would not take now is not started, and the run says why
+toobusy run --max 3      # three tasks at most, then it stops as after `stop`
+```
+
 `toobusy queue` shows what a run would do before you start one, and changes nothing:
 
 ```text

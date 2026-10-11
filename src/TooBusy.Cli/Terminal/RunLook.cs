@@ -78,7 +78,8 @@ public static class RunLook
     const int Inset = 2;
 
     // What a run that is over leaves under its tasks: how many there were, how long it took and how they went; and,
-    // for a run that did not simply run out of tasks, the line of what ended it.
+    // for a run that did not simply run out of tasks, the line of what ended it. A run that was started for one task
+    // or for a number of them says so in the place of a command of its owner.
     public static (Line Tasks, RunLine? Why) Summary(RunResult result, IReadOnlyList<TaskEnd> ends, TimeSpan took)
     {
         (RunMark Mark, string Went)[] kinds =
@@ -92,7 +93,7 @@ public static class RunLook
         return (tasks, result switch
         {
             { End: RunEnd.Emptied } => null,
-            { End: RunEnd.Stopped } => new RunLine(RunMark.Paused, "Stopped, as you asked"),
+            { End: RunEnd.Stopped } => new RunLine(RunMark.Paused, result.Why ?? "Stopped, as you asked"),
             { End: RunEnd.Killed } => new RunLine(RunMark.Interrupted, result.Why is null ? "Killed" : $"Killed: {result.Why}"),
             { End: RunEnd.Limited } => new RunLine(RunMark.Paused, $"Stopped: {result.Why ?? "a usage limit"}"),
             _ => new RunLine(RunMark.Failed, $"Stopped: {result.Why ?? "something went wrong"}"),

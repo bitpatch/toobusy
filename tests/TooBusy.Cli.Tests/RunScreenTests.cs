@@ -337,6 +337,23 @@ public sealed class RunScreenTests : IDisposable
         terminal.AssertTaped(expected);
     }
 
+    [Fact]
+    public async Task ARunThatWasStartedForANumberOfTasksSaysSoWhereItSaysThatItsOwnerStoppedIt()
+    {
+        var run = new ScriptedRun((_, view) =>
+        {
+            view.Report(new TaskEnd(Total, RunMark.Done, TimeSpan.FromSeconds(84)));
+            return System.Threading.Tasks.Task.FromResult(new RunResult(RunEnd.Stopped, 1, "Stopped after 1 task, as you asked"));
+        });
+
+        using var page = terminal.Open();
+        var screen = new RunScreen(page, () => now);
+        await screen.RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal([" ✔ #2 Show the total  1:24", " 1 task in 0 s · 1 done", " ‖ Stopped after 1 task, as you asked"], terminal.Tape.Text.Split('\n').Skip(1));
+        Assert.Equal("1 task in 0 s · 1 done · Stopped after 1 task, as you asked", screen.Summary);
+    }
+
     [Theory]
     [InlineData(RunEnd.Emptied, null, "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", null)]
     [InlineData(RunEnd.Limited, "#5 is paused: the weekly limit is spent", "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", " ‖ Stopped: #5 is paused: the weekly limit is spent")]

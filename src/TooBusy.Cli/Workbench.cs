@@ -100,12 +100,14 @@ public sealed record Workbench(
     // tasks whatever their milestone. In a demo the run is an imitated one. Otherwise the tasks are the issues of
     // the repository, Claude Code does them in the working copy, and what the run leaves on this machine is kept in
     // the local folder of the project. Null when the project has no tasks to take: its `origin` remote is not a
-    // GitHub repository.
-    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort)
+    // GitHub repository. `only` is the one task the run does and `most` how many it takes at most; without them it
+    // is a run of the whole queue. A demo of a run of one task has no task that a run was killed over, unless it is
+    // the one: the record of that task would keep the run from any other.
+    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill };
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most };
         if (Demo)
-            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules), remembered);
+            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules, killed: only is null or ImitatedTasks.Killed), remembered);
         if (Repository is null)
             return null;
 
@@ -124,9 +126,13 @@ public sealed record Workbench(
     // The made-up tasks of a demo: those that were kept while one of them is interrupted or has a record, and
     // otherwise tasks that are made up anew, so that a demo can be run again and again. The first of them have a
     // task that a run was killed over, with its record, so that a demo starts by going on with a session.
-    ImitatedTasks DemoTasks(QueueRules rules)
+    ImitatedTasks DemoTasks(QueueRules rules, bool killed = true)
     {
-        if (kept is null)
+        if (kept is null && !killed)
+        {
+            kept = new ImitatedTasks(rules, killed: false);
+        }
+        else if (kept is null)
         {
             kept = new ImitatedTasks(rules, killed: true);
             remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, Clock.Now)));

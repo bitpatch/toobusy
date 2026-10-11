@@ -7,12 +7,17 @@ namespace TooBusy.Core.Run;
 // What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
 // and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
 // a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
-// with, null where the project names none.
+// with, null where the project names none. Only is the number of the one task the run does, and Most how many tasks
+// it takes at most; null is a run of the whole queue. A run is given one of the two at most.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
 
     public string? Skill { get; init; }
+
+    public int? Only { get; init; }
+
+    public int? Most { get; init; }
 }
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
@@ -197,8 +202,9 @@ public enum RunEnd
     Killed,
 }
 
-// How a run ended. Why says what ended a run that neither ran out of tasks nor was stopped by the owner: the limit,
-// the problem, or what a kill left behind. A task that was done in part is counted apart from those that are done.
+// How a run ended. Why says what ended a run that neither ran out of tasks nor was stopped by a command of the
+// owner: the limit, the problem, what a kill left behind, or the task or the number of tasks the run was started
+// for. A task that was done in part is counted apart from those that are done.
 public sealed record RunResult(RunEnd End, int Done, string? Why = null)
 {
     public int Partial { get; init; }
