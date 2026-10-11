@@ -60,14 +60,29 @@ public class BriefingTests
     }
 
     [Fact]
-    public void ATaskThatWasInterruptedIsToldWhereTheReportOfItsSessionIs()
+    public void ATaskThatWasInterruptedIsToldOfBothCommentsItMayHaveAndWhatToDoAfterEach()
     {
         var message = Briefing.Task(Export, interrupted: true);
 
         Assert.Contains(
-            "- This task was interrupted before. The report of that session is the last comment of the task that starts with **Interrupted.**: go on with what it says is left, and do again what it says was undone.\n\n# What cannot be done without the owner",
+            "- This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how. "
+            + "One that starts with **Interrupted.** is the report of the session before: go on with what it says is left, and do again what it says was undone. "
+            + "One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description."
+            + "\n\n# What cannot be done without the owner",
             message,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheRuleOfATaskThatWasInterruptedNamesTheCommentsAsTheyAreWritten()
+    {
+        var message = Briefing.Task(Export, interrupted: true);
+
+        foreach (var comment in new[] { Briefing.Comment(OutcomeKind.Interrupted, "Undone.", "s"), Briefing.Paused("the weekly limit is spent", "s") })
+        {
+            var head = comment[..(comment.IndexOf("**", 2, StringComparison.Ordinal) + 2)];
+            Assert.Contains($"starts with {head}", message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

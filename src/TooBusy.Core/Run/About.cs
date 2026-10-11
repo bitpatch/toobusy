@@ -72,7 +72,7 @@ public static class About
             {Briefing.Task(Sample, interrupted: false)}
             ```
 
-            The task is named and not passed on: the session reads its description and its comments in the tracker. A task that was interrupted before has one rule more, after the others:
+            The task is named and not passed on: the session reads its description and its comments in the tracker. A task that was interrupted before, by `/abort` or by a usage limit in another working copy, has one rule more, after the others:
 
             ```text
             {again}

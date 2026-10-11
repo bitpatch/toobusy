@@ -11,6 +11,8 @@ public static class Briefing
 {
     // The first message of a session: the task, the rules of a session without the owner, and how its last reply
     // is to end. The task is named and not passed on: the session reads it in the tracker, whole and as it is now.
+    // `interrupted` is a task taken by its label with nothing of its session here: wrapped up after `/abort`, with a
+    // report, or paused by a usage limit elsewhere, with none. Its last comment says which.
     // `lost` is a task that a session worked on before whose conversation is gone, with no report of it.
     public static string Task(QueueTask task, bool interrupted, bool lost = false)
     {
@@ -36,7 +38,7 @@ public static class Briefing
         if (interrupted)
         {
             message.Append("""
-                - This task was interrupted before. The report of that session is the last comment of the task that starts with **Interrupted.**: go on with what it says is left, and do again what it says was undone.
+                - This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how. One that starts with **Interrupted.** is the report of the session before: go on with what it says is left, and do again what it says was undone. One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description.
 
                 """);
         }

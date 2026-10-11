@@ -549,7 +549,7 @@ The first message of a session names the task and gives the rules. It starts wit
 - the tracker is kept by toobusy, which has already moved the task to `In Progress`: the status, the labels, closing and comments are not the session's;
 - the work is done in this working copy, which was clean and must be clean at the end: everything committed and pushed, or undone;
 - the session keeps a plan of the work in its task list: the steps are laid out before it starts, each is marked when it is begun and when it is done, and the list changes when the plan does. The page of a run shows it;
-- a task that was interrupted before has the report of that session as its last comment that starts with `**Interrupted.**`;
+- a task that was interrupted before is told how by the last comment that starts with `**Interrupted.**` or with `**Stopped by a usage limit**`. The first is the report of the session before: the session goes on with what it says is left and does again what it says was undone. The second has no report: the session before worked elsewhere, its uncommitted changes are not here, and the task is done from its description;
 - a task that a session worked on before and left no report of, its conversation being gone, may have the changes of that session in the working copy: the session looks at them, keeps what is right and undoes what is not;
 - what cannot be done without the owner, as described below;
 - the last reply is the report of the task, and its last line is one of the first four of these. The fifth is not in the first message: only the request of [`/abort`](#stopping) asks for it:
@@ -694,7 +694,7 @@ One that wrapped up is told:
 
 **A tracker that refuses while a task is taken.** A session works from the moment it is started or told to go on, and the tracker is told more after that: a task whose session goes on is moved to `In Progress`, and a task that was interrupted loses its label. When the tracker refuses then, the run stops, and it stops the session first, as a kill does, so that nothing works on with nobody watching: `✖ Stopped: … · the session of #12 is stopped, and the next run goes on with it · claude attach 1a2b3c4d · the next task did not start · 0 done`. The record is kept, the task stays as the tracker has it, and the next run goes on with that session as with one that a kill stopped. A kill that comes at that moment stops the session too: `■ Killed the session of #12 while the task was taken: the next run goes on with its session · claude attach 1a2b3c4d`.
 
-On another machine there is no record: a task that was interrupted or paused is taken first by its label, with a new session, and one that a kill left in `In Progress` is not taken, in a project with a board. A project without a board has no status to hold such a task: there it is taken as any other, with a new session.
+On another machine there is no record: a task that was interrupted or paused is taken first by its label, with a new session. Its first message has the rule of a task that was interrupted, which names both comments such a task may have: the report of a wrap-up, to go on from, and the comment of a pause, after which the task is done from its description, the changes of the session before being on the machine it worked on. One that a kill left in `In Progress` is not taken, in a project with a board. A project without a board has no status to hold such a task: there it is taken as any other, with a new session.
 
 ### Local state
 
