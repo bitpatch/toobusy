@@ -1,5 +1,6 @@
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Setup;
@@ -35,7 +36,9 @@ public sealed class Session(Page page, Workbench bench)
 
     // Opens with the menu. A project that is not set up is set up first, and a user who has no milestone to work
     // on, no model or no effort chooses them; leaving any of these leaves the page. A run that is opened from the
-    // menu comes back to it when it is over, with how it went said above the menu.
+    // menu comes back to it when it is over, with how it went said above the menu. Before it is opened the checks
+    // of `doctor` are made, as `toobusy run` makes them: while one fails no run is opened, and the failures stand
+    // above the menu with their fixes. A demo has it all and checks nothing.
     public async Task HomeAsync(CancellationToken cancellationToken)
     {
         if (bench.Settings.Load()?.Settings is null)
@@ -60,10 +63,23 @@ public sealed class Session(Page page, Workbench bench)
             ? await bench.OutlookAsync(settings, choice.Title, cancellationToken)
             : null);
         string? note = null;
+        IReadOnlyList<CheckResult> failed = [];
         while (true)
         {
-            Clear("", note);
-            switch (await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks))
+            Clear("", note, failed);
+            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks);
+            failed = [];
+            if (action == HomeAction.Run && !bench.Demo)
+            {
+                (action, failed) = await CheckAsync(tasks, cancellationToken);
+                if (failed.Count > 0)
+                {
+                    note = "The run did not start. `toobusy doctor` checks all of it again.";
+                    continue;
+                }
+            }
+
+            switch (action)
             {
                 case HomeAction.Run:
                     note = bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is { } run
@@ -85,6 +101,43 @@ public sealed class Session(Page page, Workbench bench)
                     break;
                 default:
                     return;
+            }
+        }
+    }
+
+    // Makes the checks of `doctor` under the menu, which shows the one that is running at `Run` and stays what
+    // it is: gives `Run` with the checks that failed once they are over, or what was chosen meanwhile, which stops
+    // them.
+    async Task<(HomeAction Action, IReadOnlyList<CheckResult> Failed)> CheckAsync(TaskCount tasks, CancellationToken cancellationToken)
+    {
+        var checks = new RunChecks();
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var checking = MakeAsync();
+        try
+        {
+            Clear("", null);
+            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks, checks);
+            return (action, action == HomeAction.Run ? checks.Failed : []);
+        }
+        finally
+        {
+            // Checks that were not waited for are told to stop and left to it.
+            if (!checking.IsCompleted)
+                await stopping.CancelAsync();
+        }
+
+        async Task MakeAsync()
+        {
+            try
+            {
+                await bench.Checkup.RunAsync(checks, stopping.Token);
+            }
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException)
+            {
+            }
+            finally
+            {
+                checks.End();
             }
         }
     }
@@ -216,8 +269,8 @@ public sealed class Session(Page page, Workbench bench)
     }
 
     // Takes the page back from the screen that had it: what is settled in its body, with a note under it, and
-    // nothing of that screen around.
-    void Clear(string status, string? note)
+    // nothing of that screen around. The checks that failed before a run stand before the note, with their fixes.
+    void Clear(string status, string? note, IReadOnlyList<CheckResult>? failed = null)
     {
         page.Status = bench.Demo ? status.Length == 0 ? "demo" : $"{status} · demo" : status;
         page.Foot = Line.Empty;
@@ -250,7 +303,7 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Effort", effort));
 
         if (note is not null)
-            body.AddRange([Line.Empty, Line.Of(note, Tone.Muted)]);
+            body.AddRange([Line.Empty, .. (failed ?? []).SelectMany(check => CheckList.Told(check, page.Width)), Line.Of(note, Tone.Muted)]);
         page.Body = body;
     }
 }

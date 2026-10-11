@@ -1,3 +1,4 @@
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 
@@ -25,6 +26,82 @@ public sealed class TaskCount(Func<Task<QueueOutlook?>> count)
     public void Forget() => counting = null;
 }
 
+// The checks of `doctor` before a run that the menu opens, as the menu watches them: the check that is running, when
+// something of it changes, and the checks that failed once all of them are over.
+public sealed class RunChecks : ICheckupView
+{
+    readonly Lock telling = new();
+    readonly List<CheckResult> failed = [];
+    TaskCompletionSource changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    string? running;
+    bool over;
+
+    // The check that is running, or the one that ran last; null before the first of them.
+    public string? Running
+    {
+        get
+        {
+            lock (telling)
+                return running;
+        }
+    }
+
+    public bool Over
+    {
+        get
+        {
+            lock (telling)
+                return over;
+        }
+    }
+
+    public IReadOnlyList<CheckResult> Failed
+    {
+        get
+        {
+            lock (telling)
+                return [.. failed];
+        }
+    }
+
+    // Done when another check starts or the checks are over; once they are over it is done for good.
+    public Task Changed
+    {
+        get
+        {
+            lock (telling)
+                return over ? Task.CompletedTask : changed.Task;
+        }
+    }
+
+    public void Start(string name) => Tell(() => running = name);
+
+    public void Done(CheckResult result)
+    {
+        lock (telling)
+        {
+            if (result.State == CheckState.Failed)
+                failed.Add(result);
+        }
+    }
+
+    // The checks are over, however they ended.
+    public void End() => Tell(() => over = true);
+
+    void Tell(Action change)
+    {
+        TaskCompletionSource told;
+        lock (telling)
+        {
+            change();
+            told = changed;
+            changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        told.TrySetResult();
+    }
+}
+
 // The menu toobusy opens with: what can be done in a project that is set up and has its milestone, its model and
 // its effort chosen.
 public static class HomeScreen
@@ -36,24 +113,33 @@ public static class HomeScreen
     // run takes first.
     // Escape, asked twice, is the same as `Exit`: the row names the key at its right, as `Back` does, so the keys of
     // the page do not name it again.
-    public static async Task<HomeAction> AskAsync(Page page, string assistant, string milestone, TaskCount tasks)
+    // `checks` are the checks before a run that `Run` has asked for: while they go on the check that is running
+    // stands at `Run` before the dots of a wait, Enter does nothing there, and the other rows are chosen as ever.
+    // When the checks are over the menu gives `Run` by itself.
+    public static async Task<HomeAction> AskAsync(Page page, string assistant, string milestone, TaskCount tasks, RunChecks? checks = null)
     {
         page.EscapeLeaves = true;
         page.Keys = "";
         IReadOnlyList<Choice> Choices() =>
         [
-            Run(tasks.Counting, page.Width),
+            checks is null ? Run(tasks.Counting, page.Width) : new("Run", Note: checks.Running is { } check ? $"checking: {check}" : "", Off: true, Waits: true),
             new("Assistant", Note: assistant),
             new("Milestone", Note: milestone),
             new("Settings"),
             new("Exit", Picker.BackKey),
         ];
 
-        var picked = await Picker.PickAsync(page, [Line.Of("What to do", Tone.Strong)], Choices, () => tasks.Counting, _ =>
-        {
-            if (tasks.Counting.IsCompleted)
-                tasks.Forget();
-        });
+        var picked = await Picker.PickAsync(
+            page,
+            [Line.Of("What to do", Tone.Strong)],
+            Choices,
+            () => checks is null ? tasks.Counting : checks.Changed,
+            _ =>
+            {
+                if (checks is null && tasks.Counting.IsCompleted)
+                    tasks.Forget();
+            },
+            () => checks is { Over: true } ? (int)HomeAction.Run : null);
         return picked is { } index ? (HomeAction)index : HomeAction.Exit;
     }
 

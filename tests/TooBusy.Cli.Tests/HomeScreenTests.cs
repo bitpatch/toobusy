@@ -1,4 +1,5 @@
 using TooBusy.Cli.Terminal;
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 
 namespace TooBusy.Cli.Tests;
@@ -118,6 +119,69 @@ public sealed class HomeScreenTests : IDisposable
         narrow.AssertSaw(" ❯ Run        interrupted: #12 Export …\n");
     }
 
+    [Fact]
+    public async Task WhileTheChecksBeforeARunGoOnTheOneThatRunsStandsAtRunAndTheMenuGivesRunWhenTheyAreOver()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        var checks = new RunChecks();
+        checks.Start(Checkup.Git);
+
+        // Enter does nothing on `Run` while a check runs; the next check is shown in its turn, and no key ends the
+        // checks: the menu gives `Run` by itself.
+        terminal.Keys.Press(Keys.Enter).Hold(() =>
+        {
+            if (!terminal.Saw("checking: git"))
+                return false;
+
+            checks.Start(Checkup.TrackerLogin);
+            return terminal.Saw("checking: GitHub login");
+        }).Hold(() =>
+        {
+            checks.End();
+            return false;
+        });
+
+        Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        terminal.AssertSaw("""
+             What to do
+             ❯ Run        checking: git  •••••••••••
+               Assistant  own model · high
+               Milestone  v0.3.0
+               Settings
+               Exit       esc
+             ↑↓ move · enter choose · ctrl+c exit
+            """.ReplaceLineEndings("\n").TrimEnd(' '));
+        terminal.AssertSaw(" ❯ Run        checking: GitHub login  •••••••••••\n");
+    }
+
+    [Fact]
+    public async Task ChecksThatAreOverGiveRunAtOnceAndKeepTheOnesThatFailed()
+    {
+        var checks = new RunChecks();
+        checks.Start(Checkup.Git);
+        checks.Done(new CheckResult(Checkup.Git, CheckState.Passed));
+        checks.Done(new CheckResult(Checkup.Labels, CheckState.Skipped, "waits for the repository"));
+        checks.Done(new CheckResult(Checkup.AssistantLogin, CheckState.Failed, "Claude Code is not logged in.", Fixes.AssistantLogin));
+        checks.End();
+
+        // No key is pressed and nothing is drawn.
+        Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.Equal(0, terminal.Frames);
+        Assert.Equal([Checkup.AssistantLogin], checks.Failed.Select(check => check.Name));
+    }
+
+    [Fact]
+    public async Task AnotherRowIsChosenWhileTheChecksGoOn()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        var checks = new RunChecks();
+        checks.Start(Checkup.Git);
+        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
+
+        Assert.Equal(HomeAction.Milestone, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.False(checks.Over);
+    }
+
     [Theory]
     [InlineData(1, HomeAction.Assistant)]
     [InlineData(2, HomeAction.Milestone)]
@@ -144,9 +208,9 @@ public sealed class HomeScreenTests : IDisposable
     static QueueOutlook Interrupted(string title) =>
         new(3, new QueueTask(12, title, "https://github.com/acme/rocket/issues/12", ["interrupted"], BoardStatus.Todo, "Todo", [], []));
 
-    async Task<HomeAction> AskAsync(TaskCount tasks)
+    async Task<HomeAction> AskAsync(TaskCount tasks, RunChecks? checks = null)
     {
         using var page = terminal.Open();
-        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", tasks);
+        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", tasks, checks);
     }
 }

@@ -39,7 +39,9 @@ public static class Picker
 
     // The same list on a page where something goes on meanwhile: the choices are asked for again, and the list is
     // drawn anew, whenever what `changed` gives is done. `off` is told when Enter is pressed on a choice that is off.
-    public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null)
+    // `settled` is asked whenever something has changed, and what it gives is chosen without a key: what went on
+    // has chosen it.
+    public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null, Func<int?>? settled = null)
     {
         var list = new Listed(page, question, "", 0);
         while (true)
@@ -47,11 +49,14 @@ public static class Picker
             // Whether anything still goes on is looked at before the choices are asked for: what is done between the
             // two is seen by the wait for a key, and the list is drawn again.
             var wake = changed();
-            var settled = wake.IsCompleted;
+            var still = wake.IsCompleted;
+            if (settled?.Invoke() is { } by)
+                return by;
+
             list.Draw(choices());
 
             // Once nothing goes on any more the page waits for a key as any list does.
-            if ((settled ? (ConsoleKeyInfo?)page.Read() : await page.ReadAsync(wake)) is not { } key)
+            if ((still ? (ConsoleKeyInfo?)page.Read() : await page.ReadAsync(wake)) is not { } key)
                 continue;
             if (list.Press(key, null) is (true, var chosen))
                 return chosen;

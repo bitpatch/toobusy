@@ -112,6 +112,8 @@ toobusy effort high         # low, medium, high, xhigh or max
 toobusy run
 ```
 
+Either way a run starts with the checks of `toobusy doctor`: while one fails it does not start, and says what failed and how to fix it.
+
 What to know before the first run:
 
 - **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the owner's label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the status `Todo`.

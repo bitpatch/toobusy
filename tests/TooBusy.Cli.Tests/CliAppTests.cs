@@ -1043,6 +1043,76 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOfTheMenuOpensTheRunAfterTheChecksOfDoctor()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // One task for the menu to count; when the run reads the tasks there is none left, so it is over at once.
+        var counted = false;
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments[0] == "label" => Labels,
+            "gh" when arguments is ["api", "graphql", ..] && !counted => Do(() => counted = true) + "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            "gh" => "total\t0\n",
+            _ => "",
+        }, ""));
+
+        // `Run`; the menu is back when the run is over, and the last of it leaves.
+        var keys = new Keys().Press(Keys.Enter).Hold(() => Shown("0 tasks in 0 s")).Press(Keys.Up, Keys.Enter);
+        var (exit, output, error) = await RunLiveAsync(keys, processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("Running the queue", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("The run did not start.", output, StringComparison.Ordinal);
+
+        // Every check was made, and before the run asked for its tasks.
+        var asked = processes.Asked.Select(asked => $"{asked.Command} {asked.Arguments[0]}").ToList();
+        Assert.Contains("claude auth", asked);
+        Assert.Contains("gh label", asked);
+        Assert.True(asked.IndexOf("gh label") < processes.Asked.FindLastIndex(asked => asked.Command == "gh" && asked.Arguments is ["api", "graphql", ..]));
+    }
+
+    [Fact]
+    public async Task RunOfTheMenuOpensNoRunWhileACheckFailsAndSaysTheFailuresWithTheirFixesAboveTheMenu()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // A task to take; Claude Code says that it is not logged in, and the repository lacks a label of the settings.
+        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        {
+            ("claude", "auth") => new ProcessResult(ProcessStatus.Exited, 1, """{"loggedIn": false}""", ""),
+            ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
+            ("gh", "label") => new ProcessResult(ProcessStatus.Exited, 0, "manual\n", ""),
+            ("gh", "api") when arguments[1] == "graphql" => new ProcessResult(ProcessStatus.Exited, 0, "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n", ""),
+            _ => new ProcessResult(ProcessStatus.Exited, 0, "", ""),
+        });
+        using var terminal = new TestTerminal(width: 120, height: 30);
+
+        // `Run`, which opens nothing; then the last of the menu.
+        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        terminal.AssertSaw("""
+             ✘ Claude Code login  Claude Code is not logged in.
+               fix: claude, then /login
+             ✘ labels             acme/rocket has no label “interrupted”.
+               fix: gh label create "interrupted" --repo acme/rocket
+             The run did not start. `toobusy doctor` checks all of it again.
+             What to do
+             ❯ Run        1 task
+            """.ReplaceLineEndings("\n").TrimEnd(' '));
+        Assert.False(terminal.Saw("Running the queue"));
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+    }
+
+    [Fact]
     public async Task BackOfTheSettingsGoesToTheMenuAsEscapeDoes()
     {
         GitRepository();
@@ -1135,6 +1205,9 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains(rows, row => Regex.IsMatch(row, @"^ ■ #101 Show the total of an order in its header  [\d:]+$"));
         Assert.Contains(rows, row => Regex.IsMatch(row, @"^ ✔ #101 Show the total of an order in its header  [\d:]+$"));
         Assert.Contains(rows, row => row.StartsWith(" ✔ #102 ", StringComparison.Ordinal));
+
+        // A demo has it all: nothing is checked before its runs.
+        Assert.DoesNotContain("checking:", output, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }

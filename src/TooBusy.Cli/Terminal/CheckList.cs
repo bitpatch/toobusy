@@ -67,6 +67,27 @@ public sealed class CheckList : ICheckupView, IDisposable
         }
     }
 
+    // A failed check as the lines of a page, as it is printed: the mark, the name and what is wrong, and under them
+    // what else is wrong and the fix. What does not fit the width goes on to the next line, broken between words,
+    // so that a fix is never cut.
+    public static IEnumerable<Line> Told(CheckResult failed, int width)
+    {
+        var name = failed.Name.PadRight(Names) + "  ";
+        var first = true;
+        foreach (var piece in RunLook.Pieces(failed.Text, Math.Max(10, width - 2 - name.Length)))
+        {
+            yield return first
+                ? new Line(new Part("✘ ", Tone.Error), new Part(name), new Part(piece, Tone.Error))
+                : Line.Of(new string(' ', 2 + name.Length) + piece, Tone.Error);
+            first = false;
+        }
+
+        foreach (var detail in failed.Details.SelectMany(detail => RunLook.Pieces(detail, Math.Max(10, width - 2))))
+            yield return Line.Of("  " + detail, Tone.Error);
+        foreach (var piece in failed.Fix is { } fix ? RunLook.Pieces($"fix: {fix}", Math.Max(10, width - 2)) : [])
+            yield return Line.Of("  " + piece, Tone.Muted);
+    }
+
     public void Dispose()
     {
         beat?.Dispose();
