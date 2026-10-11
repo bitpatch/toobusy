@@ -307,16 +307,19 @@ public sealed class RunScreenTests : IDisposable
     [Theory]
     [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, false, " ● Reading the queue…\n ❯ press /")]
     [InlineData(RunPhase.Preparing, true, "Starting #3…", 0, false, false, " ● #3 Export the data\n   1:24 · starting\n")]
+    [InlineData(RunPhase.Preparing, true, "Running the command before #3…", 0, false, false, " ● #3 Export the data\n   1:24 · the command before the task\n", "the command before the task")]
     [InlineData(RunPhase.Working, true, "", 0, true, false, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · the last task of this run\n")]
     [InlineData(RunPhase.Working, true, "", 0, false, true, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · wrapping up\n")]
     [InlineData(RunPhase.WaitingForOwner, true, "", 0, false, false, " ● #3 Export the data\n   1:24 · waits for you · gets no message\n")]
     [InlineData(RunPhase.WaitingForLimit, true, "", 3725, false, false, " ● #3 Export the data\n   1:24 · waits for a usage limit · goes on in 1:02:05\n")]
     [InlineData(RunPhase.WaitingForLimit, false, "Waiting for the 5-hour limit to reset", 125, false, false, " ● Waiting for the 5-hour limit to reset\n   goes on in 2:05\n")]
-    public async Task WhatTheRunIsDoingIsSaidInTwoLines(RunPhase phase, bool task, string text, int until, bool stopping, bool aborting, string expected)
+    public async Task WhatTheRunIsDoingIsSaidInTwoLines(RunPhase phase, bool task, string text, int until, bool stopping, bool aborting, string expected, string? command = null)
     {
+        // A task that is being taken has no session yet: its step is the command of the project that runs.
         var status = Working with
         {
             Phase = phase,
+            Step = phase == RunPhase.Preparing ? command : Working.Step,
             Text = text,
             Task = task ? Export : null,
             Until = until > 0 ? InstantClock.Start + TimeSpan.FromSeconds(until) : null,

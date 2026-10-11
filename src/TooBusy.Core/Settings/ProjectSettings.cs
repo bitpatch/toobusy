@@ -9,6 +9,16 @@ public sealed record ProjectSettings(TrackerSettings Tracker, QueueSettings Queu
 
     // The skill of the project a session starts with, by its name; null when the project names none.
     public string? Skill { get; init; }
+
+    // The commands of the project a run runs around a task.
+    public TaskCommands Commands { get; init; } = TaskCommands.None;
+}
+
+// What a run runs through the shell of the machine, at the root of the working copy: Before a task is taken, and
+// After its session, however the task went. Null is a command the project does not have.
+public sealed record TaskCommands(string? Before, string? After)
+{
+    public static TaskCommands None { get; } = new(null, null);
 }
 
 public sealed record TrackerSettings(string Type, string? Board);

@@ -1,6 +1,7 @@
 using System.Globalization;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Run;
 
@@ -8,7 +9,8 @@ namespace TooBusy.Core.Run;
 // and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
 // a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
 // with, null where the project names none. Only is the number of the one task the run does, and Most how many tasks
-// it takes at most; null is a run of the whole queue. A run is given one of the two at most.
+// it takes at most; null is a run of the whole queue. A run is given one of the two at most. Commands are the
+// commands of the project the run runs around a task.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
@@ -18,6 +20,8 @@ public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Mo
     public int? Only { get; init; }
 
     public int? Most { get; init; }
+
+    public TaskCommands Commands { get; init; } = TaskCommands.None;
 }
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
@@ -58,6 +62,12 @@ public sealed record RunPolicy
     public TimeSpan UnknownLimitWait { get; init; } = TimeSpan.FromMinutes(30);
 
     public int LimitWaits { get; init; } = 10;
+
+    // How long a command of the project may run before it is given up, and how long the one after a task may when
+    // the run was killed and its owner waits for it to end.
+    public TimeSpan CommandTime { get; init; } = TimeSpan.FromMinutes(10);
+
+    public TimeSpan KilledCommandTime { get; init; } = TimeSpan.FromSeconds(30);
 
     public static RunPolicy Default { get; } = new();
 }

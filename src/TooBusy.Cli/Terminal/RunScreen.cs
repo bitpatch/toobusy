@@ -232,7 +232,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                     parts.Add(new Part($" · goes on in {RunLook.Clock(until - now())}", Tone.Muted));
                 break;
             case RunPhase.Preparing:
-                parts.Add(new Part(" · starting", Tone.Muted));
+                parts.Add(new Part($" · {status.Step ?? "starting"}", Tone.Muted));
                 break;
             default:
                 if (status.Step is { } step)

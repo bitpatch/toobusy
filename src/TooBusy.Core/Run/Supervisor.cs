@@ -9,7 +9,8 @@ namespace TooBusy.Core.Run;
 // moved before its session starts and after it ends, and the session is told so. New tasks are the session's to make.
 //
 // It never goes on past a doubt: a session that ends without saying how the task went, a working tree that is not
-// clean, a tracker that refuses, each stops the run, and the next task is not built on it.
+// clean, a tracker that refuses, a command of the project that fails, each stops the run, and the next task is not
+// built on it.
 //
 // Everything it knows of time comes from the clock, and everything it is told comes through `Send`, which only puts
 // the command in a line: the run itself looks at the line, in one place, so nothing here is shared between threads.
@@ -20,6 +21,7 @@ public sealed class Supervisor(
     IRunState state,
     IMachine machine,
     IClock clock,
+    IProjectCommands shell,
     RunPlan plan,
     RunPolicy policy) : IQueueRun
 {
@@ -52,6 +54,10 @@ public sealed class Supervisor(
     // The tasks of this run that came to an outcome: done, done in part or left to the owner. A run that was
     // started for a number of tasks counts them.
     int taken;
+
+    // Whether the task that is being done came to where the command before it runs: from there on the command after
+    // it runs, however the task goes.
+    bool begun;
 
     // What the pause of a task or a kill said last: it is why the run ended.
     string? left;
@@ -206,12 +212,99 @@ public sealed class Supervisor(
             + (changes ? ", and its changes are still in the working tree" : ""));
     }
 
-    // Does one task: null when the run goes on to the next one. `before` is the record of an earlier run that names
-    // the task: its session is gone on with, in the way it was left.
+    // Does one task with the commands of the project around it: null when the run goes on to the next one. The
+    // command after the task runs when the run has done with it, whatever became of it, the tracker being told
+    // already. One that fails stops the run, which does not go on over what the command was to put right; a run
+    // that ends anyway only says so.
     async Task<RunResult?> DoAsync(QueueTask task, TaskRecord? before, int queued, CancellationToken kill)
     {
-        var number = task.Number;
         var since = clock.Now;
+        begun = false;
+        RunResult? result;
+        try
+        {
+            result = await TakeAsync(task, before, since, queued, kill);
+        }
+        catch (Exception thrown) when (begun && thrown is OperationCanceledException or TrackerException or AssistantException)
+        {
+            // The kill that ended the task does not cut this command: it is what stops what the task started. The
+            // owner waits for it, so it is given less time.
+            var killed = kill.IsCancellationRequested;
+            if (await CommandAsync(after: true, task, since, queued, killed ? policy.KilledCommandTime : policy.CommandTime, killed ? CancellationToken.None : kill) is { } missed)
+                Say(RunMark.Attention, $"{missed} · see to it by hand before the next run");
+            throw;
+        }
+
+        if (!begun || await CommandAsync(after: true, task, since, queued, policy.CommandTime, kill) is not { } wrong)
+            return result;
+        if (result is null)
+            return Stop($"{wrong} · #{task.Number} stays as it ended");
+
+        Say(RunMark.Attention, $"{wrong} · see to it by hand before the next run");
+        return result;
+    }
+
+    // Runs a command of the project around a task: null when it passed, and when the project has no such command;
+    // otherwise what went wrong, after the log was told so with what the command printed.
+    async Task<string?> CommandAsync(bool after, QueueTask task, DateTimeOffset since, int queued, TimeSpan time, CancellationToken kill)
+    {
+        if ((after ? plan.Commands.After : plan.Commands.Before) is not { } command)
+            return null;
+
+        var name = $"the command {(after ? "after" : "before")} #{task.Number}";
+        Show(new RunStatus(RunPhase.Preparing, $"Running {name}…") { Task = task, Since = since, Queued = queued, Step = after ? "the command after the task" : "the command before the task" });
+        Say(RunMark.Note, $"Running {name}: {command}");
+        var started = clock.Now;
+        CommandEnd end;
+        try
+        {
+            end = await shell.RunAsync(command, Told(task), time, kill);
+        }
+        catch (OperationCanceledException) when (kill.IsCancellationRequested)
+        {
+            left = after ? $"{name} was cut by the kill" : $"{name} was cut by the kill, and the task was not taken";
+            Say(RunMark.Interrupted, $"Killed {name}: {command}");
+            throw;
+        }
+
+        if (end is { Status: CommandStatus.Exited, ExitCode: 0 })
+        {
+            Say(RunMark.Note, $"{name} passed in {Spoken.Time(clock.Now - started)}");
+            if (!after)
+                Show(new RunStatus(RunPhase.Preparing, $"Starting #{task.Number}…") { Task = task, Since = since, Queued = queued });
+            return null;
+        }
+
+        var how = end.Status switch
+        {
+            CommandStatus.Exited => string.Create(CultureInfo.InvariantCulture, $"exited with {end.ExitCode}"),
+            CommandStatus.TimedOut => $"did not end in {Spoken.Time(time)} and was stopped",
+            _ => "did not start: the shell of the machine cannot be run",
+        };
+        Say(RunMark.Failed, $"{name} {how}: {command}");
+
+        // The end of what a command printed is where it says what went wrong.
+        var printed = Lines(end.Printed);
+        if (printed.Count > Quoted)
+            Say(RunMark.Note, string.Create(CultureInfo.InvariantCulture, $"│ … {printed.Count - Quoted} more lines before these"));
+        foreach (var line in printed.TakeLast(Quoted))
+            Say(RunMark.Note, $"│ {line}");
+        return $"{name} {how}";
+    }
+
+    // What a command of the project is told of the task, in its environment.
+    static Dictionary<string, string> Told(QueueTask task) => new()
+    {
+        ["TOOBUSY_TASK"] = task.Number.ToString(CultureInfo.InvariantCulture),
+        ["TOOBUSY_TASK_TITLE"] = task.Title,
+        ["TOOBUSY_TASK_URL"] = task.Url,
+    };
+
+    // Takes a task and sees it to its end: null when the run goes on to the next one. `before` is the record of an
+    // earlier run that names the task: its session is gone on with, in the way it was left.
+    async Task<RunResult?> TakeAsync(QueueTask task, TaskRecord? before, DateTimeOffset since, int queued, CancellationToken kill)
+    {
+        var number = task.Number;
         var again = task.Has(plan.Rules.Interrupted);
         Show(new RunStatus(RunPhase.Preparing, $"Starting #{number}…") { Task = task, Since = since, Queued = queued });
 
@@ -245,6 +338,13 @@ public sealed class Supervisor(
                     how = "its session still works, and is watched again";
             }
 
+            // The command before the task runs for a session that is told to go on. One that still works is not
+            // disturbed by it, and one that ended is only settled; the command after the task runs for them too.
+            if (message is not null && await CommandAsync(after: false, task, since, queued, policy.CommandTime, kill) is { } unready)
+                return Stop($"{unready} · the session of #{number} is not told to go on, and the next run tries again");
+
+            begun = true;
+
             // The tracker is told only when the session goes on: one that does not is tried again by the next
             // run, with the task and the record as they are.
             if (message is not null && !await found.TellAsync(message, kill))
@@ -259,6 +359,10 @@ public sealed class Supervisor(
         {
             // A record whose session and conversation are gone gives a new session, which is told what it finds.
             var gone = before is not null;
+            if (await CommandAsync(after: false, task, since, queued, policy.CommandTime, kill) is { } unready)
+                return Stop($"{unready} · #{number} is not taken");
+
+            begun = true;
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
             try
             {
@@ -864,6 +968,8 @@ public sealed class Supervisor(
     // What a session said, line by line, without the empty lines and without the line that is for toobusy.
     static List<string> Said(string? reply) =>
         [.. (reply ?? "").Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0 && !line.Trim().StartsWith(Outcome.Mark, StringComparison.OrdinalIgnoreCase))];
+
+    static List<string> Lines(string text) => [.. text.Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0)];
 
     // What a session said, in the log: its first lines, and where the rest is.
     void Quote(string? reply, IAssistantSession session)

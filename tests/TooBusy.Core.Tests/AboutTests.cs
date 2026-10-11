@@ -131,6 +131,30 @@ public class AboutTests
     }
 
     [Fact]
+    public void TheCommandsOfTheProjectAroundATaskAreTold()
+    {
+        var text = About.Text(Rules, new RunPolicy { CommandTime = TimeSpan.FromMinutes(5), KilledCommandTime = TimeSpan.FromSeconds(20) }, commands: new("scripts/dev.sh ports free", "scripts/dev.sh server stop"));
+
+        Assert.Contains("## The commands of the project around a task\n\nA project may have the run itself run a command before a task and one after it, `task.before` and `task.after` of its settings", text, StringComparison.Ordinal);
+        Assert.Contains("This project runs `scripts/dev.sh ports free` before a task and `scripts/dev.sh server stop` after it.", text, StringComparison.Ordinal);
+        Assert.Contains("`TOOBUSY_TASK` is the number of the task, `TOOBUSY_TASK_TITLE` its title and `TOOBUSY_TASK_URL` its address.", text, StringComparison.Ordinal);
+        Assert.Contains("When it fails, the run stops and says so with what the command printed, and the task is not touched.", text, StringComparison.Ordinal);
+        Assert.Contains("When it fails, the task stays as it ended, and the run stops.", text, StringComparison.Ordinal);
+        Assert.Contains("A command is given up after 5 min, and counts as failed then. After a kill of the run, `after` has 20 s.", text, StringComparison.Ordinal);
+        Assert.Contains("What these commands do, the instructions and the skill of a project do not tell a session to do as well", text, StringComparison.Ordinal);
+        Assert.Contains("but for what the commands of the settings do, as told under “The commands of the project around a task”;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AProjectWithOneCommandOrNoneOrNoSettingsIsToldSo()
+    {
+        Assert.Contains("This project runs `make free` before a task, and nothing after it.", About.Text(Rules, RunPolicy.Default, commands: new("make free", null)), StringComparison.Ordinal);
+        Assert.Contains("This project runs `make stop` after a task, and nothing before it.", About.Text(Rules, RunPolicy.Default, commands: new(null, "make stop")), StringComparison.Ordinal);
+        Assert.Contains("This project has none: they are written into `.toobusy/settings.toml` by hand, and `toobusy init` keeps them.", About.Text(Rules, RunPolicy.Default), StringComparison.Ordinal);
+        Assert.Contains("No settings are read here, so it is not said whether this project has them.", About.Text(null, RunPolicy.Default), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryLineForToobusyIsTold()
     {
         var text = About.Text(null, RunPolicy.Default);

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Run;
 
@@ -14,8 +15,8 @@ public static class About
 
     // `rules` are those of the project the text is asked in; null where no settings are read, and then the labels
     // are spoken of without their names. `skill` is the skill the settings name for a session to start with; null
-    // where they name none, and where none are read.
-    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null)
+    // where they name none, and where none are read. `commands` are the commands of the settings around a task.
+    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null)
     {
         var owner = rules is null ? "the label of the owner" : $"the `{rules.Owner}` label";
 
@@ -33,6 +34,16 @@ public static class About
             : $"This project names the skill `{skill}`, so its first message begins with `{Briefing.Command(skill, Sample)}`, as shown below.";
         var head = skill is null ? "It begins with the same line in every session, but for the number, so a session of a run can be told by it from any other."
             : "After the line of the skill it begins with the same words in every session, but for the number, so a session of a run can be told by them from any other.";
+
+        // What is said of the commands of this project around a task.
+        var around = (rules, commands) switch
+        {
+            (null, _) => "No settings are read here, so it is not said whether this project has them.",
+            (_, { Before: { } first, After: { } last }) => $"This project runs `{first}` before a task and `{last}` after it.",
+            (_, { Before: { } first }) => $"This project runs `{first}` before a task, and nothing after it.",
+            (_, { After: { } last }) => $"This project runs `{last}` after a task, and nothing before it.",
+            _ => "This project has none: they are written into `.toobusy/settings.toml` by hand, and `toobusy init` keeps them.",
+        };
 
         var text = new StringBuilder();
         text.Append("""
@@ -100,9 +111,21 @@ public static class About
             What is the skill's to say:
 
             - how the work of this project is done and checked without its owner: which checks a session runs by itself, and what it does where the owner would have looked;
-            - what is done before the work and after it, such as what is brought up to date first and what is stopped or cleaned up at the end;
+            - what is done before the work and after it, such as what is brought up to date first and what is stopped or cleaned up at the end, but for what the commands of the settings do, as told under “The commands of the project around a task”;
             - the language of the report;
             - which tasks a session makes besides the one of what is left, with their labels, their wording and their relations.
+
+            ## The commands of the project around a task
+
+            A project may have the run itself run a command before a task and one after it, `task.before` and `task.after` of its settings: what is to be so around every task, such as that the ports of its development server are free before one and that the server is stopped after it. It does not depend on a session remembering it then. {around}
+
+            - A command is a line for the shell, `sh -c` and on Windows `cmd /c`. It runs at the root of the working copy, and the run knows of it only whether it exited with 0. It learns the task from its environment: `TOOBUSY_TASK` is the number of the task, `TOOBUSY_TASK_TITLE` its title and `TOOBUSY_TASK_URL` its address.
+            - `before` runs when the working tree and the queue are read, before the task is moved to `In Progress` and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
+            - `after` runs when the run has done with the task, however it went: done, done in part, left to the owner, interrupted, failed, paused by a usage limit, and when the run was killed over it. The working copy is checked and the tracker is told before it. When it fails, the task stays as it ended, and the run stops.
+            - A command is given up after {Spoken.Time(policy.CommandTime)}, and counts as failed then. After a kill of the run, `after` has {Spoken.Time(policy.KilledCommandTime)}.
+            - Neither runs around the wait for a usage limit inside a task, and a demo runs none.
+
+            What these commands do, the instructions and the skill of a project do not tell a session to do as well: the run does it, whatever the session does.
 
             ## What a session is told
 

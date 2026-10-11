@@ -953,6 +953,21 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task TheCommandsAroundATaskAreNotAskedForAndAreKept()
+    {
+        var commands = new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop");
+        store.Current = Existing with { Commands = commands };
+        dialog.Answer("Skill", "task-auto");
+        machine.Skills = ["task-auto"];
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(commands, store.Saved!.Commands);
+        Assert.DoesNotContain(result.Answers, answer => answer.Value.Contains("dev.sh", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AChangeOfTheSkillIsSaidAsItWasAndAsItWillBe()
     {
         store.Current = Existing;

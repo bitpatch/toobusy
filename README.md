@@ -20,7 +20,7 @@ What does not, yet:
 - No installer and no released binaries.
 - GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
 - Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The settings hold the board, the labels and the skill a session starts with, and nothing else to choose: the tracker and the assistant are named there, with one value each. The messages a session gets, the permissions of the assistant, the names of the board's statuses and the checks around a task are not settings yet: a run knows the statuses `Todo`, `In Progress` and `Done`, and takes one task at a time.
+- The settings hold the board, the labels, the skill a session starts with and the commands a run runs around a task, and nothing else to choose: the tracker and the assistant are named there, with one value each. The messages a session gets, the permissions of the assistant, the names of the board's statuses and the checks of the branch around a task are not settings yet: a run knows the statuses `Todo`, `In Progress` and `Done`, and takes one task at a time.
 
 ## The idea
 
@@ -88,6 +88,16 @@ The last page shows what saving will do. Until you choose `Save and exit` nothin
 
 The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 
+Two settings are not asked for and are written into the file by hand: the commands a run runs around every task, for what must not depend on a session remembering it.
+
+```toml
+[task]
+before = "scripts/dev.sh ports free"    # before a task is taken; when it fails, the run stops and the task is not touched
+after = "scripts/dev.sh server stop"    # after the session of a task, however the task went
+```
+
+Each is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. `init` keeps them, `doctor` does not run them, and a demo runs none. What they do, the instructions and the skill of your project need not tell a session to do.
+
 Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way.
 
 Without questions, as in a script: `toobusy init --yes` takes what the options say and, for the rest, what the setup proposes. `toobusy init --help` lists the options.
@@ -148,6 +158,7 @@ What to know before the first run:
 - **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own.
 - **Each task gets a session of Claude Code of its own**, a background one in the permission mode `auto`, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
 - **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`), and starts with the skill of your project when the settings name one: it changes the code, checks it, commits and pushes. toobusy keeps the task: it moves it on the board, assigns it to you, writes the report of the session into it as a comment, and closes it. New tasks are the session's to make: the one of what is left for you, and those the instructions of your project call for.
+- **The commands of your project run around every task**, when the settings have them: one before a task is taken and one after its session, however the task went. A command that fails stops the run.
 - **A task that needs you is not guessed at.** What can be done without you is done, and of what is left the session makes a new task with the owner's label and the questions for you. Answer in it, take the label off, and a later run takes it.
 - **A task that went wrong stops the run.** When its session failed, did not say how the task went, or left changes or commits that are not pushed, the task gets the owner's label and a comment that says what went wrong and how its session is opened. No run takes it while it has the label: look at it, take the label off, and a later run takes it.
 - **Stopping.** Press `/` during a run for its menu: `stop` finishes the current task and takes no other, `abort` stops as soon as possible with nothing committed. Ctrl+C twice kills the run; the next run goes on with the same session.

@@ -19,6 +19,9 @@ public static class SettingsToml
             + "and `interrupted` on a task it had to stop, which is taken first."),
         ("assistant", "Who does the tasks."),
         ("session", "What a session starts with: the skill of the project that says how a task is done here without its owner."),
+        ("task",
+            "The commands a run runs around a task, through the shell, at the root of the working copy:\n"
+            + "`before` a task is taken, and `after` its session, however the task went."),
     ];
 
     public static SettingsValidation Read(string text)
@@ -90,6 +93,8 @@ public static class SettingsToml
         (SettingsKeys.InterruptedLabel, settings.Queue.Labels.Interrupted),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
         (SettingsKeys.SessionSkill, settings.Skill),
+        (SettingsKeys.TaskBefore, settings.Commands.Before),
+        (SettingsKeys.TaskAfter, settings.Commands.After),
     ];
 
     static void Add(Dictionary<string, StringBuilder> additions, string key, object value)

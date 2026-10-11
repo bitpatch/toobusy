@@ -194,6 +194,38 @@ public class SettingsValidatorTests
     }
 
     [Fact]
+    public void TheCommandsAroundATaskAreOptionalEachApart()
+    {
+        Assert.Equal(TaskCommands.None, SettingsValidator.Validate(Document()).Settings!.Commands);
+
+        var both = SettingsValidator.Validate(Document(("task", ""), (SettingsKeys.TaskBefore, "scripts/dev.sh ports free"), (SettingsKeys.TaskAfter, "scripts/dev.sh server stop")));
+        var one = SettingsValidator.Validate(Document(("task", ""), (SettingsKeys.TaskAfter, "make stop && echo \"stopped\"")));
+
+        Assert.Empty(both.Errors);
+        Assert.Equal(new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop"), both.Settings!.Commands);
+        Assert.Empty(one.Errors);
+        Assert.Equal(new TaskCommands(null, "make stop && echo \"stopped\""), one.Settings!.Commands);
+    }
+
+    [Theory]
+    [InlineData(SettingsKeys.TaskBefore, "")]
+    [InlineData(SettingsKeys.TaskAfter, "  ")]
+    public void ACommandThatIsEmptyIsRefused(string key, string command)
+    {
+        var error = OnlyError(Document(("task", ""), (key, command)));
+
+        Assert.Equal(new SettingsError(key, LineOf(key), "a command must not be empty: leave the key out to run none"), error);
+    }
+
+    [Fact]
+    public void ACommandThatIsNotATextIsRefused()
+    {
+        var error = OnlyError(Document(("task", ""), (SettingsKeys.TaskBefore, Labels("make", "stop"))));
+
+        Assert.Equal(new SettingsError(SettingsKeys.TaskBefore, LineOf(SettingsKeys.TaskBefore), "must be a string"), error);
+    }
+
+    [Fact]
     public void TheSkillIsOptional()
     {
         Assert.Null(SettingsValidator.Validate(Document()).Settings!.Skill);
@@ -325,7 +357,7 @@ public class SettingsValidatorTests
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "session", SettingsKeys.SessionSkill];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

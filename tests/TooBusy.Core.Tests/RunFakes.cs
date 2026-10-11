@@ -307,6 +307,32 @@ sealed class FakeWorkspace : IWorkspace
     }
 }
 
+// The shell of the machine: every command passes, but for those the test gives another end. A command takes as long
+// of the clock as the test says, and what is planned for that time happens while it runs.
+sealed class FakeCommands(FakeClock clock) : IProjectCommands
+{
+    // The commands that were run, each with the number of the task it was told and the time it was given.
+    public List<(string Command, string Task, TimeSpan Time)> Ran { get; } = [];
+
+    public List<IReadOnlyDictionary<string, string>> Told { get; } = [];
+
+    public Dictionary<string, CommandEnd> Ends { get; } = [];
+
+    public TimeSpan Takes { get; set; } = TimeSpan.FromSeconds(2);
+
+    // Something that happens as a command starts.
+    public Action<string>? Running { get; set; }
+
+    public async Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken)
+    {
+        Ran.Add((command, environment["TOOBUSY_TASK"], time));
+        Told.Add(environment);
+        Running?.Invoke(command);
+        await clock.DelayAsync(Takes, cancellationToken);
+        return Ends.GetValueOrDefault(command, new CommandEnd(CommandStatus.Exited, 0, ""));
+    }
+}
+
 sealed class FakeMachine : IMachine
 {
     public bool Awake { get; private set; }

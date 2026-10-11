@@ -560,6 +560,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
     {
         Skill = skill is { Length: > 0 } ? skill : null,
+
+        // The commands around a task are not asked for: they are those of the file.
+        Commands = current?.Commands ?? TaskCommands.None,
     };
 
     void Show(int step, IReadOnlyList<SetupNote>? more = null) =>

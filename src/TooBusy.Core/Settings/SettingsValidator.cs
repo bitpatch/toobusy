@@ -30,7 +30,7 @@ public static partial class SettingsValidator
 
     sealed class Run(SettingsDocument document)
     {
-        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant", "session"];
+        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant", "session", "task"];
 
         readonly Dictionary<string, SettingsEntry> entries = [];
 
@@ -61,7 +61,19 @@ public static partial class SettingsValidator
                 new AssistantSettings(assistantType ?? ""))
             {
                 Skill = skill?.Text,
+                Commands = new TaskCommands(Command(SettingsKeys.TaskBefore), Command(SettingsKeys.TaskAfter)),
             };
+        }
+
+        // A command is a line for the shell, and nothing of it is looked at but that there is one.
+        string? Command(string key)
+        {
+            if (String(key, required: false) is not { } value)
+                return null;
+            if (!string.IsNullOrWhiteSpace(value.Text))
+                return value.Text;
+            Refuse(value.Entry, "a command must not be empty: leave the key out to run none");
+            return null;
         }
 
         // Everything the file has and the settings do not know is refused here, so that the rules below

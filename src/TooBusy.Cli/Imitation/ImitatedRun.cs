@@ -1,5 +1,6 @@
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Cli.Imitation;
 
@@ -22,8 +23,15 @@ public static class ImitatedRun
     };
 
     // The tracker and the record are those the demo keeps for the menu and for the runs after this one.
+    // A demo runs no command of the project, whatever the settings say.
     public static IQueueRun Open(RunPlan plan, IClock clock, ImitatedTasks tasks, IRunState state) =>
-        new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), state, new QuietMachine(), clock, plan, Pace);
+        new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), state, new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None }, Pace);
+
+    sealed class NoCommands : IProjectCommands
+    {
+        public Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken) =>
+            Task.FromResult(new CommandEnd(CommandStatus.NotStarted, 0, ""));
+    }
 
     sealed class CleanWorkspace : IWorkspace
     {

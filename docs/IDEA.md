@@ -23,7 +23,8 @@ The folder lives in the project's repository and holds everything that is specif
 - the queue rules: which labels mark a task type, which labels keep a task out, which status means "ready", how tasks are ordered, what blocks a task;
 - the assistant and how it is started: its permissions;
 - the prompts the assistant gets, as editable templates;
-- the checks of the working copy before a task and after it: branch, clean tree, sync with the remote, project-specific commands;
+- the checks of the working copy before a task and after it: branch, clean tree, sync with the remote;
+- the commands of the project a run runs before a task and after it;
 - local state of a run, which is not committed.
 
 What is one person's own is not in the folder: the milestone to work on, and the model and the effort the tasks are done with by default, are chosen by each user and kept on their machine.
@@ -65,5 +66,5 @@ toobusy grows out of a single-file .NET script that runs the task queue of one p
 The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, and the commands with their options. What is still open:
 
 - The rest of the schema of the settings in `.toobusy/`: the statuses of a board, the prompts as templates, the permissions of the assistant.
-- What the project-specific checks and commands look like, and when they run.
+- What the project-specific checks of the working copy look like: its branch and its sync with the remote. The commands of the project around a task are answered.
 - How installation and updates work on each platform.

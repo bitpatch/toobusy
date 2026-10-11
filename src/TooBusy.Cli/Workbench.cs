@@ -9,6 +9,7 @@ using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Git;
 using TooBusy.Infrastructure.Machine;
+using TooBusy.Infrastructure.Processes;
 using TooBusy.Infrastructure.Run;
 using TooBusy.Infrastructure.Settings;
 using TooBusy.Trackers.GitHub;
@@ -105,7 +106,7 @@ public sealed record Workbench(
     // the one: the record of that task would keep the run from any other.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most };
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands };
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules, killed: only is null or ImitatedTasks.Killed), remembered);
         if (Repository is null)
@@ -119,6 +120,7 @@ public sealed record Workbench(
             new RunStateFile(local),
             new LocalMachine(Processes),
             Clock,
+            new ShellCommands(Root),
             plan,
             RunPolicy.Default);
     }

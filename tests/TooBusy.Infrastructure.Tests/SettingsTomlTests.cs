@@ -253,6 +253,51 @@ public class SettingsTomlTests
             text);
     }
 
+    const string TaskComment = "# The commands a run runs around a task, through the shell, at the root of the working copy:\n# `before` a task is taken, and `after` its session, however the task went.\n";
+
+    [Fact]
+    public void TheCommandsAroundATaskAreReadFromTheirSection()
+    {
+        var result = SettingsToml.Read(Example + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = 'scripts/dev.sh server stop'\n");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop"), result.Settings!.Commands);
+        Assert.Equal(TaskCommands.None, SettingsToml.Read(Example).Settings!.Commands);
+    }
+
+    [Fact]
+    public void AnEmptyCommandIsRefusedWithItsLine()
+    {
+        var result = SettingsToml.Read(Example + "\n[task]\nafter = \"\"\n");
+
+        Assert.Null(result.Settings);
+        Assert.Equal(("task.after", 17), (Assert.Single(result.Errors).Key, result.Errors[0].Line));
+    }
+
+    [Fact]
+    public void ANewFileWithCommandsHasTheirSectionLastAndIsReadBack()
+    {
+        var settings = Settings with { Commands = new TaskCommands("scripts/dev.sh \"ports\" free", "scripts/dev.sh server stop") };
+
+        var text = SettingsToml.Write(settings);
+
+        Assert.EndsWith("\n" + TaskComment + "[task]\nbefore = \"scripts/dev.sh \\\"ports\\\" free\"\nafter = \"scripts/dev.sh server stop\"\n", text, StringComparison.Ordinal);
+        Assert.Equal(settings.Commands, SettingsToml.Read(text).Settings!.Commands);
+        Assert.DoesNotContain("[task]", SettingsToml.Write(Settings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARewriteKeepsTheCommandsThatWereWrittenByHand()
+    {
+        var existing = Example + "\n[task]\n# The server of the project.\nbefore = 'scripts/dev.sh ports free'   # by hand\n";
+        var read = SettingsToml.Read(existing).Settings!;
+
+        var rewritten = SettingsToml.Write(read with { Skill = "task-auto" }, existing);
+
+        Assert.StartsWith(existing, rewritten, StringComparison.Ordinal);
+        Assert.Equal(new TaskCommands("scripts/dev.sh ports free", null), SettingsToml.Read(rewritten).Settings!.Commands);
+    }
+
     [Fact]
     public void TheSkillIsReadFromItsSection()
     {
@@ -366,5 +411,6 @@ public class SettingsTomlTests
         Assert.Equal(expected.Queue.Labels.Interrupted, actual.Queue.Labels.Interrupted);
         Assert.Equal(expected.Assistant, actual.Assistant);
         Assert.Equal(expected.Skill, actual.Skill);
+        Assert.Equal(expected.Commands, actual.Commands);
     }
 }

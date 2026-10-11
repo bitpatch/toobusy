@@ -147,6 +147,32 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task AboutNamesTheCommandsOfAProjectAroundATask()
+    {
+        GitRepository();
+        WriteSettings(Settings + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n");
+
+        var (exit, output, _) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("This project runs `scripts/dev.sh ports free` before a task and `scripts/dev.sh server stop` after it.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoOfARunRunsNoCommandOfTheProject()
+    {
+        GitRepository();
+        var mark = Path.Combine(Path.GetTempPath(), $"toobusy-demo-{Guid.NewGuid():N}");
+        WriteSettings(Settings + $"\n[task]\nbefore = \"touch '{mark}'; exit 1\"\nafter = \"touch '{mark}'\"\n");
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--max", "1");
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("command", output, StringComparison.Ordinal);
+        Assert.False(File.Exists(mark));
+    }
+
+    [Fact]
     public async Task AboutSpeaksOfNoLabelsWhereTheSettingsAreNotValid()
     {
         GitRepository();

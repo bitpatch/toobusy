@@ -115,6 +115,30 @@ public interface IClock
     Task DelayAsync(TimeSpan time, CancellationToken cancellationToken);
 }
 
+// The commands of the project a run runs around a task. A command is a line for the shell of the machine: it runs at
+// the root of the working copy, with what it is told in its environment beside what toobusy has in its own, and is
+// waited for no longer than the time. How it went is told by the result; only a cancellation throws, and it stops the
+// command with everything it started.
+public interface IProjectCommands
+{
+    Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken);
+}
+
+public enum CommandStatus
+{
+    Exited,
+
+    // The shell could not be run.
+    NotStarted,
+
+    // The command did not end in its time and was stopped.
+    TimedOut,
+}
+
+// ExitCode is that of a command that exited. Printed is what the command wrote, to its output and to where its
+// errors go, as far as it came.
+public sealed record CommandEnd(CommandStatus Status, int ExitCode, string Printed);
+
 // The machine a run goes on: it is kept awake for as long as what is given back is not disposed, and it tells the
 // owner what a run wants them to know while they are away from the terminal.
 public interface IMachine

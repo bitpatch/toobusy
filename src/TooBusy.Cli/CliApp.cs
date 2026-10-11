@@ -517,7 +517,7 @@ public static class CliApp
         command.SetAction(_ =>
         {
             var settings = ProjectLocator.FindRoot(context.Folder) is { } root ? new SettingsFile(root).Load()?.Settings : null;
-            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill));
+            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill, settings?.Commands));
             return ExitCode.Done;
         });
         return command;
