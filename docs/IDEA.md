@@ -19,7 +19,7 @@ It is for a developer or a small team who already describe their work as tracker
 
 The folder lives in the project's repository and holds everything that is specific to the project:
 
-- the task tracker and the project, board or repository in it;
+- the task tracker and the board in it; the repository is not named there: it is the one the project is cloned from;
 - the queue rules: which labels mark a task type, which labels keep a task out, which status means "ready", how tasks are ordered, what blocks a task;
 - the assistant and how it is started: its permissions;
 - the prompts the assistant gets, as editable templates;
@@ -43,7 +43,7 @@ What is one person's own is not in the folder: the milestone to work on, and the
 
 ## Principles
 
-- **Nothing project-specific in the code.** Repositories, labels, branches, prompts and commands come from `.toobusy/`.
+- **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board and the labels, and later the statuses, branches, prompts and commands, come from `.toobusy/`.
 - **Trackers and assistants are replaceable.** The first version supports GitHub Issues with GitHub Projects, and Claude Code. Codex, OpenCode and other trackers come later behind the same interfaces.
 - **One task at a time in the shared working copy** in the first version. The design must not prevent running several sessions in parallel in separate git worktrees later.
 - **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it.

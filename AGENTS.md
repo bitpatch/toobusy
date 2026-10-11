@@ -32,7 +32,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 
 - Follow the dependency rules in docs/ARCHITECTURE.md. `TooBusy.Core` depends on nothing; adapters depend on Core only. The architecture tests enforce it.
 - Keep the code Native AOT compatible: no reflection-based serialisation, no dependency that is not trim-safe. Check a new package by publishing the native binary.
-- Nothing project-specific in the code: repositories, labels, branches, prompts and commands belong to the settings in `.toobusy/`.
+- Nothing project-specific in the code. The repository is the one of the `origin` remote, and the board and the labels come from the settings in `.toobusy/`. What a project will choose later, such as the statuses of its board, branches, prompts and commands, goes into the settings too, never into the code.
 - A change of what a screen looks like is looked at before it is shown: take pictures with `tools/screenshot.py` and read them. The tests see the text of a screen, not its colours.
 - New behaviour comes with tests. Core is tested with hand-written fakes of its ports.
 - Package versions go into `Directory.Packages.props`, not into project files.
