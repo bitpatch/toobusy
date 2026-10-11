@@ -18,6 +18,7 @@ dotnet run --project src/TooBusy.Cli -- --help
 dotnet run --project src/TooBusy.Cli -- --demo            # the whole tool over made-up data; changes nothing
 dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup; writes nothing
 dotnet run --project src/TooBusy.Cli -- run --demo        # a run over made-up tasks and sessions; changes nothing
+dotnet run --project src/TooBusy.Cli -- queue --demo      # the queue of a demo of a run: what is ready, what opens later, what is held; `--json` for an assistant
 dotnet run --project src/TooBusy.Cli -- about             # how a run works, with every message a session gets
 dotnet run --project src/TooBusy.Cli -- doctor            # checks everything a run needs; changes nothing
 dotnet run --project src/TooBusy.Cli -- doctor --demo     # the same over a made-up machine that has it all

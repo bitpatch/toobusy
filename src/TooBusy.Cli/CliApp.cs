@@ -5,6 +5,7 @@ using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
+using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Settings;
 
@@ -26,6 +27,7 @@ public static class CliApp
         root.Subcommands.Add(CreateModelCommand(context, demo));
         root.Subcommands.Add(CreateEffortCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
+        root.Subcommands.Add(CreateQueueCommand(context, demo));
         root.Subcommands.Add(CreateDoctorCommand(context, demo));
         root.Subcommands.Add(CreateAboutCommand(context));
 
@@ -350,27 +352,15 @@ public static class CliApp
             if (await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
-            var settings = bench.Settings.Load();
-            if (settings is { Settings: null })
-            {
-                Fail(context, "toobusy: the settings of this project are not valid.");
-                foreach (var problem in settings.Errors)
-                    context.Error.WriteLine(context.ErrorPalette.Error(problem.Describe(SettingsFile.DisplayPath)));
+            if (ValidSettings(context, bench) is not { } settings)
                 return ExitCode.Failed;
-            }
 
             // Everything a run needs is checked before anything else; a demo has it all.
             if (!bench.Demo && !await ChecksPassAsync(context, bench, cancellationToken))
                 return Fail(context, "toobusy: the run did not start. `toobusy doctor` checks all of it again.");
 
-            var standing = await bench.StandAsync(cancellationToken);
-            if (!standing.Ready)
-            {
-                Fail(context, standing.State == MilestoneState.Gone
-                    ? $"toobusy: the milestone “{standing.Name}” is not open any more."
-                    : "toobusy: the milestone to work on is not chosen.");
-                return Fail(context, "Run `toobusy milestone` to choose it.");
-            }
+            if (await ChosenMilestoneAsync(context, bench, cancellationToken) is not { } milestone)
+                return ExitCode.Failed;
 
             if (bench.Personal.LoadModel() is null)
             {
@@ -384,8 +374,8 @@ public static class CliApp
                 return Fail(context, "Run `toobusy effort` to choose it.");
             }
 
-            if (bench.OpenRun(settings!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
-                return Fail(context, "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take");
+            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is not { } run)
+                return Fail(context, NoTasks);
             if (context.Terminal is { } terminal)
                 return await OnPageAsync(context, terminal, bench, session => session.RunAsync(run, cancellationToken), cancellationToken);
 
@@ -395,6 +385,86 @@ public static class CliApp
             return Code(await run.RunAsync(new PlainRun(context.Output, context.OutputPalette), cancellationToken));
         });
         return command;
+    }
+
+    // Shows the queue as a run reads it before a task, and changes nothing: the tasks a run takes now, those that
+    // open later and those that are held. It needs what a run needs to read the queue, and says what is missing as
+    // a run does; the model, the effort and the checks of `doctor` are not among it.
+    static Command CreateQueueCommand(CliContext context, Option<bool> demo)
+    {
+        var json = new Option<bool>("--json") { Description = "Print the queue as JSON, for an assistant or a script." };
+        var command = new Command("queue", "Shows the tasks a run would take, those that open later and those that are held, and changes nothing.");
+        command.Options.Add(json);
+        command.SetAction(async (result, cancellationToken) =>
+        {
+            // A demo shows the queue in any project: where there are no settings it makes them up.
+            if ((result.GetValue(demo) ? FindProject(context) : FindSettings(context)?.Path) is null)
+                return ExitCode.NotReady;
+
+            var root = ProjectLocator.FindRoot(context.Folder)!;
+            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+                return ExitCode.NotReady;
+
+            if (ValidSettings(context, bench) is not { } settings)
+                return ExitCode.Failed;
+
+            if (await ChosenMilestoneAsync(context, bench, cancellationToken) is not { } milestone)
+                return ExitCode.Failed;
+
+            try
+            {
+                if (await bench.ReadQueueAsync(settings, milestone.Title, cancellationToken) is not var (lineup, recorded))
+                    return Fail(context, NoTasks);
+
+                var rules = QueueRules.Of(settings);
+                if (result.GetValue(json))
+                {
+                    context.Output.WriteLine(QueueLook.Json(lineup, recorded, rules));
+                    return ExitCode.Done;
+                }
+
+                foreach (var line in QueueLook.Lines(lineup, recorded, rules, context.OutputPalette))
+                    context.Output.WriteLine(line);
+                if (bench.Demo)
+                    context.Output.WriteLine(context.OutputPalette.Muted("Demo: the tasks are made up."));
+                return ExitCode.Done;
+            }
+            catch (TrackerException refused)
+            {
+                return Fail(context, $"toobusy: {refused.Message}");
+            }
+        });
+        return command;
+    }
+
+    const string NoTasks = "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take";
+
+    // The settings of the project when they validate; otherwise it says what is wrong with them and gives null.
+    static ProjectSettings? ValidSettings(CliContext context, Workbench bench)
+    {
+        var settings = bench.Settings.Load();
+        if (settings is not { Settings: null })
+            return settings!.Settings;
+
+        Fail(context, "toobusy: the settings of this project are not valid.");
+        foreach (var problem in settings.Errors)
+            context.Error.WriteLine(context.ErrorPalette.Error(problem.Describe(SettingsFile.DisplayPath)));
+        return null;
+    }
+
+    // The milestone to work on, when the user has chosen one that is open, or to work without one; otherwise it
+    // says how to choose it and gives null.
+    static async Task<MilestoneChoice?> ChosenMilestoneAsync(CliContext context, Workbench bench, CancellationToken cancellationToken)
+    {
+        var standing = await bench.StandAsync(cancellationToken);
+        if (standing.Ready)
+            return standing.Choice;
+
+        Fail(context, standing.State == MilestoneState.Gone
+            ? $"toobusy: the milestone “{standing.Name}” is not open any more."
+            : "toobusy: the milestone to work on is not chosen.");
+        Fail(context, "Run `toobusy milestone` to choose it.");
+        return null;
     }
 
     // Checks everything a run needs, a line for each check, and changes nothing. A demo checks a made-up machine

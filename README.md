@@ -11,6 +11,7 @@ What works today:
 - **Setting a project up**: `toobusy init` asks what it needs and writes the settings, on a screen or by options alone.
 - **Checking the machine**: `toobusy doctor` says whether everything a run needs is there, and how to fix what is not.
 - **Your own choices**: the milestone to work on, and the model and the effort the tasks are done with.
+- **Looking at the queue**: `toobusy queue` shows which tasks a run would take, which open later and which are held, and why, without running anything.
 - **A run** with Claude Code over GitHub Issues, with or without a GitHub Projects board: tasks one after another, a session that waits for you and is told to go on alone, usage limits, stopping, and going on with the same session after any interruption.
 - **Demos** of all of it over made-up data, which change nothing.
 
@@ -54,6 +55,7 @@ For another machine put its [runtime identifier](https://learn.microsoft.com/dot
 toobusy --demo           # the whole tool: the menu, and from it a run, the choices and the setup
 toobusy init --demo      # the setup, question by question
 toobusy run --demo       # a run over made-up tasks and made-up sessions
+toobusy queue --demo     # the queue of that run: what is ready, what opens later, what is held
 toobusy doctor --demo    # the checks over a made-up machine that has it all
 ```
 
@@ -116,6 +118,22 @@ toobusy run
 ```
 
 Either way a run starts with the checks of `toobusy doctor`: while one fails it does not start, and says what failed and how to fix it.
+
+`toobusy queue` shows what a run would do before you start one, and changes nothing:
+
+```text
+Ready
+  #71 Paint the windows yellow         interrupted
+  #12 Export the orders as a file
+
+Later
+  #20 Deploy                           waits for #12
+
+Held
+  #9  Draft of the new page            it has the draft label
+```
+
+It needs the settings and your milestone, not the model and the effort. `toobusy queue --json` prints the same lists for an assistant or a script, each task with its number, its title, its address and its labels.
 
 What to know before the first run:
 

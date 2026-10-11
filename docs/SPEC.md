@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy about`, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy queue`, `toobusy about`, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
 
 ## Setting a project up
 
@@ -13,9 +13,10 @@ In scope:
 - the milestone to work on: the choice of the user, kept on their machine, and `toobusy milestone`;
 - the model and the effort the tasks are done with by default: choices of the user too, `toobusy model` and `toobusy effort`;
 - `toobusy` without a command: the page with the menu;
+- `toobusy queue`: the queue as a run reads it, shown without running it;
 - `toobusy about`: the text that tells how a run works;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
-- the message of `toobusy` and `toobusy run` in a project that is not set up.
+- the message of `toobusy`, `toobusy run` and `toobusy queue` in a project that is not set up.
 
 Out of scope, each a later part of this specification:
 
@@ -108,7 +109,7 @@ A session of the assistant is started with the model and the effort.
 
 ### Not set up
 
-In a git repository without `.toobusy/settings.toml`, `toobusy run` and, without a terminal, `toobusy` print to the error stream and exit with code 2:
+In a git repository without `.toobusy/settings.toml`, `toobusy run`, `toobusy queue` and, without a terminal, `toobusy` print to the error stream and exit with code 2:
 
 ```
 toobusy: this project is not set up yet.
@@ -117,7 +118,7 @@ Run `toobusy init` to set it up.
 
 The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
 
-In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. Nor does `run --demo`, which makes the settings up, as [a demo](#toobusy-init) of a project that is ready does. `--help`, `--version` and `about` work everywhere.
+In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. Nor do `run --demo` and `queue --demo`, which make the settings up, as [a demo](#toobusy-init) of a project that is ready does. `--help`, `--version` and `about` work everywhere.
 
 ### The screen
 
@@ -423,6 +424,80 @@ In a terminal `run` shows the run on its tape, and leaves the tool when the run 
 
 The exit code says how the run ended: 0 for a run that ran out of tasks, that its owner stopped with `stop` or `abort`, or that a usage limit paused; 1 for one that stopped because something was wrong; 130 for one that was killed.
 
+### `toobusy queue`
+
+`queue` shows the queue without running it. It reads the open tasks as a run does before a task, with the record an earlier run left on the machine, and prints three lists. It changes nothing: not in the tracker, not on the machine.
+
+```text
+Ready
+  #71 Paint the windows yellow         interrupted
+  #12 Export the orders as a file
+  #15 Fix the rounding of a discount
+
+Later
+  #20 Deploy                           waits for #12
+
+Held
+  #7  Choose the format of the export  it waits for the owner: it has the needs-owner label
+  #9  Draft of the new page            it has the draft label
+  #14 Rename the settings page         its status is In Progress
+```
+
+- **Ready** are the tasks a run takes now, in the order it takes them. The task an earlier run left with a session stands first, with `left with a session` after its title; a task with the label of interrupted tasks has `interrupted` there. A task of a record that a run would not go on with, because it was closed since or got a label that keeps it out, is not put first: it stands where the rules of [the queue](#the-queue) put it.
+- **Later** are the tasks that open when what they wait for is closed, in the order they open, each with the tasks it waits for: `waits for #12, #15`.
+- **Held** are the tasks no run takes as things are, by their numbers, each with the reason in the words a run says it in.
+
+A list without tasks is not left out: it says `no tasks` under its name. The numbers and the titles stand in the same columns in all three lists, and a title of more than sixty characters is cut to sixty with `…`. The names of the lists are strong, the numbers, what a task waits for and why it is held are muted, and `interrupted` and `left with a session` have the colour of a warning, as [Colours](#colours) describes; without a terminal the lines are plain. The command has no screen of its own, in a terminal and without one.
+
+`queue --json` prints the same for an assistant or a script, as one JSON object with the three lists, `ready`, `later` and `held`, each an array that is there when it is empty too. A task has its `number`, its `title`, whole however long it is, its `url`, the address of the task in the tracker, and its `labels`. A task of `ready` that a run takes before the others has `first` as well: `session` for the task an earlier run left with a session, `interrupted` for one with the label of interrupted tasks. A task of `later` has `waitsFor`, the numbers of the tasks it waits for, and a task of `held` has `reason`, the same words as in the list.
+
+```json
+{
+  "ready": [
+    {
+      "number": 71,
+      "title": "Paint the windows yellow",
+      "url": "https://github.com/acme/rocket/issues/71",
+      "labels": ["feature", "interrupted"],
+      "first": "interrupted"
+    }
+  ],
+  "later": [
+    {
+      "number": 20,
+      "title": "Deploy",
+      "url": "https://github.com/acme/rocket/issues/20",
+      "labels": ["feature"],
+      "waitsFor": [12]
+    }
+  ],
+  "held": [
+    {
+      "number": 9,
+      "title": "Draft of the new page",
+      "url": "https://github.com/acme/rocket/issues/9",
+      "labels": ["feature", "draft"],
+      "reason": "it has the draft label"
+    }
+  ]
+}
+```
+
+`queue` needs what `run` needs to read the queue, and says what is missing as `run` does, on the error stream, with `--json` too, where nothing is printed besides:
+
+| What is missing | It says | Exit code |
+|---|---|---|
+| a git repository | `toobusy: not inside a git repository` | 2 |
+| the settings | the message of [a project that is not set up](#not-set-up) | 2 |
+| settings that validate | `toobusy: the settings of this project are not valid.` and the errors, a line each | 1 |
+| a milestone to work on | `toobusy: the milestone to work on is not chosen.`, or that the chosen one is not open any more, and `` Run `toobusy milestone` to choose it. `` | 1 |
+| a GitHub `origin` remote | ``toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take`` | 1 |
+| tasks that can be read | `toobusy:` and what the tracker says, such as `toobusy: acme/rocket has 101 open tasks, and the queue reads only the first 100.` | 1 |
+
+It does not need the model and the effort, and makes no checks of [`doctor`](#toobusy-doctor): what is wrong with `gh` is said when the tasks cannot be read. When the queue is shown the exit code is 0, whatever is in the lists.
+
+`queue --demo` shows the made-up tasks of [a demo of a run](#a-demo-of-a-run), as its first run finds them: the task a run was killed over stands first as one left with a session. It needs no settings, and its last line says `Demo: the tasks are made up.`; with `--json` that line is not printed.
+
 ### `toobusy about`
 
 `about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions of the project to it and to write or correct the skill a session starts with. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
@@ -499,8 +574,8 @@ A command of a package manager is proposed only when that manager is on the path
 
 | Code | Meaning |
 |---|---|
-| 0 | done; a run that ran out of tasks, that its owner stopped, or that a usage limit paused |
-| 1 | failed: a check did not pass, a value was refused, `init` was declined or left, the settings do not validate, the milestone to work on, the model or the effort is not chosen, a run stopped because something was wrong |
+| 0 | done; a run that ran out of tasks, that its owner stopped, or that a usage limit paused; a queue that is shown, whatever is in it |
+| 1 | failed: a check did not pass, a value was refused, `init` was declined or left, the settings do not validate, the milestone to work on, the model or the effort is not chosen, the tasks cannot be read, a run stopped because something was wrong |
 | 2 | there is no project, the project is not set up, there is no home folder to keep the choices in, or the command line is wrong |
 | 130 | a run was killed |
 
@@ -778,7 +853,7 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 
 ### Tests
 
-- The queue: every reason a task is held for, the order, tasks that wait for others, the interrupted task a run takes first, and the task of a record, which comes before it.
+- The queue: every reason a task is held for, the order, tasks that wait for others, the interrupted task a run takes first, and the task of a record, which comes before it. `toobusy queue` through the command line: each list and each reason, the task of a record, `--json`, an empty queue, the colours, a demo, what is missing, and that nothing but the tasks is asked for and nothing is left on the machine.
 - The line for toobusy in a reply, which is read without a block of what is left, and the tasks a report names; the messages a session gets, the first one with what a new task needs, as the project and the task are, with the command of a skill at its head and without one; and what `about` tells: the same messages word for word, the labels and the skill of the project, what is the skill's to say, and the times and the counts of the policy.
 - The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a task done in part, for which the run makes nothing, and one whose report names no other task; a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it; the record, written at the start of a session, when its conversation is known and at an outcome, and each case of the run that finds one: a session that still works, one that ended, one that was stopped, one that wrapped up, one whose conversation is gone, a task that is not taken any more, and a failure; a tracker that refuses, and a kill, while a task is taken, after its session was started or told to go on, with the session stopped and the next run going on with it; a task that a run stopped over, which gets the label of the owner and a comment and is not taken by the next run in a project without a board, and a tracker that refuses either; the assignment of a task that is taken, with a board and without one, and a tracker that refuses it, which the run goes on past.
 - What is asked of `gh` and of `claude`, argument by argument, a message that begins with the command of a skill among it, and what is made of their answers; a conversation of Claude Code read from a file of the test; a session of an earlier run that is found, lost or gone; the file of the record.

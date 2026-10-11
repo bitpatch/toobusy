@@ -67,6 +67,7 @@ public static class About
             - A task that has {owner} waits for the owner and is not taken.
             - A task waits for the open tasks that block it and for its own open sub-tasks.
             - The tasks that were interrupted are taken first, then the others by their numbers. A task that an earlier run was stopped over comes before any of them.
+            - `toobusy queue` shows which tasks a run takes as things are, in the order it takes them, those that open later and those that are held, each with the reason, and changes nothing. `toobusy queue --json` prints the same for an assistant.
             - One task is done at a time, in the working copy of the project itself. The working copy must be clean before a task, and it must be clean after it.
             - Each task is done by a session of the assistant of its own, which goes on by itself in the background. Nobody answers its questions or its permission prompts.
             - A task is gone on with by the same session whatever stopped the run over it, as told under “When a run goes on with a session”.

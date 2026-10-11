@@ -144,25 +144,40 @@ public sealed record Workbench(
     // run left, or one that was interrupted before. Null when the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
     public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
     {
-        var rules = QueueRules.Of(settings);
-        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
-        if (tasks is null)
-            return null;
-
         try
         {
             if (Demo)
                 await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
 
-            var open = await tasks.ReadOpenAsync(milestone, cancellationToken);
-            IRunState state = Demo ? remembered : new RunStateFile(LocalFolder.Of(Root));
-            var recorded = state.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
-            return TaskLineup.Arrange(open, rules).Outlook(rules, recorded);
+            if (await ReadQueueAsync(settings, milestone, cancellationToken) is not var (lineup, recorded))
+                return null;
+
+            var outlook = lineup.Outlook(QueueRules.Of(settings));
+            return recorded is null ? outlook : outlook with { Interrupted = recorded };
         }
         catch (Exception refused) when (refused is TrackerException or OperationCanceledException)
         {
             return null;
         }
+    }
+
+    // The queue as a run over these settings and this milestone reads it before a task, and nothing is changed by
+    // it: the lineup, with the task an earlier run left with a session before the others, and that task, null when
+    // there is none or the run would not go on with it. In a demo the tasks are its made-up ones. Null when the
+    // project has no tasks to read: its `origin` remote is not a GitHub repository. Throws TrackerException when
+    // the tracker refuses.
+    public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    {
+        var rules = QueueRules.Of(settings);
+        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
+        if (tasks is null)
+            return null;
+
+        var open = await tasks.ReadOpenAsync(milestone, cancellationToken);
+        IRunState state = Demo ? remembered : new RunStateFile(LocalFolder.Of(Root));
+        var recorded = state.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
+        var lineup = TaskLineup.Arrange(open, rules);
+        return (recorded is null ? lineup : lineup.Taking(recorded), recorded);
     }
 
     // The open milestones of the repository; null when they cannot be read.
