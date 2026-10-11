@@ -13,8 +13,10 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
     // The queue reads this many tasks; a project with more open ones is told so, not read in part.
     const int Page = 100;
 
-    const string Issues = """
-        query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}, filterBy: {milestoneNumber: $milestone}) { totalCount nodes { number title url milestone { title } labels(first: 50) { nodes { name } } blockedBy(first: 50) { nodes { number state } } subIssues(first: 50) { nodes { number state } } projectItems(first: 20) { nodes { project { url } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
+    // The statuses of a task on its boards. GitHub gives them only to a token with the `project` scope, so a
+    // project without a board does not ask for them.
+    const string Statuses = """
+        projectItems(first: 20) { nodes { project { url } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
         """;
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
@@ -46,7 +48,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
             + "([.subIssues.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\")), "
             + "(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv)";
         var answer = await AskAsync(
-            ["api", "graphql", "-f", $"owner={owner}", "-f", $"name={name}", .. filter, "-f", $"query={Issues.Trim()}", "--jq", lines],
+            ["api", "graphql", "-f", $"owner={owner}", "-f", $"name={name}", .. filter, "-f", $"query={Issues()}", "--jq", lines],
             $"The tasks of {repository} cannot be read.",
             cancellationToken);
 
@@ -68,6 +70,12 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
 
         return tasks;
     }
+
+    // The query of the queue, which asks for the boards of a task only when the project has one.
+    string Issues() =>
+        "query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}, filterBy: {milestoneNumber: $milestone}) { totalCount nodes { number title url milestone { title } labels(first: 50) { nodes { name } } blockedBy(first: 50) { nodes { number state } } subIssues(first: 50) { nodes { number state } }"
+        + (board is null ? "" : " " + Statuses.Trim())
+        + " } } } }";
 
     public async Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken)
     {

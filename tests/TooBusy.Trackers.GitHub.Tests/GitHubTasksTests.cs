@@ -98,6 +98,28 @@ public class GitHubTasksTests
     }
 
     [Fact]
+    public async Task TheBoardsOfATaskAreAskedForOnlyInAProjectWithABoard()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+
+        await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
+        await Tasks(board: null).ReadOpenAsync(null, TestContext.Current.CancellationToken);
+
+        var with = processes.Asked[0].Arguments[^3];
+        var without = processes.Asked[1].Arguments[^3];
+        Assert.EndsWith(
+            "subIssues(first: 50) { nodes { number state } } projectItems(first: 20) { nodes { project { url } fieldValueByName(name: \"Status\") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }",
+            with,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "query=query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: ASC}, filterBy: {milestoneNumber: $milestone}) { totalCount nodes { number title url milestone { title } labels(first: 50) { nodes { name } } blockedBy(first: 50) { nodes { number state } } subIssues(first: 50) { nodes { number state } } } } } }",
+            without);
+        Assert.Equal(["--jq"], [processes.Asked[1].Arguments[^2]]);
+        Assert.DoesNotContain("project", string.Join(' ', processes.Asked[1].Arguments), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MoreOpenTasksThanTheQueueReadsAreAnError()
     {
         processes.Answers.Enqueue(FakeProcesses.Answered("1\tv0.2.0\n"));

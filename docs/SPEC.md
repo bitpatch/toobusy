@@ -521,7 +521,7 @@ A task is **held**, and no run takes it as things are, when one of these is so, 
 | there are labels to take and it has none of them | `it has none of the labels to take: feature, bug` |
 | the project has a board, and the task does not stand there as one to do | `its status is In Progress`, `it is not on the board` |
 
-In a project with a board a task is taken only from the status `Todo`. The three statuses a run knows are those GitHub gives a new board, `Todo`, `In Progress` and `Done`, whatever the case of their letters and whatever stands between the letters: `To do` and `in-progress` are those statuses too. A project without a board has no statuses: no task is held by one, and none is moved.
+In a project with a board a task is taken only from the status `Todo`. The three statuses a run knows are those GitHub gives a new board, `Todo`, `In Progress` and `Done`, whatever the case of their letters and whatever stands between the letters: `To do` and `in-progress` are those statuses too. A project without a board has no statuses: no task is held by one, and none is moved. Nothing of the statuses is asked of GitHub there: the request for the tasks names no board, so it is answered to a token without the `project` scope too.
 
 A task **waits** for the open tasks that block it and for its own open sub-issues. It opens when they are closed, and is held while one of them is held or is not among the tasks that were read: `it waits for #7 (it has the manual label)`.
 
