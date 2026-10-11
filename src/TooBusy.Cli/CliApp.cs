@@ -1,4 +1,5 @@
 using System.CommandLine;
+using TooBusy.Cli.Imitation;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
@@ -54,13 +55,81 @@ public static class CliApp
 
     static Command CreateInitCommand(CliContext context, Option<bool> demo)
     {
-        var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.");
+        var board = new Option<string?>("--board") { Description = "The GitHub project of the tasks, by the address of its board or of any page of it.", HelpName = "URL" };
+        var noBoard = new Option<bool>("--no-board") { Description = "No project: no board keeps the statuses of the tasks." };
+        var newBoard = new Option<string?>("--new-board") { Description = "A new GitHub project with this title; it is made when the setup is saved.", HelpName = "title" };
+        var boardOwner = new Option<string?>("--board-owner") { Description = "Whose the new project will be: you or one of your organisations. The owner of the repository when it is not given.", HelpName = "login" };
+        var blocking = new Option<string[]>("--blocking-label") { Description = "A label that keeps a task out; give it again for every such label.", HelpName = "name" };
+        var noBlocking = new Option<bool>("--no-blocking-labels") { Description = "No label keeps a task out." };
+        var take = new Option<string[]>("--take-label") { Description = "A label that lets a task in; give it again for every such label.", HelpName = "name" };
+        var noTake = new Option<bool>("--no-take-labels") { Description = "Any task is taken, whatever its labels." };
+        var owner = new Option<string?>("--owner-label") { Description = "The label of a task that waits for the owner; it is made when the repository does not have it.", HelpName = "name" };
+        var interrupt = new Option<string?>("--interrupt-label") { Description = "The label of a task that a run had to stop; it is made when the repository does not have it.", HelpName = "name" };
+        var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
+        var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.")
+        {
+            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, yes,
+        };
         command.SetAction(async (result, cancellationToken) =>
         {
+            // Each answer is given once: options that answer the same question differently are a wrong command line.
+            (bool Wrong, string Message)[] clashes =
+            [
+                (new[] { result.GetValue(board) is not null, result.GetValue(noBoard), result.GetValue(newBoard) is not null }.Count(given => given) > 1,
+                    "toobusy: give one of `--board`, `--new-board` and `--no-board`, not several"),
+                (result.GetValue(boardOwner) is not null && result.GetValue(newBoard) is null, "toobusy: `--board-owner` goes with `--new-board`"),
+                (result.GetValue(blocking) is { Length: > 0 } && result.GetValue(noBlocking), "toobusy: give `--blocking-label` or `--no-blocking-labels`, not both"),
+                (result.GetValue(take) is { Length: > 0 } && result.GetValue(noTake), "toobusy: give `--take-label` or `--no-take-labels`, not both"),
+            ];
+            if (clashes.FirstOrDefault(clash => clash.Wrong) is { Wrong: true } clash)
+            {
+                Fail(context, clash.Message);
+                return ExitCode.NotReady;
+            }
+
+            var proposals = new SetupProposals(
+                result.GetValue(board) is { } address ? new BoardProposal.Existing(address)
+                    : result.GetValue(newBoard) is { } title ? new BoardProposal.Created(title, result.GetValue(boardOwner))
+                    : result.GetValue(noBoard) ? new BoardProposal.None()
+                    : null,
+                result.GetValue(noBlocking) ? [] : result.GetValue(blocking) is { Length: > 0 } blocks ? blocks : null,
+                result.GetValue(noTake) ? [] : result.GetValue(take) is { Length: > 0 } takes ? takes : null,
+                result.GetValue(owner),
+                result.GetValue(interrupt));
+
             if (FindProject(context) is not { } root)
                 return ExitCode.NotReady;
+
+            // Without questions there is no screen: what was answered and done is printed as plain lines.
+            if (result.GetValue(yes))
+            {
+                if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } unasked)
+                    return ExitCode.NotReady;
+
+                var boards = unasked.Boards is ImitatedBoards imitated ? imitated.Unwatched : unasked.Boards;
+                var setup = await new ProjectSetup(null, unasked.Environment, unasked.Tracker, boards, unasked.Settings, proposals).RunAsync(cancellationToken);
+                context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
+                foreach (var note in setup.Notes)
+                {
+                    context.Output.WriteLine(note.Tone switch
+                    {
+                        SetupTone.Failure => context.OutputPalette.Error($"✘ {note.Text}"),
+                        SetupTone.Warning => context.OutputPalette.Warning($"! {note.Text}"),
+                        _ => context.OutputPalette.Muted(note.Text),
+                    });
+                }
+
+                var refused = ReportSetup(context, setup, unasked.Demo, unasked: true);
+                NameAbout(context, setup, unasked.Demo);
+                return refused ? ExitCode.Failed : ExitCode.Done;
+            }
+
             if (context.Terminal is not { } terminal)
-                return Fail(context, "toobusy: `init` asks questions and needs a terminal");
+            {
+                Fail(context, "toobusy: `init` asks questions and needs a terminal.");
+                return Fail(context, "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.");
+            }
+
             if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
@@ -70,7 +139,7 @@ public static class CliApp
                 session = new Session(page, bench);
                 try
                 {
-                    await session.SetupAsync(leavesPage: true, cancellationToken);
+                    await session.SetupAsync(leavesPage: true, cancellationToken, proposals);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -411,12 +480,17 @@ public static class CliApp
     };
 
     // The answers of a setup and how it ended; a setup that never ended was left. Tells whether it failed.
-    static bool ReportSetup(CliContext context, SetupResult? setup, bool demo)
+    static bool ReportSetup(CliContext context, SetupResult? setup, bool demo, bool unasked = false)
     {
         var palette = context.OutputPalette;
         setup ??= new SetupResult(SetupOutcome.Left, []);
         foreach (var answer in setup.Answers)
             context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
+
+        // A setup that asked nothing showed nobody what it was about to do on GitHub: it says what it did. A demo
+        // did none of it.
+        foreach (var done in unasked && !demo ? setup.Done : [])
+            context.Output.WriteLine(done);
 
         var (failed, text) = Session.Ending(setup, demo);
         context.Output.WriteLine(

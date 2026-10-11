@@ -18,12 +18,24 @@ public enum SetupOutcome
 
 // Answers are those the setup ended with, as the screen showed them; Failure says what went wrong when it failed.
 // SettingsWritten tells a setup that wrote the file from one that only changed something on GitHub.
-public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer> Answers, string? Failure = null, bool SettingsWritten = false);
+public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer> Answers, string? Failure = null, bool SettingsWritten = false)
+{
+    // What the setup said of the machine, of the settings that exist and of the options: a dialog has shown it,
+    // and a setup that asked nothing has only this to tell it with.
+    public IReadOnlyList<SetupNote> Notes { get; init; } = [];
+
+    // What was done on GitHub, a line for each thing, in the order it was done; a setup that failed did these
+    // before it was refused.
+    public IReadOnlyList<string> Done { get; init; } = [];
+}
 
 // The steps of `toobusy init`: it asks what the settings need, shows what would change, and on a yes makes it so.
 // With settings that exist every question proposes the current value, so that accepting them all changes nothing.
 // From every step the user can go back to the one before; an answer that was given is proposed again.
-public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environment, ISetupTracker tracker, ISetupBoards boards, ISettingsStore store)
+// The proposals are what the options of the command answer: they are proposed before anything else is. Without a
+// dialog nothing is asked: every question gets what it proposes, the last one a yes, and a proposal that does not
+// pass the check of its question fails the setup before anything is changed.
+public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environment, ISetupTracker tracker, ISetupBoards boards, ISettingsStore store, SetupProposals? proposals = null)
 {
     // The steps that are asked; the confirmation comes when they are all done.
     const string ProjectLabel = "Project";
@@ -44,13 +56,23 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
     static readonly string[] Steps = [ProjectLabel, BlockingLabel, TakeLabel, OwnerLabel, InterruptLabel];
 
+    readonly ISetupDialog dialog = dialog ?? new Unasked();
+    readonly bool unasked = dialog is null;
+    readonly SetupProposals proposals = proposals ?? SetupProposals.None;
     readonly List<SetupNote> notes = [];
+    readonly List<string> done = [];
 
     ProjectSettings? current;
     string repository = "";
     bool verified;
     SetupBoards known = SetupBoards.None;
     IReadOnlyList<string>? labels;
+
+    // What the options say, once it is checked against what was read: the board when the boards are known, the
+    // labels when the labels are.
+    BoardAnswer? offeredBoard;
+    List<string>? offeredBlocking;
+    List<string>? offeredTake;
 
     // The answers so far; null is a step that was not answered yet.
     BoardAnswer? board;
@@ -87,50 +109,125 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
             notes.AddRange(loaded.Errors.Select(error => new SetupNote(SetupTone.Failure, error.Describe(store.DisplayPath))));
         }
 
+        // Settings that cannot be read propose nothing, and accepting what is proposed would put a first setup in
+        // their place: nobody is there to see that, so a setup that asks nothing does not go on.
+        if (unasked && loaded is { Settings: null })
+            return new SetupResult(SetupOutcome.Failed, [], "The settings that exist do not validate.") { Notes = notes };
+
         current = loaded?.Settings;
-        if (machine.TrackerReachable)
-        {
-            Show(0);
-            if (await dialog.WaitAsync(ProjectLabel, ProjectHint, "Reading your projects from GitHub", stopping => boards.ReadAsync(machine.OriginRepository, stopping), cancellationToken) is not { } read)
-                return new SetupResult(SetupOutcome.Left, []);
-            known = read;
-
-            // A new board is proposed for the owner of the repository when the user can make one there.
-            known = known with { Owners = [.. known.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] };
-        }
-
         var step = 0;
-        while (step >= 0)
+        try
         {
-            bool answered;
-            switch (step)
+            if (machine.TrackerReachable)
             {
-                case 0:
-                    answered = await AskBoardAsync(cancellationToken);
-                    break;
-                case 1:
-                    answered = await AskBlockingAsync(cancellationToken);
-                    break;
-                case 2:
-                    answered = await AskTakeAsync(cancellationToken);
-                    break;
-                case 3:
-                    answered = await AskOwnerAsync(cancellationToken);
-                    break;
-                case 4:
-                    answered = await AskInterruptedAsync(cancellationToken);
-                    break;
-                default:
-                    if (await ConcludeAsync(cancellationToken) is { } outcome)
-                        return new SetupResult(outcome, Answers(Steps.Length), failure, written);
-                    answered = false;
-                    break;
+                Show(0);
+                if (await dialog.WaitAsync(ProjectLabel, ProjectHint, "Reading your projects from GitHub", stopping => boards.ReadAsync(machine.OriginRepository, stopping), cancellationToken) is not { } read)
+                    return new SetupResult(SetupOutcome.Left, []);
+                known = read;
+
+                // A new board is proposed for the owner of the repository when the user can make one there.
+                known = known with { Owners = [.. known.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] };
             }
 
-            step += answered ? 1 : -1;
+            offeredBoard = OfferedBoard();
+            while (step >= 0)
+            {
+                bool answered;
+                switch (step)
+                {
+                    case 0:
+                        answered = await AskBoardAsync(cancellationToken);
+                        break;
+                    case 1:
+                        answered = await AskBlockingAsync(cancellationToken);
+                        break;
+                    case 2:
+                        answered = await AskTakeAsync(cancellationToken);
+                        break;
+                    case 3:
+                        answered = await AskOwnerAsync(cancellationToken);
+                        break;
+                    case 4:
+                        answered = await AskInterruptedAsync(cancellationToken);
+                        break;
+                    default:
+                        if (await ConcludeAsync(cancellationToken) is { } outcome)
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = notes, Done = done };
+                        answered = false;
+                        break;
+                }
+
+                step += answered ? 1 : -1;
+            }
+        }
+        catch (Refused refused)
+        {
+            // Nothing was changed: the questions come before everything that changes something.
+            return new SetupResult(SetupOutcome.Failed, Answers(step), refused.Message) { Notes = notes };
         }
 
         return new SetupResult(SetupOutcome.Left, []);
+    }
+
+    // The board an option names, as an answer: an address is put the way the settings keep it, and a new board gets
+    // the one it will belong to. Null when no option names a board, or when what it says cannot be.
+    BoardAnswer? OfferedBoard()
+    {
+        switch (proposals.Board)
+        {
+            case BoardProposal.Existing existing:
+                var address = BoardSuggestions.AddressOf(existing.Address);
+                if (SettingsValidator.IsBoard(address))
+                    return new BoardAnswer.Existing(address);
+                Reject($"{ProjectLabel}: {existing.Address.Trim()} is not a project. Use https://github.com/orgs/<org>/projects/<number>.");
+                return null;
+
+            case BoardProposal.Created created:
+                if (string.IsNullOrWhiteSpace(created.Title))
+                    Reject($"{ProjectLabel}: A project needs a title.");
+                else if (known.Owners.Count == 0)
+                    Reject($"{ProjectLabel}: A new project cannot be made: GitHub named nobody it can be made for.");
+                else if (created.Owner is null)
+                    return new BoardAnswer.Created(known.Owners[0], created.Title.Trim());
+                else if (known.Owners.FirstOrDefault(one => one.Login.Equals(created.Owner.Trim(), StringComparison.OrdinalIgnoreCase)) is { } whose)
+                    return new BoardAnswer.Created(whose, created.Title.Trim());
+                else
+                    Reject($"{ProjectLabel}: A project cannot be made for {created.Owner.Trim()}, only for {string.Join(", ", known.Owners.Select(one => one.Login))}.");
+                return null;
+
+            case BoardProposal.None:
+                return new BoardAnswer.None();
+
+            default:
+                return null;
+        }
+    }
+
+    // What an option says cannot be taken. A setup that asks nothing stops there; one that asks says so and asks
+    // its question as if the option were not given.
+    void Reject(string reason)
+    {
+        if (unasked)
+            throw new Refused(reason);
+        notes.Add(new SetupNote(SetupTone.Warning, reason));
+    }
+
+    // The labels an option names, as the repository writes them. One that the repository does not have is rejected.
+    List<string>? Among(List<string> all, IReadOnlyList<string>? named, string label)
+    {
+        if (named is null)
+            return null;
+
+        var found = new List<string>();
+        foreach (var name in Names(string.Join(',', named)))
+        {
+            if (all.FirstOrDefault(one => one.Equals(name, StringComparison.OrdinalIgnoreCase)) is { } written)
+                found.Add(written);
+            else
+                Reject($"{label}: {repository} has no label “{name}”.");
+        }
+
+        return found;
     }
 
     async Task<bool> AskBoardAsync(CancellationToken cancellationToken)
@@ -140,7 +237,8 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         {
             // What the project has now: the board that was chosen a moment ago, the one of the settings,
             // or one that is linked to the repository already.
-            var address = board switch
+            var proposed = board ?? offeredBoard;
+            var address = proposed switch
             {
                 BoardAnswer.Existing existing => existing.Address,
                 null => current?.Tracker.Board ?? known.Boards.FirstOrDefault(known => known.Linked)?.Address,
@@ -156,7 +254,8 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
                 known.Boards,
                 known.Owners,
                 text => SettingsValidator.IsBoard(BoardSuggestions.AddressOf(text)) ? null : "That is not a project. Use https://github.com/orgs/<org>/projects/<number>.",
-                title => string.IsNullOrWhiteSpace(title) ? "A project needs a title." : null));
+                title => string.IsNullOrWhiteSpace(title) ? "A project needs a title." : null,
+                proposed is BoardAnswer.Existing ? null : proposed));
             if (answer is null)
                 return false;
 
@@ -165,6 +264,8 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
                 answer = chosen = new BoardAnswer.Existing(BoardSuggestions.AddressOf(chosen.Address));
                 if (verified && await tracker.RefuseBoardAsync(chosen.Address, cancellationToken) is { } reason)
                 {
+                    if (unasked)
+                        throw new Refused($"{ProjectLabel}: {reason}");
                     refused = [new SetupNote(SetupTone.Failure, reason)];
                     continue;
                 }
@@ -177,11 +278,11 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
     async Task<bool> AskBlockingAsync(CancellationToken cancellationToken)
     {
-        var proposed = blocking ?? current?.Queue.Labels.Blocking ?? [];
         if (!verified)
         {
             Show(1);
-            var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", proposed), _ => null);
+            var names = blocking ?? proposals.Blocking ?? current?.Queue.Labels.Blocking ?? [];
+            var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", names), _ => null);
             if (typed is not null)
                 blocking = Names(typed);
             return typed is not null;
@@ -189,6 +290,8 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
         if (await AllLabelsAsync(1, BlockingLabel, BlockingHint, cancellationToken) is not { } all)
             return false;
+        offeredBlocking ??= Among(all, proposals.Blocking, BlockingLabel);
+        var proposed = blocking ?? offeredBlocking ?? current?.Queue.Labels.Blocking ?? [];
         Show(1);
         var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, all, Indexes(all, proposed));
         if (picked is not null)
@@ -198,11 +301,11 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
     async Task<bool> AskTakeAsync(CancellationToken cancellationToken)
     {
-        var proposed = take ?? current?.Queue.Labels.Take ?? [];
         if (!verified)
         {
             Show(2);
-            var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", proposed), text =>
+            var names = take ?? proposals.Take ?? current?.Queue.Labels.Take ?? [];
+            var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", names), text =>
                 Names(text).Intersect(blocking!, StringComparer.OrdinalIgnoreCase).FirstOrDefault() is { } shared ? $"{shared} is a blocking label." : null);
             if (typed is not null)
                 take = Names(typed);
@@ -211,6 +314,14 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
         if (await AllLabelsAsync(2, TakeLabel, TakeHint, cancellationToken) is not { } all)
             return false;
+        offeredTake ??= Among(all, proposals.Take, TakeLabel);
+        var proposed = take ?? offeredTake ?? current?.Queue.Labels.Take ?? [];
+
+        // A blocking label is not among the choices. Where nobody chooses, a proposed one would be dropped
+        // without a word.
+        if (unasked && proposed.FirstOrDefault(name => Has(blocking!, name)) is { } shared)
+            throw new Refused($"{TakeLabel}: {shared} is a blocking label.");
+
         var rest = all.Except(blocking!, StringComparer.OrdinalIgnoreCase).ToList();
         Show(2);
         var picked = dialog.ChooseMany(TakeLabel, TakeHint, rest, Indexes(rest, proposed));
@@ -223,7 +334,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         3,
         OwnerLabel,
         "A task that cannot go on without you gets this label, and is not taken while it has it.",
-        owner ?? current?.Queue.Labels.Owner ?? ProposedOwner,
+        owner ?? proposals.Owner?.Trim() ?? current?.Queue.Labels.Owner ?? ProposedOwner,
         name => Has(take!, name) ? $"{name} is a label to take." : null,
         answer => owner = answer,
         cancellationToken);
@@ -232,7 +343,7 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         4,
         InterruptLabel,
         "A task that a run had to stop gets this label, and the next run takes it first.",
-        interrupted ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
+        interrupted ?? proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
         name => Has(take!, name) ? $"{name} is a label to take."
             : Has(blocking!, name) ? $"{name} is a blocking label."
             : name.Equals(owner, StringComparison.OrdinalIgnoreCase) ? $"{name} is the label of the owner."
@@ -351,11 +462,22 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
         try
         {
             if (made is not null)
+            {
                 address = await tracker.CreateBoardAsync(made.Owner, made.Title, cancellationToken);
+                done.Add($"The project “{made.Title}” was made for {made.Owner.Login}: {address}");
+            }
+
             if (linking)
+            {
                 await tracker.LinkBoardAsync(address!, repository, cancellationToken);
+                done.Add($"The project was linked to {repository}.");
+            }
+
             foreach (var name in missing)
+            {
                 await tracker.CreateLabelAsync(repository, name, cancellationToken);
+                done.Add($"The label “{name}” was made in {repository}.");
+            }
         }
         catch (TrackerException refused)
         {
@@ -435,4 +557,32 @@ public sealed class ProjectSetup(ISetupDialog dialog, ISetupEnvironment environm
 
     static List<string> Names(string text) =>
         [.. text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    // A proposal that did not pass the check of its question, where nobody can be asked again.
+    sealed class Refused(string reason) : Exception(reason);
+
+    // The dialog of a setup that asks nothing: every question is answered with what it proposes, the last one with
+    // a yes, and nobody goes back. A proposed text that its question refuses cannot be asked for again.
+    sealed class Unasked : ISetupDialog
+    {
+        public void Show(SetupProgress progress)
+        {
+        }
+
+        public async Task<T?> WaitAsync<T>(string label, string hint, string text, Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+            where T : class =>
+            await work(cancellationToken);
+
+        public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) => proposed;
+
+        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) => proposed;
+
+        public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) =>
+            refuse(proposed) is { } reason ? throw new Refused($"{label}: {reason}") : proposed;
+
+        public BoardAnswer? AskBoard(BoardQuestion question) =>
+            question.Current is { } current ? new BoardAnswer.Existing(current.Address) : question.Proposed ?? new BoardAnswer.None();
+
+        public bool? Confirm(string question) => true;
+    }
 }

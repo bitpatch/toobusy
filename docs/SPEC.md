@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run. The options of `init` that answer without questions are described but not built.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
 
 ## Setting a project up
 
@@ -155,7 +155,7 @@ From top to bottom the screen is:
 
 **Leaving.** Ctrl+C leaves the screen, but only when it is pressed twice in a row: after the first one the line of the keys says `press ctrl+c again to exit`, and any other key takes the question back.
 
-Without a terminal there is no screen: `init` fails, as described below, and the other commands print plain lines.
+Without a terminal there is no screen: `init` fails unless it is told to ask nothing, as described below, and the other commands print plain lines.
 
 ### Colours
 
@@ -196,18 +196,44 @@ After writing, `init` says that the file is to be committed.
 
 **An existing setup.** When the settings exist, `init` runs the same steps with the current values proposed, so pressing Enter through it changes nothing. A settings file that does not validate is reported with its errors, and `init` proposes whatever it could read.
 
-**Without questions.** This part is not built yet. Every answer has an option, and `--yes` accepts the proposed value of every question the options leave open, the confirmation included:
+**Without questions.** Every answer has an option, and `--yes` accepts the proposed value of every question the options leave open, the confirmation included:
 
 | Option | Answer |
 |---|---|
-| `--board <URL>`, `--no-board` | the board, or none |
+| `--board <URL>` | the board, by its address or the address of any page of it |
+| `--new-board <title>` | a new board with this title |
+| `--board-owner <login>` | whose the new board will be: the user or one of their organisations; without it, the owner of the repository when a board can be made there, and otherwise the first GitHub names |
+| `--no-board` | no board |
 | `--blocking-label <name>` | a blocking label; repeatable |
+| `--no-blocking-labels` | no blocking label |
 | `--take-label <name>` | a label to take; repeatable |
-| `--yes` | ask nothing |
+| `--no-take-labels` | no label to take: any task |
+| `--owner-label <name>` | the owner's label |
+| `--interrupt-label <name>` | the interrupt label |
+| `--yes`, `-y` | ask nothing |
 
-Without `--yes` the options are the proposed answers of the interactive setup. With `--yes` a value that fails its check — a board that cannot be reached, a label the repository does not have — is an error with exit code 1, and nothing is written. Without a terminal and without `--yes`, `init` fails and names the option.
+An option that names labels names all of them: `--blocking-label manual` over settings that block two labels leaves one. Options that answer one question differently, such as `--board` with `--no-board` or `--take-label` with `--no-take-labels`, and `--board-owner` without `--new-board`, are a wrong command line: exit code 2.
 
-**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`. A run of a demo is the real run over made-up tasks and made-up sessions, described with [the page of a run](#a-demo-of-a-run). The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
+Without `--yes` the options are the proposed answers of the interactive setup, before those of the settings that exist: the board of `--board` is the one Enter keeps, `--new-board` and `--no-board` open the question on their tab, the labels are marked or pointed at. An option that cannot be taken, a text that is not the address of a board, an owner a board cannot be made for, a label the repository does not have, is said as a warning over the questions, and its question is asked as if the option were not given.
+
+With `--yes` there is no screen, with a terminal or without one. Every question gets what it proposes: the option, else the value of the settings that exist, else what a first setup proposes, where the board is the one linked to the repository or none, no label blocks, any task is taken, and the two labels are `needs-owner` and `interrupted`. Then the same things are done as on `Save and exit`: a new board is made, the board is linked, the labels are made, the file is written. What comes out is plain lines: the name of the command and the folder, what is wrong with the machine as the setup says it, the answers as in the report, a line for each thing that was done on GitHub, `The label “needs-owner” was made in acme/rocket.`, and how the setup ended. Settings that already say all of it end with `Nothing to change: the settings already say this.` and exit code 0.
+
+With `--yes` a value that fails the check of its question is an error with exit code 1, and nothing is made, linked or written. The last line names the question and says why: `✘ Labels to take: acme/rocket has no label “nice”. The settings were not written.` The checks are those of the questions:
+
+- a board whose address is not one, or that cannot be reached; a new board without a title, or for an owner it cannot be made for;
+- a blocking label or a label to take that the repository does not have, and a label to take that is a blocking label, whether an option names it or the settings do;
+- an owner's label that is a label to take, and an interrupt label that is a label to take, a blocking label or the owner's label. These two need not be in the repository: one that is not there is made, as the interactive setup makes it.
+
+Settings that exist and do not validate are an error too: their errors are printed, and the file stays as it is, because nobody is there to see a first setup written in its place. What GitHub refuses on saving fails as it does in the interactive setup, after the lines of what was done before it. Where the tracker cannot be read, without a working `gh` or a GitHub `origin`, `--yes` does what the interactive setup does: it says that nothing is verified, takes the options as they are typed, checks the labels against each other only, makes and links nothing, and writes the file.
+
+Without a terminal and without `--yes`, `init` changes nothing and fails with exit code 1:
+
+```
+toobusy: `init` asks questions and needs a terminal.
+Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.
+```
+
+**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, with `--yes` as well as on the screen, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`. A run of a demo is the real run over made-up tasks and made-up sessions, described with [the page of a run](#a-demo-of-a-run). The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
 
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
 

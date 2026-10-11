@@ -152,7 +152,16 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             .. question.Owners.Count > 0 ? [(Way.Created, "New project")] : ((Way, string)[])[],
             (Way.None, "No project"),
         ];
-        var way = 0;
+
+        // The tabs open on the way that is proposed, when a new board or none is.
+        var created = question.Proposed as BoardAnswer.Created;
+        Way? proposed = question.Proposed switch
+        {
+            BoardAnswer.Created => Way.Created,
+            BoardAnswer.None => Way.None,
+            _ => null,
+        };
+        var way = Math.Max(0, Array.FindIndex(ways, tab => tab.Way == proposed));
 
         // The lists of the tabs end with `Back`, where there is somewhere to go back to. A tab where a text is typed
         // has no list to put it in: Escape goes back from there.
@@ -163,8 +172,8 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         var at = Math.Max(0, question.Known.ToList().FindIndex(board => board.Address == question.Current?.Address));
         var top = 0;
         var address = new LineEditor("");
-        var title = new LineEditor("");
-        var owner = 0;
+        var title = new LineEditor(created?.Title ?? "");
+        var owner = Math.Max(0, question.Owners.ToList().IndexOf(created?.Owner!));
         string? reason = null;
 
         // The place under the tabs is as tall as the tallest of them, whatever tab is open: a list starts at its top,

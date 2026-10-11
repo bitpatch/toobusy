@@ -86,7 +86,7 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 
 | Port | What it hides | Implementations |
 |---|---|---|
-| `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation; waiting for something that is read. Every question can be gone back from, and so can a wait: the reading is told to stop | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests |
+| `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation; waiting for something that is read. Every question can be gone back from, and so can a wait: the reading is told to stop | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests; none for `init --yes`, where `ProjectSetup` takes what every question proposes |
 | `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which runs the checks of the doctor that need no settings and adds the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
 | `ISetupTracker` | whether a board can be read, the labels; making a board, linking one to the repository and making a label, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
 | `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
@@ -102,6 +102,8 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 `MilestoneStanding` says where a choice stands against the open milestones: not made, open, no milestone, gone, or not checked because the milestones cannot be read. `MilestoneOrder` is the order milestones are offered in.
 
 `ProjectSetup` is a walk over its steps: an answer moves it forward, going back from a question moves it to the step before, and going back from the first one leaves the setup. It keeps the answers, so that a step that is asked again proposes what was answered. Nothing is changed before the last step is confirmed; a new board is an answer like any other until then.
+
+The options of `init` reach the steps as `SetupProposals`: what an option says is proposed before the value of the settings and before what a first setup proposes. The board of an option is checked when the boards are read and its labels when the labels are, once. `--yes` is the same walk without a dialog: `ProjectSetup` then answers every question with what it proposes and the last one with a yes, so a setup that asks nothing cannot differ from one where Enter is pressed all the way. What an option says and cannot be is a warning among the notes where somebody is asked, and where nobody is it ends the setup as failed, before anything is changed; so does a proposed text that its question refuses, and a board that cannot be read. The result carries the notes and a line for each thing that was done on GitHub, which `CliApp` prints as plain lines.
 
 The setup never asks for the repository: `ISetupEnvironment` gives the one of the `origin` remote, and the labels are read from it. `BoardSuggestions` is what the question about the board does with a typed text: it finds the boards that fit it and turns the address of any page of a project into the address of its board.
 

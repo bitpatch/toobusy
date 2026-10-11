@@ -89,12 +89,13 @@ public sealed class Session(Page page, Workbench bench)
         }
     }
 
-    // `leavesPage` tells that there is nowhere to go back to from the first question.
-    public async Task<SetupResult> SetupAsync(bool leavesPage, CancellationToken cancellationToken)
+    // `leavesPage` tells that there is nowhere to go back to from the first question. The proposals are what the
+    // options of `init` answer.
+    public async Task<SetupResult> SetupAsync(bool leavesPage, CancellationToken cancellationToken, SetupProposals? proposals = null)
     {
         Clear("Setting up this project", null);
         page.Body = [];
-        return Setup = await new ProjectSetup(new SetupScreen(page, leavesPage), bench.Environment, bench.Tracker, bench.Boards, bench.Settings).RunAsync(cancellationToken);
+        return Setup = await new ProjectSetup(new SetupScreen(page, leavesPage), bench.Environment, bench.Tracker, bench.Boards, bench.Settings, proposals).RunAsync(cancellationToken);
     }
 
     // Asks for the milestone and remembers the answer; false when the user went back instead.

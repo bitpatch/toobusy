@@ -1298,14 +1298,249 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task InitNeedsATerminal()
+    public async Task WithoutATerminalInitFailsAndNamesTheOptionThatAsksNothing()
     {
         GitRepository();
 
-        var (exit, _, error) = await RunAsync("init");
+        var (exit, output, error) = await RunAsync("init", "--no-board");
 
         Assert.Equal(1, exit);
-        Assert.Contains("needs a terminal", error, StringComparison.Ordinal);
+        Assert.Equal("", output);
+        Assert.Equal(
+            "toobusy: `init` asks questions and needs a terminal." + Environment.NewLine
+            + "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options." + Environment.NewLine,
+            error);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
+    public async Task TheHelpOfInitListsItsOptions()
+    {
+        var (exit, output, _) = await RunAsync("init", "--help");
+
+        Assert.Equal(0, exit);
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "-y, --yes"])
+            Assert.Contains(option, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesAndWithoutATerminalAFirstSetupTakesWhatIsProposedAndWritesIt()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["init", "--yes"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal(
+            [
+                $"toobusy · Setting up this project · ~{Path.DirectorySeparatorChar}{folder.Name}",
+                "✔ Tracker          GitHub",
+                "✔ Project          none",
+                "✔ Blocking labels  none",
+                "✔ Labels to take   any task",
+                "✔ Owner's label    needs-owner",
+                "✔ Interrupt label  interrupted",
+                "✔ Assistant        Claude Code",
+                "The label “needs-owner” was made in acme/rocket.",
+                "The label “interrupted” was made in acme/rocket.",
+                "✔ The settings are written to .toobusy/settings.toml. Commit the file.",
+                "`toobusy about` tells how a run works, for you and for your assistant.",
+                "",
+            ],
+            output.Split(Environment.NewLine));
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("blocking = []\ntake = []\nowner = \"needs-owner\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.DoesNotContain("board", written.Replace("# ", "", StringComparison.Ordinal).Split('\n').Where(line => line.Contains('=', StringComparison.Ordinal)).Aggregate("", string.Concat), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesEveryOptionIsTheAnswer()
+    {
+        GitRepository();
+        var processes = GitHubWithProjects(labels: "bug\nfeature\nmanual\ndraft\n");
+
+        var (exit, output, _) = await RunAsync(
+            Context(processes),
+            ["init", "-y", "--board", "https://github.com/orgs/acme/projects/3/views/1", "--blocking-label", "manual", "--blocking-label", "draft", "--take-label", "bug", "--take-label", "feature", "--owner-label", "manual", "--interrupt-label", "paused"]);
+
+        Assert.Equal(0, exit);
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("board = \"https://github.com/orgs/acme/projects/3\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = [\"manual\", \"draft\"]\ntake = [\"bug\", \"feature\"]\nowner = \"manual\"\ninterrupted = \"paused\"", written, StringComparison.Ordinal);
+        Assert.Contains("✔ Project          https://github.com/orgs/acme/projects/3", output, StringComparison.Ordinal);
+        Assert.Contains("The project was linked to acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Contains("The label “paused” was made in acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Equal(
+            [["label", "create", "paused", "--repo", "acme/rocket"]],
+            processes.Asked.Where(asked => asked.Command == "gh" && asked.Arguments.Take(2).SequenceEqual(["label", "create"])).Select(asked => asked.Arguments));
+    }
+
+    [Fact]
+    public async Task WithYesANewBoardIsMadeForTheOwnerThatIsNamed()
+    {
+        GitRepository();
+        var processes = GitHubWithProjects(labels: "manual\ninterrupted\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--new-board", "Rocket", "--board-owner", "ann", "--owner-label", "manual"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Project          new: Rocket (ann)", output, StringComparison.Ordinal);
+        Assert.Contains("The project “Rocket” was made for ann: https://github.com/users/ann/projects/9", output, StringComparison.Ordinal);
+        Assert.Contains("The project was linked to acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("title=Rocket"));
+        Assert.Contains("board = \"https://github.com/users/ann/projects/9\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesAnExistingSetupIsLeftAsItIsAndAnOptionChangesOnlyItsAnswer()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        var processes = GitHub(milestones: "", labels: Labels + "bug\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes"]);
+
+        Assert.Equal(0, exit);
+        Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Equal(Settings, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+
+        (exit, _, _) = await RunAsync(Context(processes), ["init", "--yes", "--take-label", "bug", "--no-blocking-labels"]);
+
+        Assert.Equal(0, exit);
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("blocking = []\ntake = [\"bug\"]\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+
+        (exit, _, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-take-labels", "--no-board"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("take = []", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("✘ Blocking labels: acme/rocket has no label “urgent”. The settings were not written.", "--blocking-label", "urgent")]
+    [InlineData("✘ Labels to take: acme/rocket has no label “nice”. The settings were not written.", "--take-label", "nice")]
+    [InlineData("✘ Labels to take: manual is a blocking label. The settings were not written.", "--blocking-label", "manual", "--take-label", "manual")]
+    [InlineData("✘ Project: rocket is not a project. Use https://github.com/orgs/<org>/projects/<number>. The settings were not written.", "--board", "rocket")]
+    [InlineData("✘ Project: A project cannot be made for acme, only for ann. The settings were not written.", "--new-board", "Rocket", "--board-owner", "acme")]
+    [InlineData("✘ Interrupt label: manual is the label of the owner. The settings were not written.", "--owner-label", "manual", "--interrupt-label", "manual")]
+    public async Task WithYesAValueThatFailsItsCheckIsAnErrorAndNothingIsWritten(string failure, params string[] options)
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", .. options]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith(failure + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("create"));
+    }
+
+    [Fact]
+    public async Task WithYesABoardThatCannotBeReachedIsAnErrorAndNothingIsWritten()
+    {
+        GitRepository();
+        var processes = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "project"
+            ? new ProcessResult(ProcessStatus.Exited, 1, "", "Could not resolve to a ProjectV2")
+            : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("✘ Project: ", output, StringComparison.Ordinal);
+        Assert.EndsWith("The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
+    public async Task WithYesSettingsThatDoNotValidateAreAnErrorAndStayAsTheyAre()
+    {
+        GitRepository();
+        WriteSettings("version = 1\n");
+
+        var (exit, output, _) = await RunAsync(Context(GitHub(milestones: "")), ["init", "--yes"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("! The settings that exist do not validate:", output, StringComparison.Ordinal);
+        Assert.Contains("✘ .toobusy/settings.toml", output, StringComparison.Ordinal);
+        Assert.EndsWith("✘ The settings that exist do not validate. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Equal("version = 1\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task WithYesAndWithoutTheGitHubToolTheOptionsAreWrittenAsTheyAreAndThatIsSaid()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("init", "--yes", "--blocking-label", "manual");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✘ The GitHub command-line tool `gh` is not installed.", output, StringComparison.Ordinal);
+        Assert.Contains("nothing is verified", output, StringComparison.Ordinal);
+        Assert.Contains("blocking = [\"manual\"]", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesADemoChangesNothing()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("init", "--demo", "--yes", "--take-label", "bug");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("✔ Labels to take   bug", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("was made in", output, StringComparison.Ordinal);
+        Assert.EndsWith("Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
+    public async Task WithYesInATerminalNoScreenIsOpened()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys(), "init", "--demo", "--yes");
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("\u001b[?1049h", output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("toobusy: give one of `--board`, `--new-board` and `--no-board`, not several", "--board", "https://github.com/orgs/acme/projects/3", "--no-board")]
+    [InlineData("toobusy: give one of `--board`, `--new-board` and `--no-board`, not several", "--new-board", "Rocket", "--no-board")]
+    [InlineData("toobusy: `--board-owner` goes with `--new-board`", "--board-owner", "acme")]
+    [InlineData("toobusy: give `--blocking-label` or `--no-blocking-labels`, not both", "--blocking-label", "manual", "--no-blocking-labels")]
+    [InlineData("toobusy: give `--take-label` or `--no-take-labels`, not both", "--take-label", "bug", "--no-take-labels")]
+    public async Task OptionsThatAnswerTheSameQuestionDifferentlyAreAWrongCommandLine(string message, params string[] options)
+    {
+        GitRepository();
+
+        var (exit, _, error) = await RunAsync(["init", "--yes", "--demo", .. options]);
+
+        Assert.Equal(2, exit);
+        Assert.Equal(message + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task WithoutYesTheOptionsAreTheProposedAnswersOfTheScreen()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
+
+        // Enter on every question, the last one included: no board, `manual` blocks, `bug` is taken, `manual` is
+        // the label of the owner and `interrupted` the one of interrupted tasks.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--no-board", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("[No project]", output, StringComparison.Ordinal);
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("blocking = [\"manual\"]\ntake = [\"bug\"]\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.DoesNotContain("was made", Report(output), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1494,6 +1729,21 @@ public sealed class CliAppTests : IDisposable
         "git" => "https://github.com/acme/rocket.git\n",
         "gh" when arguments[0] == "label" => labels,
         "gh" when arguments[0] == "api" && arguments[1].StartsWith("repos/", StringComparison.Ordinal) => milestones,
+        "gh" when arguments[0] == "api" => "owner\tuser\tann\n",
+        _ => "",
+    }, ""));
+
+    // The same machine, whose `gh` answers what is asked about projects too: a board can be read, made for the
+    // user and linked to the repository.
+    static FakeProcesses GitHubWithProjects(string labels) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    {
+        "git" => "https://github.com/acme/rocket.git\n",
+        "gh" when arguments[0] == "label" => labels,
+        "gh" when arguments.Any(argument => argument.Contains("linkProjectV2ToRepository", StringComparison.Ordinal)) => "R_1\n",
+        "gh" when arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)) => "https://github.com/users/ann/projects/9\n",
+        "gh" when arguments.Any(argument => argument.Contains("projectV2(number:", StringComparison.Ordinal) && argument.Contains("repository(owner:", StringComparison.Ordinal)) => "P_1\tR_1\n",
+        "gh" when arguments.Any(argument => argument.Contains("projectV2(number:", StringComparison.Ordinal)) => "P_1\n",
+        "gh" when arguments.Any(argument => argument.Contains("(login: $login) { id }", StringComparison.Ordinal)) => "U_1\n",
         "gh" when arguments[0] == "api" => "owner\tuser\tann\n",
         _ => "",
     }, ""));

@@ -30,8 +30,8 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
 
 // The boards of a demo: the real ones of the user when they can be read, and made-up ones after them until
 // there are enough to try a list that scrolls. The owners a board can be made for are filled up the same way.
-// They take their time, so that the wait for them can be looked at.
-public sealed class ImitatedBoards(ISetupBoards? real, IClock clock) : ISetupBoards
+// They take their time, so that the wait for them can be looked at, unless nobody watches.
+public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watched = true) : ISetupBoards
 {
     const int Enough = 10;
 
@@ -46,9 +46,12 @@ public sealed class ImitatedBoards(ISetupBoards? real, IClock clock) : ISetupBoa
         "example-tools", "example-garden", "example-harbour", "example-atlas", "example-north",
     ];
 
+    // The same boards for a setup that has no screen: there is no wait to look at.
+    public ImitatedBoards Unwatched => new(real, clock, watched: false);
+
     public async Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
     {
-        var waited = clock.DelayAsync(Wait, cancellationToken);
+        var waited = watched ? clock.DelayAsync(Wait, cancellationToken) : Task.CompletedTask;
         var read = real is null ? SetupBoards.None : await real.ReadAsync(repository, cancellationToken);
         await waited;
         var boards = Titles.Take(Math.Max(0, Enough - read.Boards.Count))

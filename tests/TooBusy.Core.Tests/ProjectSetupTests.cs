@@ -520,12 +520,298 @@ public class ProjectSetupTests
         Assert.NotNull(store.Saved);
     }
 
-    Task<SetupResult> RunAsync() => new ProjectSetup(dialog, machine, tracker, boards, store).RunAsync(TestContext.Current.CancellationToken);
+    [Fact]
+    public async Task TheOptionsAreTheProposedAnswersOfTheQuestions()
+    {
+        boards.Read = new SetupBoards([new(Moon, "Moon", false)], []);
+
+        var result = await RunAsync(new SetupProposals(new BoardProposal.Existing($"{Moon}/views/2"), ["Draft"], ["bug", "feature"], "manual", "paused"));
+
+        // Nothing is answered here: the dialog accepts what every question proposes.
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new SetupBoard(Moon, "Moon", false), dialog.Question!.Current);
+        Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
+        Assert.Equal(["draft"], store.Saved.Queue.Labels.Blocking);
+        Assert.Equal(["bug", "feature"], store.Saved.Queue.Labels.Take);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
+        Assert.Equal([("acme/rocket", "paused")], tracker.Labelled);
+    }
+
+    [Fact]
+    public async Task AnOptionIsProposedBeforeTheSettingsThatExist()
+    {
+        store.Current = Existing;
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+
+        await RunAsync(new SetupProposals(new BoardProposal.None(), [], ["feature"], "draft"));
+
+        Assert.Null(dialog.Question!.Current);
+        Assert.Equal(new BoardAnswer.None(), dialog.Question.Proposed);
+        Assert.Null(store.Saved!.Tracker.Board);
+        Assert.Empty(store.Saved.Queue.Labels.Blocking);
+        Assert.Equal(["feature"], store.Saved.Queue.Labels.Take);
+        Assert.Equal("draft", store.Saved.Queue.Labels.Owner);
+
+        // No option names the interrupt label: the one of the settings stays.
+        Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
+    }
+
+    [Fact]
+    public async Task ANewBoardOfAnOptionIsProposedForItsOwnerOrForTheOwnerOfTheRepository()
+    {
+        boards.Read = new SetupBoards([], [new("denis", false), new("acme", true)]);
+
+        await RunAsync(new SetupProposals(new BoardProposal.Created(" Rocket ", null)));
+        Assert.Equal(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"), dialog.Question!.Proposed);
+        Assert.Equal([(new SetupOwner("acme", true), "Rocket")], tracker.Made);
+
+        var again = new ScriptedDialog();
+        await new ProjectSetup(again, machine, tracker, boards, store, new SetupProposals(new BoardProposal.Created("Moon", "Denis"))).RunAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(new BoardAnswer.Created(new SetupOwner("denis", false), "Moon"), again.Question!.Proposed);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatNamesNoBoardIsProposedWhenTheQuestionIsAskedAgain()
+    {
+        dialog.Board(new BoardAnswer.None());
+        dialog.Back("Blocking labels");
+
+        await RunAsync();
+
+        Assert.Equal(new BoardAnswer.None(), dialog.Question!.Proposed);
+    }
+
+    [Fact]
+    public async Task AnOptionThatCannotBeTakenIsSaidAndTheQuestionIsAskedWithoutIt()
+    {
+        var result = await RunAsync(new SetupProposals(new BoardProposal.Existing("rocket"), ["manual", "urgent"], ["nice"]));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(
+            [
+                new SetupNote(SetupTone.Warning, "Project: rocket is not a project. Use https://github.com/orgs/<org>/projects/<number>."),
+                new SetupNote(SetupTone.Warning, "Blocking labels: acme/rocket has no label “urgent”."),
+                new SetupNote(SetupTone.Warning, "Labels to take: acme/rocket has no label “nice”."),
+            ],
+            dialog.Shown.Notes.Where(note => note.Tone == SetupTone.Warning));
+        Assert.Null(store.Saved!.Tracker.Board);
+        Assert.Equal(["manual"], store.Saved.Queue.Labels.Blocking);
+        Assert.Empty(store.Saved.Queue.Labels.Take);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAFirstSetupTakesWhatIsProposedAndSaysWhatItDid()
+    {
+        boards.Read = new SetupBoards([new(Moon, "Moon", false), new(Rocket, "Rocket", true)], []);
+
+        var result = await RunUnaskedAsync(SetupProposals.None);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.True(result.SettingsWritten);
+        Assert.Equal(Rocket, store.Saved!.Tracker.Board);
+        Assert.Empty(store.Saved.Queue.Labels.Blocking);
+        Assert.Empty(store.Saved.Queue.Labels.Take);
+        Assert.Equal("needs-owner", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
+        Assert.Equal(7, result.Answers.Count);
+        Assert.Equal(["The label “needs-owner” was made in acme/rocket."], result.Done);
+        Assert.Empty(result.Notes);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsEveryOptionIsTheAnswer()
+    {
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Existing(Moon), ["manual", "draft"], ["bug"], "manual", "paused"));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
+
+        // The labels are written in the order the repository lists them, as a choice among them is.
+        Assert.Equal(["draft", "manual"], store.Saved.Queue.Labels.Blocking);
+        Assert.Equal(["bug"], store.Saved.Queue.Labels.Take);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
+        Assert.Equal(["The project was linked to acme/rocket.", "The label “paused” was made in acme/rocket."], result.Done);
+        Assert.Equal([(Moon, "acme/rocket")], tracker.Linked);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsANewBoardIsMadeLinkedAndWritten()
+    {
+        boards.Read = new SetupBoards([], [new("acme", true)]);
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("https://github.com/orgs/acme/projects/42", store.Saved!.Tracker.Board);
+        Assert.Equal(
+            [
+                "The project “Rocket” was made for acme: https://github.com/orgs/acme/projects/42",
+                "The project was linked to acme/rocket.",
+                "The label “needs-owner” was made in acme/rocket.",
+            ],
+            result.Done);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAnExistingSetupIsLeftAsItIsAndAnOptionChangesIt()
+    {
+        store.Current = Existing;
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+
+        Assert.Equal(SetupOutcome.NothingToChange, (await RunUnaskedAsync(SetupProposals.None)).Outcome);
+        Assert.Null(store.Saved);
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.None(), Take: []));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Null(store.Saved!.Tracker.Board);
+        Assert.Equal(["manual"], store.Saved.Queue.Labels.Blocking);
+        Assert.Empty(store.Saved.Queue.Labels.Take);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Empty(result.Done);
+    }
+
+    [Theory]
+    [InlineData("board", "Project: https://github.com/orgs/acme/projects/1 cannot be read")]
+    [InlineData("address", "Project: acme/rocket is not a project. Use https://github.com/orgs/<org>/projects/<number>.")]
+    [InlineData("title", "Project: A project needs a title.")]
+    [InlineData("whose", "Project: A project cannot be made for ann, only for acme, denis.")]
+    [InlineData("blocking", "Blocking labels: acme/rocket has no label “urgent”.")]
+    [InlineData("take", "Labels to take: acme/rocket has no label “nice”.")]
+    [InlineData("shared", "Labels to take: bug is a blocking label.")]
+    [InlineData("owner", "Owner's label: bug is a label to take.")]
+    [InlineData("unnamed", "Owner's label: A label needs a name.")]
+    [InlineData("interrupt", "Interrupt label: manual is the label of the owner.")]
+    public async Task WithoutQuestionsAnOptionThatFailsItsCheckFailsTheSetupAndNothingIsChanged(string wrong, string failure)
+    {
+        boards.Read = new SetupBoards([], [new("denis", false), new("acme", true)]);
+        tracker.Unreadable.Add(Rocket);
+        var proposals = wrong switch
+        {
+            "board" => new SetupProposals(new BoardProposal.Existing(Rocket)),
+            "address" => new SetupProposals(new BoardProposal.Existing("acme/rocket")),
+            "title" => new SetupProposals(new BoardProposal.Created(" ", null)),
+            "whose" => new SetupProposals(new BoardProposal.Created("Rocket", "ann")),
+            "blocking" => new SetupProposals(Blocking: ["manual", "urgent"]),
+            "take" => new SetupProposals(Take: ["nice"]),
+            "shared" => new SetupProposals(Blocking: ["bug"], Take: ["bug"]),
+            "owner" => new SetupProposals(Take: ["bug"], Owner: "bug"),
+            "unnamed" => new SetupProposals(Owner: " "),
+            _ => new SetupProposals(Owner: "manual", Interrupted: "manual"),
+        };
+
+        var result = await RunUnaskedAsync(proposals);
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal(failure, result.Failure);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Made);
+        Assert.Empty(tracker.Linked);
+        Assert.Empty(tracker.Labelled);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsANewBoardNeedsSomebodyToMakeItFor()
+    {
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Project: A new project cannot be made: GitHub named nobody it can be made for.", result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAFailureKeepsTheAnswersBeforeIt()
+    {
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.None(), ["manual"], ["nice"]));
+
+        Assert.Equal(
+            [new SetupAnswer("Tracker", "GitHub"), new SetupAnswer("Project", "none"), new SetupAnswer("Blocking labels", "manual")],
+            result.Answers);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsALabelOfTheSettingsThatBecomesBlockingFailsTheSetup()
+    {
+        store.Current = Existing;
+
+        var result = await RunUnaskedAsync(new SetupProposals(Blocking: ["bug"]));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Labels to take: bug is a blocking label.", result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsSettingsThatDoNotValidateAreNotReplaced()
+    {
+        store.Errors = [new SettingsError("tracker.type", 5, "is missing")];
+
+        var result = await RunUnaskedAsync(SetupProposals.None);
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("The settings that exist do not validate.", result.Failure);
+        Assert.Contains(new SetupNote(SetupTone.Failure, ".toobusy/settings.toml:5: tracker.type: is missing"), result.Notes);
+        Assert.Null(store.Saved);
+        Assert.Equal(0, tracker.Calls);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsWhatGitHubRefusesFailsTheSetupAfterWhatWasDone()
+    {
+        boards.Read = new SetupBoards([new(Moon, "Moon", false)], []);
+        tracker.RefuseToLabel = "labels cannot be made";
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Existing(Moon)));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("labels cannot be made", result.Failure);
+        Assert.Equal(["The project was linked to acme/rocket."], result.Done);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAndWithoutTheTrackerTheOptionsAreTakenAsTheyAreAndThatIsSaid()
+    {
+        machine.TrackerReachable = false;
+        machine.Problems = [new SetupProblem("gh is not installed", "brew install gh")];
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Existing(Rocket), ["manual", "urgent"], ["nice"], "waiting"));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(Rocket, store.Saved!.Tracker.Board);
+        Assert.Equal(["manual", "urgent"], store.Saved.Queue.Labels.Blocking);
+        Assert.Equal(["nice"], store.Saved.Queue.Labels.Take);
+        Assert.Equal("waiting", store.Saved.Queue.Labels.Owner);
+        Assert.Equal(0, tracker.Calls);
+        Assert.Empty(result.Done);
+        Assert.Equal([SetupTone.Failure, SetupTone.Muted, SetupTone.Warning], result.Notes.Select(note => note.Tone));
+        Assert.Contains("nothing is verified", result.Notes[2].Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAndWithoutTheTrackerATypedLabelIsStillCheckedAgainstTheOthers()
+    {
+        machine.TrackerReachable = false;
+
+        var result = await RunUnaskedAsync(new SetupProposals(Blocking: ["manual"], Take: ["manual"]));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Labels to take: manual is a blocking label.", result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    Task<SetupResult> RunAsync(SetupProposals? proposals = null) => new ProjectSetup(dialog, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
+
+    // A setup that asks nothing: it has no dialog.
+    Task<SetupResult> RunUnaskedAsync(SetupProposals proposals) => new ProjectSetup(null, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
 
     static bool SameSettings(ProjectSettings? left, ProjectSettings? right) => FakeStore.Render(left!) == FakeStore.Render(right!);
 
     // Answers each question from its script and accepts what is proposed when the script has nothing for it.
-    // A board that the project has is kept; without one the answer is no board.
+    // A board that the project has is kept; without one the answer is the one that is proposed, or no board.
     sealed class ScriptedDialog : ISetupDialog
     {
         readonly Dictionary<string, Queue<string[]?>> answers = [];
@@ -617,7 +903,7 @@ public class ProjectSetupTests
             Question = question;
             if (boards.Count > 0)
                 return boards.Dequeue();
-            return question.Current is { } current ? new BoardAnswer.Existing(current.Address) : new BoardAnswer.None();
+            return question.Current is { } current ? new BoardAnswer.Existing(current.Address) : question.Proposed ?? new BoardAnswer.None();
         }
 
         public bool? Confirm(string question)

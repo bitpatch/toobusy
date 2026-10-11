@@ -62,7 +62,9 @@ public sealed record SetupBoards(IReadOnlyList<SetupBoard> Boards, IReadOnlyList
 }
 
 // Current is the board the project has now, when it has one: the user keeps it or changes it.
-// A new board can be made only when there are owners to make it for.
+// A new board can be made only when there are owners to make it for. Proposed is an answer that names no board
+// there is, a new one or none, when that is what an option said or what was answered before: the question opens
+// with it, and there is no Current then.
 public sealed record BoardQuestion(
     string Label,
     string Hint,
@@ -70,7 +72,8 @@ public sealed record BoardQuestion(
     IReadOnlyList<SetupBoard> Known,
     IReadOnlyList<SetupOwner> Owners,
     Func<string, string?> RefuseAddress,
-    Func<string, string?> RefuseTitle);
+    Func<string, string?> RefuseTitle,
+    BoardAnswer? Proposed = null);
 
 public abstract record BoardAnswer
 {
@@ -79,6 +82,29 @@ public abstract record BoardAnswer
     public sealed record Created(SetupOwner Owner, string Title) : BoardAnswer;
 
     public sealed record None : BoardAnswer;
+}
+
+// What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
+// leaves a question with what it proposes by itself. An empty list of labels is an answer: no label.
+public sealed record SetupProposals(
+    BoardProposal? Board = null,
+    IReadOnlyList<string>? Blocking = null,
+    IReadOnlyList<string>? Take = null,
+    string? Owner = null,
+    string? Interrupted = null)
+{
+    public static SetupProposals None { get; } = new();
+}
+
+// The board as an option names it: by an address, as a new one with its title and the login of whose it will be,
+// which is the first of those it can be made for when it is not given, or none.
+public abstract record BoardProposal
+{
+    public sealed record Existing(string Address) : BoardProposal;
+
+    public sealed record Created(string Title, string? Owner) : BoardProposal;
+
+    public sealed record None : BoardProposal;
 }
 
 // What the setup needs to know of the machine before it asks anything.

@@ -419,6 +419,29 @@ public sealed class SetupScreenTests : IDisposable
         terminal.AssertSaw("  By URL  [No project]  press tab to switch\n");
     }
 
+    [Fact]
+    public void TheTabsOpenOnNoProjectWhenThatIsProposed()
+    {
+        terminal.Keys.Press(Keys.Enter);
+
+        var answer = screen.AskBoard(Question(current: null) with { Proposed = new BoardAnswer.None() });
+
+        Assert.Equal(new BoardAnswer.None(), answer);
+        Assert.Equal(1, terminal.Frames);
+        terminal.AssertSaw("  Your projects   By URL   New project  [No project]  press tab to switch\n");
+    }
+
+    [Fact]
+    public void TheTabsOpenOnANewProjectWithItsOwnerAndTitleWhenThatIsProposed()
+    {
+        terminal.Keys.Press(Keys.Enter);
+
+        var answer = screen.AskBoard(Question(current: null) with { Proposed = new BoardAnswer.Created(Owners[1], "Rocket two") });
+
+        Assert.Equal(new BoardAnswer.Created(Owners[1], "Rocket two"), answer);
+        terminal.AssertSaw("  Your projects   By URL  [New project]  No project   press tab to switch\n Whose project it will be:\n   acme   organisation\n ❯ denis  your account\n Title   Rocket two\n");
+    }
+
     static BoardQuestion Question(SetupBoard? current) => new(
         "Project",
         "The project of the tasks.",
