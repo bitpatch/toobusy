@@ -118,12 +118,16 @@ public sealed record Workbench(
             new ClaudeCode(Processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, Home, System.Environment.GetEnvironmentVariable), Root),
             new GitWorkspace(Processes, Root),
             new RunStateFile(local),
+            new RunSignFile(local),
             new LocalMachine(Processes),
             Clock,
             new ShellCommands(Root),
             plan,
             RunPolicy.Default);
     }
+
+    // The run that goes on in the working copy; null when none does. A demo looks at no sign, as it puts none up.
+    public GoingRun? Going() => Demo ? null : new RunSignFile(LocalFolder.Of(Root)).Read();
 
     // The made-up tasks of a demo: those that were kept while one of them is interrupted or has a record, and
     // otherwise tasks that are made up anew, so that a demo can be run again and again. The first of them have a

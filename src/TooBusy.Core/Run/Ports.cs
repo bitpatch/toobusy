@@ -1,3 +1,4 @@
+using System.Globalization;
 using TooBusy.Core.Assistant;
 
 namespace TooBusy.Core.Run;
@@ -174,6 +175,67 @@ public enum RecordState
 }
 
 public sealed record TaskRecord(int Number, SessionTrace Session, RecordState State = RecordState.Working);
+
+// The sign a run puts up in the working copy for as long as it goes on, so that whoever works beside it can tell: a
+// second run, which does not start, and `toobusy status`. Unlike the record it does not outlive its run: it is taken
+// down when the run ends, and the sign of a run that died says nothing.
+public interface IRunSign
+{
+    // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given.
+    RunSign? Raise(RunSign sign);
+
+    // Says anew what the run is doing.
+    void Change(RunSign sign);
+
+    void Lower();
+}
+
+// What a run says of itself on its sign: where it is, the task it works on, with its title and its address, null
+// between tasks, how the session of the task is opened, null while it has none, and until when the run waits for a
+// usage limit.
+public sealed record RunSign(RunPhase Phase)
+{
+    public int? Task { get; init; }
+
+    public string? Title { get; init; }
+
+    public string? Url { get; init; }
+
+    public string? Open { get; init; }
+
+    public DateTimeOffset? Until { get; init; }
+
+    // What is said of a run on its sign, of all it shows: a sign changes when one of these does, not with every step
+    // of a session.
+    public static RunSign Of(RunStatus status) => new(status.Phase)
+    {
+        Task = status.Task?.Number,
+        Title = status.Task?.Title,
+        Url = status.Task?.Url,
+        Open = status.Task is null ? null : status.Open,
+        Until = status.Phase == RunPhase.WaitingForLimit ? status.Until : null,
+    };
+
+    // The run in a few words, as `toobusy status` and a run that does not start say it: the task and how its session
+    // is opened, with what the run waits for, or that it is between tasks.
+    public string Told
+    {
+        get
+        {
+            if (Task is not { } number)
+                return Phase == RunPhase.WaitingForLimit ? "it waits for a usage limit" : "between tasks";
+
+            var waits = Phase switch
+            {
+                RunPhase.WaitingForLimit when Until is { } until => string.Create(CultureInfo.InvariantCulture, $" · waits for a usage limit until {until.UtcDateTime:yyyy-MM-dd HH:mm} UTC"),
+                RunPhase.WaitingForLimit => " · waits for a usage limit",
+                RunPhase.WaitingForOwner => " · its session waits for the owner",
+                _ => "",
+            };
+            return string.Create(CultureInfo.InvariantCulture, $"#{number} {Title}{waits}{(Open is null ? "" : $" · {Open}")}");
+        }
+    }
+}
 
 // Where a run tells what happens: a line of its log for everything that happened, every task that is over, once,
 // and what is going on right now.

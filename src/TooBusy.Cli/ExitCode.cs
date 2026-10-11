@@ -11,6 +11,9 @@ public static class ExitCode
     // There is no project, the project is not set up, or the command line is wrong.
     public const int NotReady = 2;
 
+    // A run is going on in the working copy: `status` says so, and a second run does not start.
+    public const int Busy = 3;
+
     // A run was left while a session worked: the session is stopped, and its task stays as it is.
     public const int Killed = 130;
 }

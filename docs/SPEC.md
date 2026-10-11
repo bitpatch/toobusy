@@ -14,6 +14,7 @@ In scope:
 - the model and the effort the tasks are done with by default: choices of the user too, `toobusy model` and `toobusy effort`;
 - `toobusy` without a command: the page with the menu;
 - `toobusy queue`: the queue as a run reads it, shown without running it;
+- `toobusy status`: whether a run is going on in the working copy;
 - `toobusy about`: the text that tells how a run works;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
 - the message of `toobusy`, `toobusy run` and `toobusy queue` in a project that is not set up.
@@ -324,7 +325,7 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 
 | Choice | Opens |
 |---|---|
-| `Run` | the run, on its tape; when it is over the menu is back by itself, with how the run went said above it. The checks of [`doctor`](#toobusy-doctor) are made first, as `toobusy run` makes them, and the run is not opened while one fails |
+| `Run` | the run, on its tape; when it is over the menu is back by itself, with how the run went said above it. It is not opened while a run goes on in the working copy: the menu says `A run is going on here already:` above itself, with the task of that run as [`toobusy status`](#toobusy-status) names it. The checks of [`doctor`](#toobusy-doctor) are made first, as `toobusy run` makes them, and the run is not opened while one fails |
 | `Assistant` | the model and the effort, described below; Escape goes back to the menu |
 | `Milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
 | `Settings` | the steps of `init` with the current values proposed; Escape from the first of them goes back to the menu, and so does the end of the setup, whose last line is shown above the menu |
@@ -408,7 +409,18 @@ The levels: low, medium, high, xhigh, max
 
 `run` takes the tasks of the queue one after another, as [Running the tasks](#running-the-tasks) describes.
 
-`run` does not start over settings that do not validate: it prints `toobusy: the settings of this project are not valid.` and the errors, a line each, and exits with code 1. Then come the checks of [`doctor`](#toobusy-doctor), and after them the choices of the user.
+`run` does not start over settings that do not validate: it prints `toobusy: the settings of this project are not valid.` and the errors, a line each, and exits with code 1.
+
+Nor does it start while a run goes on in the same working copy: a second one would work in the middle of the task of the first. It says so with the task of that run, as [`toobusy status`](#toobusy-status) names it, and exits with code 3, before anything is checked or asked of the tracker:
+
+```
+toobusy: a run is going on in this working copy already: #12 Export the orders as a file · claude attach 1a2b3c4d
+The run did not start. `toobusy status` says whether that one still goes on.
+```
+
+Two runs that are started at the same moment may both come past this. The run itself looks once more when it puts up [its sign](#local-state): the one that finds the sign of the other says `✖ Did not start: a run is going on in this working copy already: …`, starts nothing and ends as a run that stopped because something was wrong.
+
+Then come the checks of [`doctor`](#toobusy-doctor), and after them the choices of the user.
 
 `run` does not start without a milestone to work on. When the user has not chosen one, or the chosen one is not open any more, it exits with code 1:
 
@@ -515,11 +527,73 @@ It does not need the model and the effort, and makes no checks of [`doctor`](#to
 
 `queue --demo` shows the made-up tasks of [a demo of a run](#a-demo-of-a-run), as its first run finds them: the task a run was killed over stands first as one left with a session. It needs no settings, and its last line says `Demo: the tasks are made up.`; with `--json` that line is not printed.
 
+### `toobusy status`
+
+`status` says whether a run is going on in the working copy, and changes nothing. A run works in the working copy itself, so a commit that is made beside it lands in the middle of its task: an assistant that works with the owner in the project looks here before it commits. The record of a session does not say it, as it stays after a run that was killed.
+
+A run that goes on is told in one line, with the task it works on and the command that opens its session:
+
+```
+A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d
+```
+
+What the run waits for stands between the two, and a run that has no task at the moment says so:
+
+| The run | The line |
+|---|---|
+| does a task | `A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d` |
+| has taken a task whose session is not started yet, or runs a command of the project around it | `A run is going on: #12 Export the orders as a file` |
+| has a session that waits for the owner | `A run is going on: #12 Export the orders as a file · its session waits for the owner · claude attach 1a2b3c4d` |
+| waits for a usage limit | `A run is going on: #12 Export the orders as a file · waits for a usage limit until 2030-01-01 14:05 UTC · claude attach 1a2b3c4d` |
+| is between tasks: it checks the working tree or reads the queue | `A run is going on: between tasks` |
+
+Without a run it says so, and names the task an earlier run left with a session, when there is one, by its number: the title of a task is the tracker's, which `status` does not ask.
+
+```
+No run is going on.
+An earlier run left #12 with a session: the next run goes on with it.
+```
+
+It reads what a run wrote down in [`.toobusy/local/`](#local-state), the sign of the run and the record of a session, and nothing else: it needs a git working copy, and no settings, no choices of the user, no network, no `gh` and no terminal. It works from any folder of the working copy. Outside one it says `toobusy: not inside a git repository` and exits with code 2. The sign of a run that died does not count, as [Local state](#local-state) describes, and is left where it is.
+
+**The exit code** tells a run that goes on from none, so that a script does not read the text: 0 when no run is going on, so that `toobusy status && git commit` commits only then, and 3 while one is. Neither is a failure, and 1 and 2 stay what they are for every command.
+
+`status --json` prints the same as one JSON object, with the same exit code. `running` is always there. Of a run that goes on there are `process`, the number of its process, `since`, when the run started, and `phase`: `between-tasks`, `preparing` for a task that is taken and whose session does not work yet, `working`, `waiting-for-owner` or `waiting-for-limit`. `task` is the task it works on, with its `number`, its `title` and its `url`, and `session` the command that opens its session; neither is there between tasks, and `session` not before the session is started. `until` is when a wait for a usage limit ends. The times are in UTC.
+
+```json
+{
+  "running": true,
+  "process": 4242,
+  "since": "2030-01-01T09:00:00Z",
+  "phase": "working",
+  "task": {
+    "number": 12,
+    "title": "Export the orders as a file",
+    "url": "https://github.com/acme/rocket/issues/12"
+  },
+  "session": "claude attach 1a2b3c4d"
+}
+```
+
+Without a run, `left` is the task an earlier run left with a session, when there is one: its number as `task`, and how the session was left as `state`, which is `working`, `paused` for a session that a usage limit stopped, or `wrapped-up` for one that wrapped the task up after `/abort`.
+
+```json
+{
+  "running": false,
+  "left": {
+    "task": 12,
+    "state": "working"
+  }
+}
+```
+
+`status --demo` shows a made-up run that goes on, whatever the working copy has, and exits with code 3 as for a real one. Its last line says `Demo: the run is made up.`; with `--json` that line is not printed.
+
 ### `toobusy about`
 
 `about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions of the project to it and to write or correct the skill a session starts with. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
 
-It prints, as Markdown and in this order: which tasks a run takes and how it does them; that toobusy keeps the task of a session, and what it does to it before the session; that a session makes new tasks itself, which of them toobusy asks for, and what of them is the project's to say; that a session starts with the skill the settings name, what the first message says already, so that the skill does not say it again or against it, and what is the skill's to say: how the work of the project is done and checked without its owner, what is done before and after it, the language of the report, and which tasks a session makes besides the one of what is left; the commands of the project a run runs around a task, when each runs, what it learns of the task and what a failure does, so that the instructions of a project do not tell a session to do the same; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit, those for a session that a later run goes on with, and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
+It prints, as Markdown and in this order: which tasks a run takes and how it does them, with the commands that show the queue and say whether a run is going on; that toobusy keeps the task of a session, and what it does to it before the session; that a session makes new tasks itself, which of them toobusy asks for, and what of them is the project's to say; that a session starts with the skill the settings name, what the first message says already, so that the skill does not say it again or against it, and what is the skill's to say: how the work of the project is done and checked without its owner, what is done before and after it, the language of the report, and which tasks a session makes besides the one of what is left; the commands of the project a run runs around a task, when each runs, what it learns of the task and what a failure does, so that the instructions of a project do not tell a session to do the same; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit, those for a session that a later run goes on with, and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
 
 In a project that is set up the labels of its settings are named, as in ``the `needs-owner` label``, and it is said whether the project has a board. The skill is named too, and the first message is shown as a session of the project gets it, with the command of the skill at its head; a project that names none is told so. The commands around a task are named as the settings have them, and a project that has none is told so. Where there are no settings, or they do not validate, the labels are spoken of without their names, the first message is shown without a skill, and the text says that no settings are read.
 
@@ -591,9 +665,10 @@ A command of a package manager is proposed only when that manager is on the path
 
 | Code | Meaning |
 |---|---|
-| 0 | done; a run that ran out of tasks, that its owner stopped, that did the task or the number of tasks it was started for, or that a usage limit paused; a queue that is shown, whatever is in it |
+| 0 | done; a run that ran out of tasks, that its owner stopped, that did the task or the number of tasks it was started for, or that a usage limit paused; a queue that is shown, whatever is in it; `status` when no run is going on |
 | 1 | failed: a check did not pass, a value was refused, `init` was declined or left, the settings do not validate, the milestone to work on, the model or the effort is not chosen, the tasks cannot be read, a run stopped because something was wrong, the task of `run --task` is not one a run takes |
 | 2 | there is no project, the project is not set up, there is no home folder to keep the choices in, or the command line is wrong |
+| 3 | a run is going on in the working copy: `status` says so, and `run` did not start beside it |
 | 130 | a run was killed |
 
 ### Tests
@@ -604,6 +679,7 @@ A command of a package manager is proposed only when that manager is on the path
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, the skill, named, left out and not written yet, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn. A tape is read as the rows the terminal's own screen has after it, sequence by sequence, so that a tape that has lost count of its lines fails. A key that a test holds back for something that never happens fails the test instead of letting the page go on for ever.
 - `doctor`: each check passed, failed and skipped, the skill looked for in the folders of a test, the fix for each platform with and without its package manager, the lines of the checks with and without a terminal, and a run that does not start while a check fails, from the command line and from the menu, where one that starts after the checks is covered too.
+- `status` through the command line: no run, the task of a record, a run that goes on, with its task, between tasks and waiting for a usage limit, what a run that died left behind, `--json`, a demo, outside a git working copy, and that it asks nothing of the machine and leaves nothing on it.
 - The "not set up" message and the exit codes, through the command line; `about` outside a project, in one that is set up, with a skill and without one, with the commands around a task, and in one whose settings do not validate.
 
 ## Running the tasks
@@ -892,7 +968,13 @@ On another machine there is no record: a task that was interrupted or paused is 
 
 ### Local state
 
-What a run leaves on the machine lies in `.toobusy/local/`: the record of the task a run has a session for, the request that waits for a session, and what the status line of the last session told. The folder is made by the run and has a `.gitignore` of its own that leaves everything in it out, so that nothing of it is committed, the working tree stays clean, and the `.gitignore` of the project is not touched.
+What a run leaves on the machine lies in `.toobusy/local/`: the record of the task a run has a session for, the sign of a run that goes on, the request that waits for a session, and what the status line of the last session told. The folder is made by the run and has a `.gitignore` of its own that leaves everything in it out, so that nothing of it is committed, the working tree stays clean, and the `.gitignore` of the project is not touched.
+
+**The sign of a run.** A run writes down that it goes on, as `run.json`, when it starts, before it reads anything, and takes that away when it ends, however it ends: out of tasks, stopped, over a problem or killed. The sign has the number of the process of the run and when that process started, when the run started, and what the run is doing: where it is, the task it works on, with its title and its address, the command that opens the session of the task, and until when it waits for a usage limit. It is written anew when one of these changes, not with every step of a session, and put in place whole, as the record is.
+
+A sign counts while its process lives. A run whose process was killed outright leaves its sign behind, and that sign says nothing: [`toobusy status`](#toobusy-status) says that no run is going on, and the next run puts its own sign over it. The number of a process is given to another one after a while, so a process counts as the run only when it started when the sign says its process did; a process whose start cannot be read counts. A sign that cannot be read says nothing either.
+
+One run goes on in a working copy: [`toobusy run`](#toobusy-run) and `Run` of the menu do not start a second one. The sign is that of the working copy, so runs in two working copies of a project do not hold each other. A run of the menu that comes after another one of the same `toobusy` puts the sign up again.
 
 ### The machine
 
@@ -931,7 +1013,7 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 
 ### A demo of a run
 
-`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, no command of the project is run, and the waits are seconds long. Where the settings are made up they name the skill `task-auto`, and the log says of every new session that it starts with it. The tasks fit the rules of the project, and one after another they show: a task that a run was killed over, which stands in `In Progress` with a made-up record, and whose session goes on; a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose session makes a task of what is left, which is held for the owner when the run ends; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. The menu of a demo opens with that task named at `Run`, `interrupted: #100 Rename the settings page`, as the task of a record is. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first, goes on with its session, and then takes the rest of the same tasks. After that run the made-up tasks start over, as they do after any run that leaves no task interrupted and no record; the task a run was killed over is among the first of them only. Without a terminal the log of a demo starts with `Demo: nothing is changed.`
+`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, no command of the project is run, and the waits are seconds long. It puts up no sign and looks at none: a demo works on nothing, so it goes on beside a run in the same working copy, a run starts beside it, and `toobusy status` does not tell it. Where the settings are made up they name the skill `task-auto`, and the log says of every new session that it starts with it. The tasks fit the rules of the project, and one after another they show: a task that a run was killed over, which stands in `In Progress` with a made-up record, and whose session goes on; a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose session makes a task of what is left, which is held for the owner when the run ends; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. The menu of a demo opens with that task named at `Run`, `interrupted: #100 Rename the settings page`, as the task of a record is. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first, goes on with its session, and then takes the rest of the same tasks. After that run the made-up tasks start over, as they do after any run that leaves no task interrupted and no record; the task a run was killed over is among the first of them only. Without a terminal the log of a demo starts with `Demo: nothing is changed.`
 
 `run --demo` takes `--task` and `--max` as a run does. The tasks of a demo are #100 to #107. A demo of one task has no task that a run was killed over, whose record would keep the run from any other, unless that task, #100, is the one asked for: `run --demo --task 101` does #101, `--task 105` says that it waits for #102, and `--task 100` goes on with the session of #100.
 
@@ -939,6 +1021,6 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 
 - The queue: every reason a task is held for, the order, tasks that wait for others, the interrupted task a run takes first, and the task of a record, which comes before it. `toobusy queue` through the command line: each list and each reason, the task of a record, `--json`, an empty queue, the colours, a demo, what is missing, and that nothing but the tasks is asked for and nothing is left on the machine.
 - The line for toobusy in a reply, which is read without a block of what is left, and the tasks a report names; the messages a session gets, the first one with what a new task needs, as the project and the task are, with the command of a skill at its head and without one; and what `about` tells: the same messages word for word, the labels and the skill of the project, what is the skill's to say, and the times and the counts of the policy.
-- The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a task done in part, for which the run makes nothing, and one whose report names no other task; a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it; the record, written at the start of a session, when its conversation is known and at an outcome, and each case of the run that finds one: a session that still works, one that ended, one that was stopped, one that wrapped up, one whose conversation is gone, a task that is not taken any more, and a failure; a tracker that refuses, and a kill, while a task is taken, after its session was started or told to go on, with the session stopped and the next run going on with it; a task that a run stopped over, which gets the label of the owner and a comment and is not taken by the next run in a project without a board, and a tracker that refuses either; the assignment of a task that is taken, with a board and without one, and a tracker that refuses it, which the run goes on past; a run of one task, with each outcome, a task that is held, one that waits, a number that is not a task, the record of another task and its own, and a task that its session makes; a run of a number of tasks, what counts, a task that is gone on with, a task that a session makes, a queue that runs out first and a `/stop` before the count; the commands of the project, with a fake of the shell: a run without them, the two around a task and what they are told, a `before` that fails, is given up or does not start, `after` after every outcome and after a session that did not start, an `after` that fails, a kill before and inside a task, a task that is gone on with, and a wait for a usage limit.
-- What is asked of `gh` and of `claude`, argument by argument, a message that begins with the command of a skill among it, and what is made of their answers; a conversation of Claude Code read from a file of the test; a session of an earlier run that is found, lost or gone; the file of the record; a command of the project through the real shell: its folder, its environment, its exit code and what it printed, one that does not end in its time, one that is cut, and one that leaves something running.
-- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first; the menu over a record. `run --task` and `run --max` through the command line: the two together and a number that is not positive, a demo of each, a task that is not taken, the tape of a counted run, and a number that is not a task of a project, for which no session is started; and a demo in a project whose settings have commands, which runs none.
+- The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a task done in part, for which the run makes nothing, and one whose report names no other task; a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it; the record, written at the start of a session, when its conversation is known and at an outcome, and each case of the run that finds one: a session that still works, one that ended, one that was stopped, one that wrapped up, one whose conversation is gone, a task that is not taken any more, and a failure; a tracker that refuses, and a kill, while a task is taken, after its session was started or told to go on, with the session stopped and the next run going on with it; a task that a run stopped over, which gets the label of the owner and a comment and is not taken by the next run in a project without a board, and a tracker that refuses either; the assignment of a task that is taken, with a board and without one, and a tracker that refuses it, which the run goes on past; a run of one task, with each outcome, a task that is held, one that waits, a number that is not a task, the record of another task and its own, and a task that its session makes; a run of a number of tasks, what counts, a task that is gone on with, a task that a session makes, a queue that runs out first and a `/stop` before the count; the commands of the project, with a fake of the shell: a run without them, the two around a task and what they are told, a `before` that fails, is given up or does not start, `after` after every outcome and after a session that did not start, an `after` that fails, a kill before and inside a task, a task that is gone on with, and a wait for a usage limit; the sign of the run, with a fake of it: put up, changed with what the run does and not with every look, taken down at the end and after a kill, and a run that finds the sign of another and starts nothing.
+- What is asked of `gh` and of `claude`, argument by argument, a message that begins with the command of a skill among it, and what is made of their answers; a conversation of Claude Code read from a file of the test; a session of an earlier run that is found, lost or gone; the file of the record; the file of the sign, with the processes of the machine faked and real: a run that goes on, one that ended, one that died, a process that got its number, a second run, and a file that cannot be read; a command of the project through the real shell: its folder, its environment, its exit code and what it printed, one that does not end in its time, one that is cut, and one that leaves something running.
+- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first; the menu over a record. `run --task` and `run --max` through the command line: the two together and a number that is not positive, a demo of each, a task that is not taken, the tape of a counted run, and a number that is not a task of a project, for which no session is started; and a demo in a project whose settings have commands, which runs none. A second run that does not start, from the command line and from the menu; a run that `status` tells while it goes on and not after it; and a demo that a run does not hold.

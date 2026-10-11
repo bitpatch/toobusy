@@ -52,6 +52,8 @@ public class AboutTests
         Assert.Contains("A task that was closed since, or got the `needs-owner` label or a label that keeps a task out, is not taken.", text, StringComparison.Ordinal);
         Assert.Contains("- `toobusy run` takes tasks until none is left. `toobusy run --max 3` takes three at most: a task counts when it is done, done in part or left to the owner. `toobusy run --task 12` does task #12 and no other, and only when a run would take it now:", text, StringComparison.Ordinal);
         Assert.Contains("- `toobusy queue` shows which tasks a run takes as things are, in the order it takes them, those that open later and those that are held, each with the reason, and changes nothing.", text, StringComparison.Ordinal);
+        Assert.Contains("- `toobusy status` says whether a run is going on in the working copy, with the task it works on and the command that opens its session, and changes nothing.", text, StringComparison.Ordinal);
+        Assert.Contains("It exits with 0 when no run is going on and with 3 while one is, and `toobusy status --json` prints the same for an assistant. A second run does not start in a working copy while one goes on.", text, StringComparison.Ordinal);
     }
 
     [Fact]

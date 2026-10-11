@@ -7,6 +7,7 @@ using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
+using TooBusy.Infrastructure.Run;
 using TooBusy.Infrastructure.Settings;
 
 namespace TooBusy.Cli;
@@ -28,6 +29,7 @@ public static class CliApp
         root.Subcommands.Add(CreateEffortCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
         root.Subcommands.Add(CreateQueueCommand(context, demo));
+        root.Subcommands.Add(CreateStatusCommand(context, demo));
         root.Subcommands.Add(CreateDoctorCommand(context, demo));
         root.Subcommands.Add(CreateAboutCommand(context));
 
@@ -368,6 +370,14 @@ public static class CliApp
             if (ValidSettings(context, bench) is not { } settings)
                 return ExitCode.Failed;
 
+            // One run goes on in a working copy. A demo changes nothing there and is not held.
+            if (bench.Going() is { } going)
+            {
+                Fail(context, $"toobusy: a run is going on in this working copy already: {going.Sign.Told}");
+                Fail(context, "The run did not start. `toobusy status` says whether that one still goes on.");
+                return ExitCode.Busy;
+            }
+
             // Everything a run needs is checked before anything else; a demo has it all.
             if (!bench.Demo && !await ChecksPassAsync(context, bench, cancellationToken))
                 return Fail(context, "toobusy: the run did not start. `toobusy doctor` checks all of it again.");
@@ -446,6 +456,40 @@ public static class CliApp
             {
                 return Fail(context, $"toobusy: {refused.Message}");
             }
+        });
+        return command;
+    }
+
+    // Says whether a run is going on in the working copy, and changes nothing: the task it works on and how its
+    // session is opened, or, without a run, the task an earlier run left with a session. It needs a project and
+    // nothing else, and reads only what a run wrote down on the machine. The exit code tells a run from none.
+    static Command CreateStatusCommand(CliContext context, Option<bool> demo)
+    {
+        var json = new Option<bool>("--json") { Description = "Print it as JSON, for an assistant or a script." };
+        var command = new Command("status", "Says whether a run is going on in this working copy, and changes nothing.");
+        command.Options.Add(json);
+        command.SetAction(result =>
+        {
+            if (FindProject(context) is not { } root)
+                return ExitCode.NotReady;
+
+            // A demo shows a made-up run that goes on, whatever the project has.
+            var local = LocalFolder.Of(root);
+            var going = result.GetValue(demo) ? StatusLook.MadeUp : new RunSignFile(local).Read();
+            var left = going is null ? new RunStateFile(local).Load() : null;
+            if (result.GetValue(json))
+            {
+                context.Output.WriteLine(StatusLook.Json(going, left));
+            }
+            else
+            {
+                foreach (var line in StatusLook.Lines(going, left))
+                    context.Output.WriteLine(line);
+                if (result.GetValue(demo))
+                    context.Output.WriteLine(context.OutputPalette.Muted("Demo: the run is made up."));
+            }
+
+            return going is null ? ExitCode.Done : ExitCode.Busy;
         });
         return command;
     }

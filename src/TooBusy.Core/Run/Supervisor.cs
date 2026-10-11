@@ -19,6 +19,7 @@ public sealed class Supervisor(
     IAssistant assistant,
     IWorkspace workspace,
     IRunState state,
+    IRunSign sign,
     IMachine machine,
     IClock clock,
     IProjectCommands shell,
@@ -47,6 +48,9 @@ public sealed class Supervisor(
     // The record of the task that is worked on, as it was written last.
     TaskRecord? record;
 
+    // What the sign of the run says, as it was written last; null while the sign is not up.
+    RunSign? told;
+
     // The tasks the run closed: those that are done, and those that are done in part.
     int done;
     int partial;
@@ -68,6 +72,18 @@ public sealed class Supervisor(
     {
         this.view = view;
         var started = clock.Now;
+
+        // One run goes on in a working copy: a second one would work in the middle of the task of the first.
+        var up = RunSign.Of(status);
+        if (sign.Raise(up) is { } other)
+        {
+            var going = $"a run is going on in this working copy already: {other.Told}";
+            Say(RunMark.Failed, $"Did not start: {going}");
+            Show(new RunStatus(RunPhase.Ended, ""));
+            return Ended(RunEnd.Problem, going);
+        }
+
+        told = up;
         RunResult result;
         using (machine.KeepAwake())
         {
@@ -86,6 +102,11 @@ public sealed class Supervisor(
             catch (AssistantException refused)
             {
                 result = Stop(refused.Message);
+            }
+            finally
+            {
+                told = null;
+                sign.Lower();
             }
         }
 
@@ -999,6 +1020,8 @@ public sealed class Supervisor(
     {
         status = next with { Limits = limits, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
         view.Show(status);
+        if (told is not null && RunSign.Of(status) is var now && now != told)
+            sign.Change(told = now);
     }
 
     // The commands that mean something at the moment.

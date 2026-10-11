@@ -20,6 +20,7 @@ dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup; writ
 dotnet run --project src/TooBusy.Cli -- run --demo        # a run over made-up tasks and sessions; changes nothing
 dotnet run --project src/TooBusy.Cli -- run --demo --max 2    # the same, two tasks at most; `--task 101` does that task and no other
 dotnet run --project src/TooBusy.Cli -- queue --demo      # the queue of a demo of a run: what is ready, what opens later, what is held; `--json` for an assistant
+dotnet run --project src/TooBusy.Cli -- status            # whether a run is going on in this working copy; exits with 3 while one is; `--json` for an assistant; `--demo` shows a made-up one
 dotnet run --project src/TooBusy.Cli -- about             # how a run works, with every message a session gets
 dotnet run --project src/TooBusy.Cli -- doctor            # checks everything a run needs; changes nothing
 dotnet run --project src/TooBusy.Cli -- doctor --demo     # the same over a made-up machine that has it all

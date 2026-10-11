@@ -12,6 +12,7 @@ What works today:
 - **Checking the machine**: `toobusy doctor` says whether everything a run needs is there, and how to fix what is not.
 - **Your own choices**: the milestone to work on, and the model and the effort the tasks are done with.
 - **Looking at the queue**: `toobusy queue` shows which tasks a run would take, which open later and which are held, and why, without running anything.
+- **Knowing that a run goes on**: `toobusy status` says whether one works in the working copy right now, and on which task, so that nobody commits in the middle of it.
 - **A run** with Claude Code over GitHub Issues, with or without a GitHub Projects board: tasks one after another, a session that waits for you and is told to go on alone, usage limits, stopping, and going on with the same session after any interruption.
 - **Demos** of all of it over made-up data, which change nothing.
 
@@ -56,6 +57,7 @@ toobusy --demo           # the whole tool: the menu, and from it a run, the choi
 toobusy init --demo      # the setup, question by question
 toobusy run --demo       # a run over made-up tasks and made-up sessions
 toobusy queue --demo     # the queue of that run: what is ready, what opens later, what is held
+toobusy status --demo    # what is said of a run that goes on
 toobusy doctor --demo    # the checks over a made-up machine that has it all
 ```
 
@@ -151,6 +153,18 @@ Held
 ```
 
 It needs the settings and your milestone, not the model and the effort. `toobusy queue --json` prints the same lists for an assistant or a script, each task with its number, its title, its address and its labels.
+
+`toobusy status` says whether a run is going on in the working copy, and changes nothing:
+
+```text
+A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d
+```
+
+```text
+No run is going on.
+```
+
+A run works in the working copy itself, so a commit made beside it lands in the middle of its task. `status` needs nothing but the working copy, and exits with 3 while a run goes on and with 0 when none does: `toobusy status && git commit` commits only then. Tell the assistant you work with to look before it commits, and not the sessions of a run, which commit while their run goes on; `toobusy status --json` prints the same for an assistant. A second run does not start in a working copy while one goes on.
 
 What to know before the first run:
 

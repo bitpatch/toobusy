@@ -36,7 +36,7 @@ public sealed class Session(Page page, Workbench bench)
 
     // Opens with the menu. A project that is not set up is set up first, and a user who has no milestone to work
     // on, no model or no effort chooses them; leaving any of these leaves the page. A run that is opened from the
-    // menu comes back to it when it is over, with how it went said above the menu. Before it is opened the checks
+    // menu comes back to it when it is over, with how it went said above the menu. No run is opened while one goes on in the working copy. Before it is opened the checks
     // of `doctor` are made, as `toobusy run` makes them: while one fails no run is opened, and the failures stand
     // above the menu with their fixes. A demo has it all and checks nothing.
     public async Task HomeAsync(CancellationToken cancellationToken)
@@ -69,6 +69,12 @@ public sealed class Session(Page page, Workbench bench)
             Clear("", note, failed);
             var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks);
             failed = [];
+            if (action == HomeAction.Run && bench.Going() is { } going)
+            {
+                note = $"A run is going on here already: {going.Sign.Told}";
+                continue;
+            }
+
             if (action == HomeAction.Run && !bench.Demo)
             {
                 (action, failed) = await CheckAsync(tasks, cancellationToken);

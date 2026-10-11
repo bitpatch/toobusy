@@ -375,6 +375,28 @@ sealed class FakeState : IRunState
 }
 
 // What a run said and showed.
+// The sign of a run: what stood on it, in its order, null where it was taken down. `Other` is the sign of another
+// run that goes on.
+sealed class FakeSign : IRunSign
+{
+    public RunSign? Other { get; set; }
+
+    public List<RunSign?> Written { get; } = [];
+
+    public RunSign? Raise(RunSign sign)
+    {
+        if (Other is not null)
+            return Other;
+
+        Written.Add(sign);
+        return null;
+    }
+
+    public void Change(RunSign sign) => Written.Add(sign);
+
+    public void Lower() => Written.Add(null);
+}
+
 sealed class Log : IRunView
 {
     public List<string> Lines { get; } = [];

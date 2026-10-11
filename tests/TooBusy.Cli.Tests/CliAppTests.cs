@@ -2443,6 +2443,286 @@ public sealed class CliAppTests : IDisposable
             Report(output));
     }
 
+    [Fact]
+    public async Task StatusSaysThatNoRunIsGoingOnAndNeedsNothingButAProject()
+    {
+        GitRepository();
+        var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+
+        var (exit, output, error) = await RunAsync(Context(processes) with { PersonalFolder = null }, ["status"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal("No run is going on." + Environment.NewLine, output);
+
+        // No settings, no command of the machine, and nothing is left behind.
+        Assert.Empty(processes.Asked);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+
+        var (code, json, _) = await RunAsync("status", "--json");
+        Assert.Equal(0, code);
+        Assert.Equal("{\n  \"running\": false\n}", json.ReplaceLineEndings("\n").TrimEnd());
+    }
+
+    [Fact]
+    public async Task StatusNamesTheTaskAnEarlierRunLeftWithASession()
+    {
+        GitRepository();
+        var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local"));
+        var record = """{"task":14,"session":"abc12345","since":"2030-01-01T09:00:00.0000000Z","state":"paused"}""";
+        File.WriteAllText(Path.Combine(local.FullName, "session.json"), record);
+
+        var (exit, output, _) = await RunAsync("status");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            "No run is going on." + Environment.NewLine + "An earlier run left #14 with a session: the next run goes on with it." + Environment.NewLine,
+            output);
+
+        var (code, json, _) = await RunAsync("status", "--json");
+        Assert.Equal(0, code);
+        Assert.Equal(
+            """
+            {
+              "running": false,
+              "left": {
+                "task": 14,
+                "state": "paused"
+              }
+            }
+            """.ReplaceLineEndings("\n"),
+            json.ReplaceLineEndings("\n").TrimEnd());
+        Assert.Equal(record, File.ReadAllText(Path.Combine(local.FullName, "session.json")));
+        Assert.Equal(["session.json"], local.GetFiles().Select(file => file.Name));
+    }
+
+    [Fact]
+    public async Task StatusNamesTheTaskOfARunThatGoesOnAndHowItsSessionIsOpened()
+    {
+        GitRepository();
+        GoingRun(Working);
+
+        // The record of the task is there too, as it is while a session works: the run is what is told.
+        File.WriteAllText(Path.Combine(folder.FullName, ".toobusy", "local", "session.json"), """{"task":12,"session":"1a2b3c4d","since":"2030-01-01T09:00:00.0000000Z","state":"working"}""");
+
+        var (exit, output, error) = await RunFromAsync(folder.CreateSubdirectory("src").FullName, "status");
+
+        Assert.Equal(3, exit);
+        Assert.Equal("", error);
+        Assert.Equal("A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d" + Environment.NewLine, output);
+
+        var (code, json, _) = await RunAsync("status", "--json");
+        Assert.Equal(3, code);
+        using var told = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Equal(
+            ["running", "process", "since", "phase", "task", "session"],
+            told.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.True(told.RootElement.GetProperty("running").GetBoolean());
+        Assert.Equal(Environment.ProcessId, told.RootElement.GetProperty("process").GetInt32());
+        Assert.Matches(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", told.RootElement.GetProperty("since").GetString());
+        Assert.Equal("working", told.RootElement.GetProperty("phase").GetString());
+        Assert.Equal(
+            """{"number":12,"title":"Export the orders as a file","url":"https://github.com/acme/rocket/issues/12"}""",
+            Regex.Replace(told.RootElement.GetProperty("task").GetRawText(), @"\s+(?=[""}])|(?<=[{:,])\s+", ""));
+        Assert.Equal("claude attach 1a2b3c4d", told.RootElement.GetProperty("session").GetString());
+    }
+
+    [Fact]
+    public async Task StatusSaysThatARunIsBetweenTasksOrWaitsForAUsageLimit()
+    {
+        GitRepository();
+        GoingRun(new RunSign(RunPhase.Preparing));
+
+        var (exit, output, _) = await RunAsync("status");
+        Assert.Equal(3, exit);
+        Assert.Equal("A run is going on: between tasks" + Environment.NewLine, output);
+        Assert.Contains("\"phase\": \"between-tasks\"", (await RunAsync("status", "--json")).Output, StringComparison.Ordinal);
+
+        GoingRun(Working with { Phase = RunPhase.WaitingForLimit, Until = new DateTimeOffset(2030, 1, 1, 14, 5, 0, TimeSpan.Zero) });
+
+        (exit, output, _) = await RunAsync("status");
+        Assert.Equal(3, exit);
+        Assert.Equal(
+            "A run is going on: #12 Export the orders as a file · waits for a usage limit until 2030-01-01 14:05 UTC · claude attach 1a2b3c4d" + Environment.NewLine,
+            output);
+        var json = (await RunAsync("status", "--json")).Output;
+        Assert.Contains("\"phase\": \"waiting-for-limit\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"until\": \"2030-01-01T14:05:00Z\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StatusDoesNotCountWhatARunThatDiedLeftBehind()
+    {
+        GitRepository();
+        var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local"));
+
+        // No process of the machine has this number.
+        var left = """{"process":2147483646,"since":"2030-01-01T09:00:00.0000000Z","phase":"working","task":12,"title":"Export the orders as a file","open":"claude attach 1a2b3c4d"}""";
+        File.WriteAllText(Path.Combine(local.FullName, "run.json"), left);
+        File.WriteAllText(Path.Combine(local.FullName, "session.json"), """{"task":12,"session":"1a2b3c4d","since":"2030-01-01T09:00:00.0000000Z","state":"working"}""");
+
+        var (exit, output, _) = await RunAsync("status");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            "No run is going on." + Environment.NewLine + "An earlier run left #12 with a session: the next run goes on with it." + Environment.NewLine,
+            output);
+
+        // It changes nothing: what was left is the next run's to put its own over.
+        Assert.Equal(left, File.ReadAllText(Path.Combine(local.FullName, "run.json")));
+    }
+
+    [Fact]
+    public async Task StatusOutsideAGitRepositoryFailsAsTheOtherCommandsDo()
+    {
+        var (exit, output, error) = await RunAsync("status");
+
+        Assert.Equal(2, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task StatusOfADemoShowsAMadeUpRunThatGoesOn()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("status", "--demo");
+
+        Assert.Equal(3, exit);
+        Assert.Equal("", error);
+        Assert.Equal(
+            "A run is going on: #102 Export the orders as a file · claude attach 1a2b3c4d" + Environment.NewLine + "Demo: the run is made up." + Environment.NewLine,
+            output);
+
+        var (code, json, _) = await RunAsync("status", "--demo", "--json");
+        Assert.Equal(3, code);
+        Assert.StartsWith("{", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Demo", json, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartWhileOneGoesOnInTheWorkingCopy()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        GoingRun(Working);
+        var processes = new FakeProcesses((command, _) => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
+
+        Assert.Equal(3, exit);
+        Assert.Equal("", output);
+        Assert.Equal(
+            "toobusy: a run is going on in this working copy already: #12 Export the orders as a file · claude attach 1a2b3c4d" + Environment.NewLine
+            + "The run did not start. `toobusy status` says whether that one still goes on." + Environment.NewLine,
+            error);
+
+        // It is said before anything is checked or asked of the tracker, and the sign of that run stays.
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command is "gh" or "claude");
+        Assert.Equal(3, (await RunAsync("status")).Exit);
+    }
+
+    [Fact]
+    public async Task ARunPutsItsSignUpWhileItGoesOnAndTakesItDownWhenItEnds()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // What `status` says while the run reads its tasks.
+        (int Exit, string Output, string Error)? meanwhile = null;
+        FakeProcesses? processes = null;
+        processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments[0] == "label" => Labels,
+            "gh" when arguments is ["api", "graphql", ..] => Do(() => meanwhile = Look()) + "total\t0\n",
+            _ => "",
+        }, ""));
+
+        var (exit, _, error) = await RunAsync(Context(processes), ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Equal((3, "A run is going on: between tasks" + Environment.NewLine, ""), meanwhile);
+        Assert.Equal((0, "No run is going on." + Environment.NewLine, ""), Look());
+        Assert.Equal([".gitignore"], new DirectoryInfo(Path.Combine(folder.FullName, ".toobusy", "local")).GetFiles().Select(file => file.Name));
+
+        (int Exit, string Output, string Error) Look()
+        {
+            using var output = new StringWriter();
+            using var failed = new StringWriter();
+            var code = CliApp.RunAsync(["status"], Context(null) with { Output = output, Error = failed }, TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            return (code, output.ToString(), failed.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task ADemoOfARunIsNotHeldByARunThatGoesOnAndLeavesItsSignAlone()
+    {
+        GitRepository();
+        GoingRun(Working);
+        var sign = Path.Combine(folder.FullName, ".toobusy", "local", "run.json");
+        var written = File.ReadAllText(sign);
+
+        var (exit, output, error) = await RunAsync("run", "--demo", "--task", "101");
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
+        Assert.Equal(written, File.ReadAllText(sign));
+    }
+
+    [Fact]
+    public async Task RunOfTheMenuOpensNoRunWhileOneGoesOnInTheWorkingCopy()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        GoingRun(Working);
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments is ["api", "graphql", ..] => "total\t1\n12\tExport the orders as a file\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            _ => "",
+        }, ""));
+        using var terminal = new TestTerminal(width: 120, height: 30);
+
+        // `Run`, which opens nothing; then the last of the menu.
+        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        terminal.AssertSaw("""
+             A run is going on here already: #12 Export the orders as a file · claude attach 1a2b3c4d
+             What to do
+             ❯ Run        1 task
+            """.ReplaceLineEndings("\n").TrimEnd(' '));
+        Assert.False(terminal.Saw("Running the queue"));
+
+        // Nothing was checked for a run that does not start.
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude");
+    }
+
+    // A task that a run works on, as its sign says it.
+    static readonly RunSign Working = new(RunPhase.Working)
+    {
+        Task = 12,
+        Title = "Export the orders as a file",
+        Url = "https://github.com/acme/rocket/issues/12",
+        Open = "claude attach 1a2b3c4d",
+    };
+
+    // The sign of a run that goes on in the project: the process of the test is the one that lives.
+    void GoingRun(RunSign sign)
+    {
+        var file = new TooBusy.Infrastructure.Run.RunSignFile(TooBusy.Infrastructure.Run.LocalFolder.Ensure(folder.FullName));
+        Assert.Null(file.Raise(sign));
+    }
+
     void GitRepository() => folder.CreateSubdirectory(".git");
 
     // A skill of the project, where Claude Code reads it.

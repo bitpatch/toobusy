@@ -16,6 +16,7 @@ public sealed class SupervisorTests : IDisposable
     readonly FakeWorkspace workspace = new();
     readonly FakeMachine machine = new();
     readonly FakeState state = new();
+    readonly FakeSign sign = new();
     readonly Log log = new();
     readonly FakeCommands shell;
     readonly CancellationTokenSource kill = new();
@@ -2082,6 +2083,94 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains("‖ Stopped by /stop · 1 done", log.Lines);
     }
 
+    [Fact]
+    public async Task ARunPutsItsSignUpSaysOnItWhatItDoesAndTakesItDownWhenItEnds()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works(4).Ends(Done);
+
+        await RunAsync();
+
+        var working = new RunSign(RunPhase.Working) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3" };
+        Assert.Equal(new RunSign(RunPhase.Preparing), sign.Written[0]);
+        Assert.Contains(new RunSign(RunPhase.Preparing) { Task = 3, Title = "Task 3", Url = "https://example.com/3" }, sign.Written);
+
+        // The sign changes with what it says, not with every look at the session.
+        Assert.Single(sign.Written, written => written == working);
+        Assert.Equal(new RunSign(RunPhase.Preparing), sign.Written[^2]);
+        Assert.Null(sign.Written[^1]);
+        Assert.Single(sign.Written, written => written is null);
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartWhileAnotherGoesOnInTheWorkingCopy()
+    {
+        tracker.Add(3);
+        sign.Other = new RunSign(RunPhase.Working) { Task = 12, Title = "Export the orders as a file", Open = "claude attach 1a2b3c4d" };
+
+        var result = await RunAsync();
+
+        var why = "a run is going on in this working copy already: #12 Export the orders as a file · claude attach 1a2b3c4d";
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
+        Assert.Equal([$"✖ Did not start: {why}"], log.Lines);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(tracker.Did);
+
+        // The sign of the other run is not this one's to take down.
+        Assert.Empty(sign.Written);
+        Assert.Equal(RunPhase.Ended, log.Statuses[^1].Phase);
+    }
+
+    [Fact]
+    public async Task AKillTakesTheSignDownAndARunThatWaitsSaysSoOnIt()
+    {
+        tracker.Add(3);
+        assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Limit();
+        clock.At(TimeSpan.FromMinutes(5), kill.Cancel);
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Killed, result.End);
+        Assert.Contains(
+            new RunSign(RunPhase.WaitingForLimit) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3", Until = FakeClock.Start + TimeSpan.FromMinutes(61) },
+            sign.Written);
+        Assert.Null(sign.Written[^1]);
+    }
+
+    [Fact]
+    public async Task ASessionThatWaitsForTheOwnerIsSaidOnTheSign()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
+
+        await RunAsync();
+
+        Assert.Contains(sign.Written, written => written is { Phase: RunPhase.WaitingForOwner, Task: 3, Open: "fake attach 3", Until: null });
+    }
+
+    [Theory]
+    [InlineData(RunPhase.Preparing, null, null, false, "between tasks")]
+    [InlineData(RunPhase.WaitingForLimit, null, null, false, "it waits for a usage limit")]
+    [InlineData(RunPhase.Preparing, 12, null, false, "#12 Export the orders as a file")]
+    [InlineData(RunPhase.Working, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · claude attach 1a2b3c4d")]
+    [InlineData(RunPhase.WaitingForOwner, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · its session waits for the owner · claude attach 1a2b3c4d")]
+    [InlineData(RunPhase.WaitingForLimit, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · waits for a usage limit · claude attach 1a2b3c4d")]
+    [InlineData(RunPhase.WaitingForLimit, 12, "claude attach 1a2b3c4d", true, "#12 Export the orders as a file · waits for a usage limit until 2030-01-01 10:01 UTC · claude attach 1a2b3c4d")]
+    public void TheSignOfARunSaysInAFewWordsWhatTheRunDoes(RunPhase phase, int? task, string? open, bool until, string told)
+    {
+        var said = new RunSign(phase)
+        {
+            Task = task,
+            Title = task is null ? null : "Export the orders as a file",
+            Open = open,
+            Until = until ? FakeClock.Start + TimeSpan.FromMinutes(61) : null,
+        };
+
+        Assert.Equal(told, said.Told);
+    }
+
     // The tasks that were told to be over, each with its mark.
     IEnumerable<(int Task, RunMark Mark)> Ended => log.Ends.Select(ended => (ended.Task, ended.Mark));
 
@@ -2089,7 +2178,7 @@ public sealed class SupervisorTests : IDisposable
     static TaskRecord Record(int task, RecordState left = RecordState.Working) =>
         new(task, new SessionTrace($"fake-{task}", $"conversation-{task}", FakeClock.Start), left);
 
-    Supervisor Run => run ??= new Supervisor(tracker, assistant, workspace, state, machine, clock, shell, plan, policy);
+    Supervisor Run => run ??= new Supervisor(tracker, assistant, workspace, state, sign, machine, clock, shell, plan, policy);
 
     Task<RunResult> RunAsync() => Run.RunAsync(log, kill.Token);
 }
