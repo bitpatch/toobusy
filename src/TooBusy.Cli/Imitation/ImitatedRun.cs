@@ -145,7 +145,8 @@ public sealed class ImitatedTasks : ITaskTracker
 
 // The assistant of a demo. Its sessions are plays written here, one for each made-up task, and they last as long as
 // the clock says: a session works through its steps, each a few seconds long, and then ends its turn, asks, or runs
-// into a usage limit. What it is told starts its next act.
+// into a usage limit. What it is told starts its next act. A session with a play keeps a plan of it, a step of the
+// plan for each step of the acts it has started: the plan grows when it goes on with the next act.
 public sealed class ImitatedAssistant(IClock clock) : IAssistant
 {
     static readonly TimeSpan Reset = TimeSpan.FromSeconds(6);
@@ -243,6 +244,12 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
         // The steps of the acts that are over, and the size of the conversation they left.
         int steps;
 
+        // The plan: whether the act that is played is of the play, and so of the plan, how many steps the plan
+        // has, and how many of them the acts that are over have done.
+        bool planned = acts != Plain;
+        int cells = acts != Plain ? acts[0].Steps.Length : 0;
+        int done;
+
         public string Open => $"claude attach 4f2a{task} (made up)";
 
         public string? Conversation => null;
@@ -254,33 +261,49 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
             {
                 passed -= act.Steps[index].Seconds;
                 if (passed < 0)
-                    return Task.FromResult(new SessionLook(SessionPhase.Working, Step: act.Steps[index].Step, Steps: steps + index + 1, Context: Context(steps + index + 1)));
+                    return Task.FromResult(new SessionLook(SessionPhase.Working, Step: act.Steps[index].Step, Steps: steps + index + 1, Context: Context(steps + index + 1), Plan: Plan(index)));
             }
 
             // A session that runs into the limit uses the near window up; it starts anew a little later.
             if (act.End.Limit is not null && assistant.near.Used < 100)
                 assistant.near = new UsageWindow("5-hour", 100, assistant.clock.Now + Reset);
-            return Task.FromResult(act.End with { Steps = steps + act.Steps.Length, Context = Context(steps + act.Steps.Length) });
+            return Task.FromResult(act.End with { Steps = steps + act.Steps.Length, Context = Context(steps + act.Steps.Length), Plan = Plan(act.Steps.Length) });
         }
 
         public Task<bool> TellAsync(string message, CancellationToken cancellationToken)
         {
-            Next(message == Briefing.WrapUp(task) ? WrapUp : played + 1 < acts.Length ? acts[++played] : Plain[0]);
+            if (message == Briefing.WrapUp(task))
+                Next(WrapUp, false);
+            else if (played + 1 < acts.Length)
+                Next(acts[++played], true);
+            else
+                Next(Plain[0], false);
             return Task.FromResult(true);
         }
 
         public Task AskAsync(string message, CancellationToken cancellationToken)
         {
-            Next(WrapUp);
+            Next(WrapUp, false);
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-        void Next(Act next)
+        void Next(Act next, bool ofPlay)
         {
             steps += act.Steps.Length;
-            (act, since) = (next, assistant.clock.Now);
+            if (planned)
+                done += act.Steps.Length;
+            if (ofPlay)
+                cells += next.Steps.Length;
+            (act, since, planned) = (next, assistant.clock.Now, ofPlay);
+        }
+
+        // The plan when so many steps of the act are made: the step the session is at is the next of them.
+        IReadOnlyList<PlanStep>? Plan(int made)
+        {
+            var at = planned ? done + made : done;
+            return cells == 0 ? null : [.. Enumerable.Range(0, cells).Select(step => step < at ? PlanStep.Done : step == at && planned ? PlanStep.Active : PlanStep.Pending)];
         }
 
         static long Context(int steps) => 18_000 + (steps * 3_400L);

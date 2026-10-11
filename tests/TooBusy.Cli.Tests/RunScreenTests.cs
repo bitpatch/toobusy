@@ -88,6 +88,79 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task ThePlanOfTheSessionIsABarUnderTheTaskThatIsBuiltAnewWhenThePlanChanges()
+    {
+        var bars = new List<string?>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            // A session that keeps no plan has the two lines of its task and nothing under them.
+            view.Show(Working);
+            await SeenAsync("1:24 · Edit src/Export.cs");
+            bars.Add(Bar());
+
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Active, PlanStep.Pending, PlanStep.Pending] });
+            await SeenAsync("▰▱▱▱");
+            bars.Add(Bar());
+
+            // The step goes on to the next, and the plan gets two more: a cell for each.
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Done, PlanStep.Active, PlanStep.Pending, PlanStep.Pending, PlanStep.Pending] });
+            await SeenAsync("▰▰▱▱▱▱");
+            bars.Add(Bar());
+
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Done] });
+            await SeenAsync("▰▰\n");
+            bars.Add(Bar());
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal([" ❯ press / to show the menu", "   ▰▱▱▱", "   ▰▰▱▱▱▱", "   ▰▰"], bars);
+    }
+
+    [Fact]
+    public async Task TheStepsThatAreDoneAreInTheAccentAndTheOneTheSessionIsAtBlinks()
+    {
+        var palette = Palette.Dark;
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Done, PlanStep.Active, PlanStep.Pending] });
+            await SeenAsync("▰▰▰▱");
+
+            // Nothing of the line changes when the session takes the next step but the cell that blinks.
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Done, PlanStep.Active, PlanStep.Active] });
+            await SeenAsync("▰▰▰▰");
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open(palette: palette);
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        var written = terminal.Output.ToString();
+        Assert.Contains(palette.Accent("▰▰") + palette.Muted("▱▱"), written, StringComparison.Ordinal);
+
+        // The cell is written where it stands, full, in the shade the blink has at the moment.
+        Assert.Matches("\u001b\\[6G\u001b\\[38;2;[0-9;]+m▰", written);
+        Assert.Matches("\u001b\\[7G\u001b\\[38;2;[0-9;]+m▰", written);
+    }
+
+    // Waits until the terminal's own screen shows the text.
+    async Task SeenAsync(string text)
+    {
+        while (!Has(text))
+            await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+    }
+
+    // The line under the time and the step of the task that is worked on.
+    string? Bar()
+    {
+        var rows = terminal.Tape.Text.Split('\n');
+        var at = Array.FindIndex(rows, row => row.Contains("1:24 · Edit src/Export.cs", StringComparison.Ordinal));
+        return at < 0 || at + 1 >= rows.Length ? null : rows[at + 1];
+    }
+
+    [Fact]
     public async Task ASlashOpensTheMenuOfTheCommandsThatMeanSomethingNowAndNothingIsTyped()
     {
         RunCommand? sent = null;

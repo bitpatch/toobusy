@@ -7,8 +7,9 @@ namespace TooBusy.Cli.Terminal;
 // its number and title and the time it took. Nothing is said of a task that starts. What a run warns of stays too.
 //
 // Under these lines stands the task that is worked on: a mark that turns, its number and title and, under them, how
-// long it has been worked on and what its session is doing. While the session waits for the owner, what it said last
-// and how it is opened stand there too, and are gone when it goes on.
+// long it has been worked on and what its session is doing. A session that keeps a plan of its work has it under them
+// as a bar, a cell for each step: full for one that is done, blinking for one it is at. While the session waits for
+// the owner, what it said last and how it is opened stand there too, and are gone when it goes on.
 //
 // Under the task is the place of the commands, between two rules. Nothing is typed there: a pointer blinks where
 // the menu opens, and `/` opens the menu of the commands that mean something at the moment, the arrows move, Enter
@@ -83,7 +84,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
                 // A foot that shows nothing new is not drawn again: the times it shows change once in a second.
                 var foot = Foot(status, listed, at, any, tape);
-                var showing = string.Join('\n', foot.Lines.Select(Told).Append($"{foot.Chosen}"));
+                var showing = string.Join('\n', foot.Lines.Select(Told).Append($"{foot.Chosen}").Append(string.Join(' ', foot.Lit ?? [])));
                 if (settled.Count > 0 || showing != drawn)
                 {
                     tape.DrawFitted(settled, foot);
@@ -176,6 +177,9 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         var mark = new Caret(lines.Count, 0);
         lines.AddRange(Doing(status));
 
+        // The bar of the plan is the third line of the task: the cells of the steps the session is at blink.
+        List<Caret> lit = status.Task is null ? [] : [.. RunLook.Active(status.Plan).Select(column => new Caret(mark.Line + 2, column))];
+
         // What the session said gets the lines the window has left over, the rest of the foot being what it is.
         lines.AddRange(Asked(status, width, Math.Min(Quoted, tape.Room - lines.Count - 3 - Math.Max(1, listed.Count))));
         lines.Add(rule);
@@ -196,11 +200,12 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
         lines.Add(rule);
         lines.Add(Keys(status, listed.Count > 0, width));
-        return new Strip(lines, mark, Chosen: chosen);
+        return new Strip(lines, mark, Chosen: chosen, Lit: lit);
     }
 
-    // What the run is doing, in two lines: the task under the mark, and under it the time and what goes on.
-    // Between tasks the first line says what the run does, and the second how long it waits for what it waits for.
+    // What the run is doing, in two lines: the task under the mark, and under it the time and what goes on; and in a
+    // third the plan of the session, when it keeps one. Between tasks the first line says what the run does, and the
+    // second how long it waits for what it waits for.
     IEnumerable<Line> Doing(RunStatus status)
     {
         if (status.Task is not { } task)
@@ -242,6 +247,8 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         }
 
         yield return new Line([.. parts]);
+        if (status.Plan.Count > 0)
+            yield return RunLook.Plan(status.Plan);
     }
 
     // What a session that waits for the owner said last, on as many lines as there is room for, and how the owner

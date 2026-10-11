@@ -208,10 +208,10 @@ sealed class FakeSession(int task) : IAssistantSession
 
     public int Looks { get; private set; }
 
-    public FakeSession Works(int looks = 1, string step = "Editing a file", Action? and = null)
+    public FakeSession Works(int looks = 1, string step = "Editing a file", Action? and = null, PlanStep[]? plan = null)
     {
         for (var index = 0; index < looks; index++)
-            Add(new SessionLook(SessionPhase.Working, Step: step, Steps: ++steps, Context: 1000 * steps), and);
+            Add(new SessionLook(SessionPhase.Working, Step: step, Steps: ++steps, Context: 1000 * steps, Plan: plan), and);
         return this;
     }
 

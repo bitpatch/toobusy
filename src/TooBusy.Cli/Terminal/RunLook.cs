@@ -55,6 +55,28 @@ public static class RunLook
         return new Line(new Part(new RunLine(ended.Mark, "").Symbol + " ", Mark(ended.Mark)), new Part(title), new Part(took, Tone.Muted));
     }
 
+    // The plan a session keeps of its task, as a bar under it: a cell for each step, full and in the accent for one
+    // that is done, empty and muted for the others. It stands under the text of the lines above it.
+    public static Line Plan(IReadOnlyList<PlanStep> plan)
+    {
+        var parts = new List<Part> { new(new string(' ', Inset)) };
+        for (var from = 0; from < plan.Count;)
+        {
+            var done = plan[from] == PlanStep.Done;
+            var count = plan.Skip(from).TakeWhile(step => step == PlanStep.Done == done).Count();
+            parts.Add(new Part(string.Concat(Enumerable.Repeat(done ? Tape.Full : "▱", count)), done ? Tone.Accent : Tone.Muted));
+            from += count;
+        }
+
+        return new Line([.. parts]);
+    }
+
+    // The columns of the cells of that bar whose steps the session is at: they blink.
+    public static IEnumerable<int> Active(IReadOnlyList<PlanStep> plan) =>
+        Enumerable.Range(0, plan.Count).Where(step => plan[step] == PlanStep.Active).Select(step => Inset + step);
+
+    const int Inset = 2;
+
     // What a run that is over leaves under its tasks: how many there were, how long it took and how they went; and,
     // for a run that did not simply run out of tasks, the line of what ended it.
     public static (Line Tasks, RunLine? Why) Summary(RunResult result, IReadOnlyList<TaskEnd> ends, TimeSpan took)

@@ -5,8 +5,9 @@ namespace TooBusy.Cli.Terminal;
 
 // The foot of a tape: the lines under what the tape has said for good, drawn again and again. Like a frame of a
 // screen it may have a cursor at a caret and a chosen line, which blink. Its mark is where something goes on: the
-// line and the column of a sign that turns: a full cell of dots with a gap that runs around it.
-public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret? Caret = null, int? Chosen = null)
+// line and the column of a sign that turns: a full cell of dots with a gap that runs around it. Its lit cells are
+// those of a bar that are being filled: each blinks between the accent and the muted colour of an empty one.
+public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret? Caret = null, int? Chosen = null, IReadOnlyList<Caret>? Lit = null)
 {
     public static Strip Empty { get; } = new([]);
 }
@@ -34,6 +35,9 @@ public sealed class Tape
     // What a program that is stopped while a tape is unrolled must still write: lines that wrap again, the cursor
     // as it was, and a line of its own for what the terminal writes next.
     public const string Rescue = "\u001b[?7h" + Screen.Shown + "\r\n";
+
+    // A cell of a bar as it is when it is full.
+    public const string Full = "▰";
 
     // The sign of the mark as the gap goes around it, a beat at a time.
     static readonly string[] Signs = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"];
@@ -100,7 +104,12 @@ public sealed class Tape
             // A foot that does not fit loses its first lines, and what points into it moves with them.
             var cut = Math.Max(0, foot.Lines.Count - Math.Max(1, drawn.Height - 1));
             Caret? Moved(Caret? at) => at is var (line, column) && line >= cut ? new Caret(line - cut, column) : null;
-            this.foot = cut == 0 ? foot : new Strip([.. foot.Lines.Skip(cut)], Moved(foot.Mark), Moved(foot.Caret), foot.Chosen >= cut ? foot.Chosen - cut : null);
+            this.foot = cut == 0 ? foot : new Strip(
+                [.. foot.Lines.Skip(cut)],
+                Moved(foot.Mark),
+                Moved(foot.Caret),
+                foot.Chosen >= cut ? foot.Chosen - cut : null,
+                foot.Lit is null ? null : [.. foot.Lit.Select(cell => Moved(cell)).OfType<Caret>()]);
 
             var text = new StringBuilder(Screen.HideCursor);
             text.Append(anew ? "\u001b[H\u001b[2J\u001b[3J" + Bar(width) : "\r" + Up(above));
@@ -183,6 +192,9 @@ public sealed class Tape
 
         if (foot.Mark is var (marked, sign))
             Put(marked, sign, palette.Accent(Sign(step)));
+
+        foreach (var (line, column) in foot.Lit ?? [])
+            Put(line, column, palette.Spark(Full, glow));
 
         // Of the chosen line only its first piece blinks, the pointer with the name, as on a screen.
         if (foot.Chosen is { } chosen && chosen < foot.Lines.Count && foot.Lines[chosen].Parts is [var name, ..])

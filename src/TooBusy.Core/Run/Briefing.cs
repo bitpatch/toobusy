@@ -46,6 +46,7 @@ public static class Briefing
             - Follow the instructions of the project in everything else: how the work is done, how it is checked, how it is committed and pushed. Commit and push the finished work as they say.
             - The tracker is kept by toobusy. It has already moved the task to In Progress. Do not change the status or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
             - Work in this working copy: make no worktree and do not move to another one. It was clean when you started and it must be clean when you end: everything of yours is committed and pushed, or undone.
+            - Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done, and change the list when the plan changes. toobusy shows the list to the owner as the progress of the task.
 
             """);
         if (interrupted)

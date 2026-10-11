@@ -966,6 +966,22 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ThePlanOfTheSessionIsInTheStatusAsItIsAtEveryLook()
+    {
+        tracker.Add(3);
+        assistant.Session(3)
+            .Works()
+            .Works(plan: [PlanStep.Done, PlanStep.Active, PlanStep.Pending])
+            .Works(plan: [PlanStep.Done, PlanStep.Done, PlanStep.Active, PlanStep.Pending])
+            .Ends(Done);
+
+        await RunAsync();
+
+        var plans = log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => string.Join(' ', status.Plan)).Distinct().ToList();
+        Assert.Equal(["", "Done Active Pending", "Done Done Active Pending"], plans);
+    }
+
+    [Fact]
     public async Task TheStatusSaysWhatIsGoingOnAndWhichCommandsMeanSomething()
     {
         tracker.Add(3);

@@ -153,6 +153,46 @@ public sealed class TapeTests : IDisposable
     }
 
     [Fact]
+    public void TheLitCellsOfABarBlinkBetweenTheAccentAndTheMutedColour()
+    {
+        var palette = Palette.Dark;
+        using var page = terminal.Open(palette: palette);
+        var tape = Unroll(page);
+        var bar = new Line(new Part("  "), new Part("▰", Tone.Accent), new Part("▱▱▱", Tone.Muted));
+
+        tape.Draw([], new Strip([Line.Of("● Ship it"), Line.Of("  0:03 · Read a.cs"), bar], Lit: [new Caret(2, 3), new Caret(2, 4)]));
+
+        // A cell that is lit is full, in the shade of the beat; the others are as the line has them.
+        Assert.EndsWith("\r\u001b[5G" + palette.Spark("▰", 1) + "\r\r\u001b[6G" + palette.Spark("▰", 1) + "\r", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Equal("   ▰▰▰▱", terminal.Tape.Rows[6]);
+
+        var shades = new HashSet<string>();
+        for (var beat = 0; beat < 8; beat++)
+        {
+            var before = terminal.Output.ToString().Length;
+            terminal.Tick!();
+            shades.Add(terminal.Output.ToString()[before..]);
+        }
+
+        Assert.True(shades.Count > 4);
+        Assert.Equal("   ▰▰▰▱", terminal.Tape.Rows[6]);
+    }
+
+    [Fact]
+    public void WithoutColoursTheLitCellsOfABarStayAsTheyAreDrawn()
+    {
+        using var page = terminal.Open();
+        var tape = Unroll(page);
+
+        tape.Draw([], new Strip([Line.Of("● Ship it"), Line.Of("  0:03 · Read a.cs"), Line.Of("  ▰▱▱▱")], Lit: [new Caret(2, 3)]));
+        var drawn = terminal.Output.ToString();
+        terminal.Tick!();
+
+        Assert.Equal(drawn, terminal.Output.ToString());
+        Assert.Equal("   ▰▱▱▱", terminal.Tape.Rows[6]);
+    }
+
+    [Fact]
     public void WithoutColoursNothingPulsesAndTheCursorOfTheTerminalStandsAtTheCaret()
     {
         using var page = terminal.Open();

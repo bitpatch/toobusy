@@ -190,6 +190,59 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Null(look.Limit);
     }
 
+    [Fact]
+    public async Task ThePlanOfASessionIsTheListOfTasksItKeeps()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        Assert.Null((await session.LookAsync(TestContext.Current.CancellationToken)).Plan);
+
+        // A step is known from what Claude Code answers, and one of a helper is not of this plan. What was planned
+        // before the run took the session is planned still.
+        Write(
+            Called("c1", "TaskCreate", """{"subject":"Read the code"}""", at: "2029-12-31T23:00:00Z"),
+            Answered("c1", """{"task":{"id":"1","subject":"Read the code"}}"""),
+            Called("c2", "TaskCreate", """{"subject":"Write the export"}"""),
+            Called("c3", "TaskCreate", """{"subject":"Run the tests"}"""),
+            Answered("c2", """{"task":{"id":"2","subject":"Write the export"}}"""),
+            Answered("c3", """{"task":{"id":"3","subject":"Run the tests"}}"""),
+            Called("h1", "TaskCreate", """{"subject":"Of a helper"}""", extra: ""","isSidechain":true"""),
+            Answered("h1", """{"task":{"id":"9","subject":"Of a helper"}}""", extra: ""","isSidechain":true"""),
+            Answered("x1", """{"task":{"id":"7","subject":"Not asked for"}}"""),
+            Called("c4", "TaskUpdate", """{"taskId":"1","status":"completed"}"""),
+            Answered("c4", """{"success":true,"taskId":"1","updatedFields":["status"],"statusChange":{"from":"pending","to":"completed"}}"""),
+            Used("Edit", """{"file_path":"/work/rocket/src/a.cs"}"""),
+            Called("c5", "TaskUpdate", """{"taskId":"2","status":"in_progress"}"""),
+            Answered("c5", """{"success":true,"taskId":"2","updatedFields":["status"],"statusChange":{"from":"pending","to":"in_progress"}}"""));
+
+        var look = await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([PlanStep.Done, PlanStep.Active, PlanStep.Pending], look.Plan);
+
+        // Keeping the plan is not what the session is doing, though it is a step of its own.
+        Assert.Equal("Edit src/a.cs", look.Step);
+        Assert.Equal(5, look.Steps);
+
+        // The list changes: a step is added, one is taken out, and one that was renamed is as far as it was.
+        Write(
+            Called("c6", "TaskCreate", """{"subject":"Describe it"}"""),
+            Answered("c6", """{"task":{"id":"4","subject":"Describe it"}}"""),
+            Called("c7", "TaskUpdate", """{"taskId":"3","status":"deleted"}"""),
+            Answered("c7", """{"success":true,"taskId":"3","updatedFields":["status"],"statusChange":{"from":"pending","to":"deleted"}}"""),
+            Called("c8", "TaskUpdate", """{"taskId":"2","subject":"Write the export as CSV"}"""),
+            Answered("c8", """{"success":true,"taskId":"2","updatedFields":["subject"]}"""));
+
+        Assert.Equal([PlanStep.Done, PlanStep.Active, PlanStep.Pending], (await session.LookAsync(TestContext.Current.CancellationToken)).Plan);
+
+        Write(
+            Called("c9", "TaskUpdate", """{"taskId":"4","status":"deleted"}"""),
+            Answered("c9", """{"success":true,"taskId":"4","updatedFields":["status"],"statusChange":{"from":"pending","to":"deleted"}}"""),
+            Called("c10", "TaskUpdate", """{"taskId":"2","status":"completed"}"""),
+            Answered("c10", """{"success":true,"taskId":"2","updatedFields":["status"],"statusChange":{"from":"in_progress","to":"completed"}}"""));
+
+        Assert.Equal([PlanStep.Done, PlanStep.Done], (await session.LookAsync(TestContext.Current.CancellationToken)).Plan);
+    }
+
     [Theory]
     [InlineData("Bash", """{"command":"dotnet test"}""", "Bash: dotnet test")]
     [InlineData("Edit", """{"file_path":"/work/rocket/src/a.cs"}""", "Edit src/a.cs")]
@@ -401,6 +454,13 @@ public sealed class ClaudeCodeTests : IDisposable
         "{" + $"\"type\":\"assistant\",\"timestamp\":\"{at}\"{extra},\"message\":" + "{" + $"\"model\":\"{model}\",\"content\":["
         + "{\"type\":\"thinking\",\"thinking\":\"…\"},{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(text) + "}],"
         + "\"usage\":{" + $"\"input_tokens\":{tokens},\"cache_read_input_tokens\":20000,\"cache_creation_input_tokens\":1500" + "}}}";
+
+    // A call of a tool that is known by a name, and what Claude Code answered to it.
+    static string Called(string id, string tool, string input, string at = "2030-01-01T09:00:03Z", string extra = "") =>
+        "{" + $"\"type\":\"assistant\",\"timestamp\":\"{at}\"{extra},\"message\":" + "{\"model\":\"claude-opus\",\"content\":[{\"type\":\"tool_use\",\"id\":\"" + id + "\",\"name\":\"" + tool + "\",\"input\":" + input + "}]}}";
+
+    static string Answered(string id, string result, string extra = "") =>
+        "{" + $"\"type\":\"user\",\"timestamp\":\"2030-01-01T09:00:04Z\"{extra},\"message\":" + "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"" + id + "\",\"content\":\"ok\"}]},\"toolUseResult\":" + result + "}";
 
     static string Used(string tool, string input) =>
         "{\"type\":\"assistant\",\"timestamp\":\"2030-01-01T09:00:03Z\",\"message\":{\"model\":\"claude-opus\",\"content\":[{\"type\":\"tool_use\",\"name\":\"" + tool + "\",\"input\":" + input + "}]}}";

@@ -1,19 +1,31 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using TooBusy.Core.Run;
 
 namespace TooBusy.Assistants.ClaudeCode;
 
 // What a session did, read from the conversation Claude Code writes as it goes: a line of JSON for everything said
 // and done. The file is read on from where the reading stopped, whole lines only, and what was written before the
-// run took the session is left out, so that a session that goes on does not count for what it said before.
+// run took the session is left out, so that a session that goes on does not count for what it said before. Its plan
+// is the one thing that is read from the start: a session that goes on has the plan it had.
 public sealed class Transcript(string path, DateTimeOffset since, string root)
 {
     // Tools with which a session asks instead of doing: they are no steps of its own.
     static readonly string[] Asking = ["AskUserQuestion", "ExitPlanMode"];
 
+    // The tools with which a session keeps the plan of its work, a list of tasks of its own: one adds a step to it,
+    // the other says how far a step is.
+    const string Adding = "TaskCreate";
+    const string Marking = "TaskUpdate";
+
     // A step is said in so many characters at most.
     const int Longest = 80;
+
+    // The calls that keep the plan and are not answered yet, by their names, and the steps of the plan in the
+    // order they were added, each known by what Claude Code calls it.
+    readonly Dictionary<string, string> planning = [];
+    readonly List<(string Id, PlanStep State)> steps = [];
 
     long position;
     string rest = "";
@@ -26,6 +38,9 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
 
     // The size of the conversation, in tokens.
     public long Context { get; private set; }
+
+    // The plan the session keeps of its work, step by step; null when it keeps none.
+    public IReadOnlyList<PlanStep>? Plan { get; private set; }
 
     // The last thing the session said.
     public string? Reply { get; private set; }
@@ -69,14 +84,32 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
         {
             using var document = JsonDocument.Parse(line);
             var entry = document.RootElement;
-            if (entry.ValueKind != JsonValueKind.Object || Text(entry, "type") != "assistant" || Flag(entry, "isSidechain")
+            if (entry.ValueKind != JsonValueKind.Object || Flag(entry, "isSidechain")
                 || !entry.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
                 return;
+
+            var blocks = message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array ? content.EnumerateArray().ToList() : [];
+            if (Text(entry, "type") == "user")
+            {
+                Planned(entry, blocks);
+                return;
+            }
+
+            if (Text(entry, "type") != "assistant")
+                return;
+
+            // A call that keeps the plan is waited for whenever it was made: what Claude Code answers says what
+            // became of the plan.
+            foreach (var block in blocks)
+            {
+                if (Text(block, "type") == "tool_use" && Text(block, "name") is Adding or Marking && Text(block, "id") is { } call)
+                    planning[call] = Text(block, "name")!;
+            }
+
             if (Text(entry, "timestamp") is not { } written
                 || !DateTimeOffset.TryParse(written, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) || at < since)
                 return;
 
-            var blocks = message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array ? content.EnumerateArray().ToList() : [];
             if (Flag(entry, "isApiErrorMessage"))
             {
                 // Claude Code writes what the service refused with as a message of the assistant.
@@ -101,7 +134,9 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
             {
                 if (Text(block, "type") == "tool_use" && Text(block, "name") is { } tool)
                 {
-                    Step = Told(tool, block.TryGetProperty("input", out var input) ? input : default);
+                    // Keeping the plan is a step, but not what the session is doing: the bar of the plan tells of it.
+                    if (tool is not (Adding or Marking))
+                        Step = Told(tool, block.TryGetProperty("input", out var input) ? input : default);
                     if (!Asking.Contains(tool))
                         Steps++;
                 }
@@ -114,6 +149,38 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
         catch (JsonException)
         {
             // A line that is not JSON says nothing.
+        }
+    }
+
+    // What Claude Code answered to the calls that keep the plan: a step that was added is known by the name it was
+    // given, and a step that was marked is as far as the answer says. One that was deleted is no step any more.
+    void Planned(JsonElement entry, List<JsonElement> blocks)
+    {
+        if (!entry.TryGetProperty("toolUseResult", out var result) || result.ValueKind != JsonValueKind.Object)
+            return;
+
+        foreach (var block in blocks)
+        {
+            if (Text(block, "type") != "tool_result" || Text(block, "tool_use_id") is not { } call || !planning.Remove(call, out var tool))
+                continue;
+
+            if (tool == Adding)
+            {
+                if (result.TryGetProperty("task", out var added) && Text(added, "id") is { } id && !steps.Exists(step => step.Id == id))
+                    steps.Add((id, PlanStep.Pending));
+            }
+            else if (Text(result, "taskId") is { } marked && result.TryGetProperty("statusChange", out var change) && Text(change, "to") is { } status)
+            {
+                var index = steps.FindIndex(step => step.Id == marked);
+                if (index < 0)
+                    continue;
+                if (status == "deleted")
+                    steps.RemoveAt(index);
+                else
+                    steps[index] = (marked, status switch { "completed" => PlanStep.Done, "in_progress" => PlanStep.Active, _ => PlanStep.Pending });
+            }
+
+            Plan = steps.Count == 0 ? null : [.. steps.Select(step => step.State)];
         }
     }
 

@@ -282,6 +282,7 @@ public sealed class Supervisor(
             Since = since,
             Step = unseen ? "its session cannot be read" : look.Step,
             Context = look.Context,
+            Plan = look.Plan ?? [],
             Queued = queued,
             Until = sendAt,
             Open = session.Open,
@@ -432,7 +433,7 @@ public sealed class Supervisor(
         var known = limits.Near is { ResetsAt: not null } near && near.Used >= policy.Spent ? limits.Near : null;
         var until = known is { ResetsAt: { } reset } ? reset + policy.ResetMargin : clock.Now + policy.UnknownLimitWait;
         Say(RunMark.Paused, $"#{number} waits {Spoken.Time(until - clock.Now)} for {(known is null ? "the limit" : Limit(known))} to reset, then goes on · /stop pauses it for the next run");
-        Show(new RunStatus(RunPhase.WaitingForLimit, "") { Task = task, Since = since, Until = until, Open = session.Open });
+        Show(new RunStatus(RunPhase.WaitingForLimit, "") { Task = task, Since = since, Until = until, Open = session.Open, Plan = status.Plan });
 
         bool waited;
         try
