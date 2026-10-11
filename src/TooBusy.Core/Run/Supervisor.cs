@@ -5,8 +5,8 @@ using TooBusy.Core.Queue;
 namespace TooBusy.Core.Run;
 
 // A run of the queue: it takes the tasks one after another, has the assistant do each in a session of its own,
-// watches the session, and tells the tracker how the task went. It is the run that keeps the tracker: a task is
-// moved before its session starts and after it ends, and the session is told so.
+// watches the session, and tells the tracker how the task went. It is the run that keeps the task of a session: it is
+// moved before its session starts and after it ends, and the session is told so. New tasks are the session's to make.
 //
 // It never goes on past a doubt: a session that ends without saying how the task went, a working tree that is not
 // clean, a tracker that refuses, each stops the run, and the next task is not built on it.
@@ -218,7 +218,7 @@ public sealed class Supervisor(
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
             try
             {
-                session = await assistant.StartAsync(Start(task, Briefing.Task(task, again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp })), kill);
+                session = await assistant.StartAsync(Start(task, Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp })), kill);
             }
             catch (AssistantException)
             {
@@ -271,7 +271,7 @@ public sealed class Supervisor(
         Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
         string?[] taken = [plan.Rules.Board ? "In Progress on the board" : null, unassigned is null ? "assigned to the current user" : null];
         if (taken.Any(how => how is not null))
-            Say(RunMark.Note, $"#{number} is {string.Join(" and ", taken.Where(how => how is not null))}; the session is told that toobusy keeps the tracker");
+            Say(RunMark.Note, $"#{number} is {string.Join(" and ", taken.Where(how => how is not null))}; the session is told that toobusy keeps its task");
         if (unassigned is not null)
             Say(RunMark.Attention, $"{unassigned} · the run goes on");
 
@@ -470,7 +470,7 @@ public sealed class Supervisor(
                 told++;
                 steps = look.Steps;
                 (waiting, sendAt) = (false, null);
-                var message = Briefing.Alone(number);
+                var message = Briefing.Alone(number, plan.Rules.Owner);
                 Say(RunMark.GoesOn, $"#{number} is told to go on without the owner: its turn is cut, and this is the next message of its conversation · {session.Open}");
                 Say(RunMark.Note, $"“{message}”");
                 if (!await session.TellAsync(message, kill))
@@ -613,6 +613,7 @@ public sealed class Supervisor(
         var wrong = tree is null ? "the working tree cannot be read after"
             : tree.Changes > 0 ? "left changes in the working tree"
             : outcome.Kind is OutcomeKind.Done or OutcomeKind.Partial && tree.Unpushed > 0 ? $"left {(tree.Unpushed == 1 ? "a commit that is" : $"{tree.Unpushed} commits that are")} not pushed"
+            : outcome.Kind == OutcomeKind.Partial && !outcome.Names(number) ? "said that a part is done and named no task of what is left"
             : null;
         if (wrong is not null)
         {
@@ -649,18 +650,12 @@ public sealed class Supervisor(
                 return (RunMark.Done, null);
 
             case OutcomeKind.Partial:
-                // What is left is a task of its own: what the session wrote of it, and the description of the task
-                // it comes from. It has the labels that make the task a task to take, the one of the owner, and
-                // the milestone of that task, which a run without a milestone does not know otherwise.
-                var rest = outcome.Rest ?? new RestTask("", outcome.Report);
-                var title = rest.Title.Length > 0 ? rest.Title : Briefing.RestTitle(task);
-                string[] labels = [rules.Owner, .. task.Labels.Where(label => rules.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(rules.Owner, StringComparison.OrdinalIgnoreCase))];
-                var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, await tracker.ReadDescriptionAsync(number, kill)), labels, task.Milestone), kill);
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open, made), kill);
+                // What is left is a task that the session made and that its report names: the run makes nothing.
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open), kill);
                 await CloseAsync(number, kill);
                 partial++;
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");
-                Say(RunMark.Note, $"#{number} is closed; what is left is #{made} “{title}”, which waits for the owner with the {rules.Owner} label");
+                Say(RunMark.Note, $"#{number} is closed, with the report of the session as its comment; what is left is a task that the session made");
                 return (RunMark.Partial, null);
 
             case OutcomeKind.Owner:

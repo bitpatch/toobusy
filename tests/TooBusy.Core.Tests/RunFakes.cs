@@ -38,14 +38,10 @@ sealed class FakeTracker : ITaskTracker
 {
     public List<QueueTask> Open { get; } = [];
 
-    public Dictionary<int, string> Descriptions { get; } = [];
-
-    // What was done, as `status 12 InProgress`, `assign 12`, `label 12 +manual`, `comment 12`, `close 12`, `create 31`.
+    // What was done, as `status 12 InProgress`, `assign 12`, `label 12 +manual`, `comment 12`, `close 12`.
     public List<string> Did { get; } = [];
 
     public List<(int Number, string Text)> Comments { get; } = [];
-
-    public List<NewTask> Made { get; } = [];
 
     public List<string?> Read { get; } = [];
 
@@ -54,8 +50,6 @@ sealed class FakeTracker : ITaskTracker
 
     // What happens as something is done, before it is: a kill that comes in the middle of it, for one.
     public Action<string>? Doing { get; set; }
-
-    public int Next { get; set; } = 100;
 
     // A tracker that says a task is closed and goes on listing it among the open ones.
     public bool ForgetsClosing { get; set; }
@@ -72,12 +66,6 @@ sealed class FakeTracker : ITaskTracker
         Read.Add(milestone);
         Do("read");
         return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
-    }
-
-    public Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken)
-    {
-        Do($"description {number}", remember: false);
-        return Task.FromResult(Descriptions.GetValueOrDefault(number) ?? $"Do task {number}.");
     }
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
@@ -126,21 +114,12 @@ sealed class FakeTracker : ITaskTracker
         return Task.CompletedTask;
     }
 
-    public Task<int> CreateAsync(NewTask task, CancellationToken cancellationToken)
-    {
-        var number = Next++;
-        Do($"create {number}");
-        Made.Add(task);
-        Open.Add(new QueueTask(number, task.Title, $"https://example.com/{number}", task.Labels, BoardStatus.Todo, "Todo", [], [], task.Milestone));
-        return Task.FromResult(number);
-    }
-
-    void Do(string what, bool remember = true)
+    void Do(string what)
     {
         Doing?.Invoke(what);
         if (Refused.Contains(what) || Refused.Contains(what.Split(' ')[0]))
             throw new TrackerException($"The tracker refused: {what}.");
-        if (remember && what != "read")
+        if (what != "read")
             Did.Add(what);
     }
 

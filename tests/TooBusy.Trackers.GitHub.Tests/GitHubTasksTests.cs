@@ -150,25 +150,6 @@ public class GitHubTasksTests
     }
 
     [Fact]
-    public async Task TheDescriptionOfATaskIsReadWithItsLines()
-    {
-        processes.Answers.Enqueue(FakeProcesses.Answered("Do it.\\n\\n- one\\n- two\n"));
-
-        var description = await Tasks().ReadDescriptionAsync(12, TestContext.Current.CancellationToken);
-
-        Assert.Equal("Do it.\n\n- one\n- two", description);
-        Assert.Equal(["issue", "view", "12", "--repo", "acme/rocket", "--json", "body", "--jq", "[.body] | @tsv"], Assert.Single(processes.Asked).Arguments);
-    }
-
-    [Fact]
-    public async Task ATaskWithoutADescriptionHasAnEmptyOne()
-    {
-        processes.Answers.Enqueue(FakeProcesses.Answered("\n"));
-
-        Assert.Equal("", await Tasks().ReadDescriptionAsync(12, TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
     public async Task ATaskIsMovedOnTheBoardByTheNameOfTheStatus()
     {
         processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn progress\nitem\tPVTI_9\tPVT_other\nitem\tPVTI_1\tPVT_1\n"));
@@ -297,44 +278,6 @@ public class GitHubTasksTests
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AddLabelAsync(12, "needs owner", TestContext.Current.CancellationToken));
 
         Assert.Equal("The label needs owner could not be put on #12. could not add label: 'needs owner' not found", refused.Message);
-    }
-
-    [Fact]
-    public async Task ANewTaskIsMadeWithItsLabelsAndItsMilestoneAndPutOnTheBoard()
-    {
-        processes.Answers.Enqueue(FakeProcesses.Answered("https://github.com/acme/rocket/issues/31\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_31\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_31\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_31\n"));
-
-        var number = await Tasks().CreateAsync(new NewTask("The rest", "What is left.", ["needs owner", "feature"], "v0.2.0"), TestContext.Current.CancellationToken);
-
-        Assert.Equal(31, number);
-        Assert.Equal(
-            ["issue", "create", "--repo", "acme/rocket", "--title", "The rest", "--body", "What is left.", "--label", "needs owner", "--label", "feature", "--milestone", "v0.2.0"],
-            processes.Asked[0].Arguments);
-        Assert.Contains("number=31", processes.Asked[1].Arguments);
-        Assert.Contains("option=O_1", processes.Asked[3].Arguments);
-    }
-
-    [Fact]
-    public async Task ANewTaskWithoutAMilestoneNamesNone()
-    {
-        processes.Answers.Enqueue(FakeProcesses.Answered("https://github.com/acme/rocket/issues/31\n"));
-
-        await Tasks(board: null).CreateAsync(new NewTask("The rest", "What is left.", [], null), TestContext.Current.CancellationToken);
-
-        Assert.Equal(["issue", "create", "--repo", "acme/rocket", "--title", "The rest", "--body", "What is left."], Assert.Single(processes.Asked).Arguments);
-    }
-
-    [Fact]
-    public async Task AnAnswerThatNamesNoTaskIsARefusal()
-    {
-        processes.Answers.Enqueue(FakeProcesses.Answered("Creating issue in acme/rocket\n"));
-
-        var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CreateAsync(new NewTask("The rest", "", [], null), TestContext.Current.CancellationToken));
-
-        Assert.Equal("The task “The rest” could not be made.", refused.Message);
     }
 
     GitHubTasks Tasks(string? board = Board) => new(processes, "acme/rocket", board);

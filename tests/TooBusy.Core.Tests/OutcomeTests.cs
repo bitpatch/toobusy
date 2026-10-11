@@ -18,7 +18,6 @@ public class OutcomeTests
         Assert.Equal(kind, outcome!.Kind);
         Assert.Equal("The export is written.\n\nChecked with the tests.", outcome.Report);
         Assert.Null(outcome.Reason);
-        Assert.Null(outcome.Rest);
     }
 
     [Theory]
@@ -61,40 +60,27 @@ public class OutcomeTests
     }
 
     [Fact]
-    public void ATaskDoneInPartNamesWhatIsLeft()
+    public void AReplyIsReadWithoutABlockOfWhatIsLeft()
     {
-        var outcome = Outcome.Read("""
-            The export is written.
-
-            TOOBUSY-REST: Choose the format of the dates
-            The dates are left as they were.
-
-            - [ ] ISO or the format of the country?
-            TOOBUSY: partial
-            """);
+        var outcome = Outcome.Read("The export is written.\n\nTOOBUSY-REST: Choose the format of the dates\nThe dates are left as they were.\nTOOBUSY: partial");
 
         Assert.Equal(OutcomeKind.Partial, outcome!.Kind);
-        Assert.Equal("The export is written.", outcome.Report);
-        Assert.Equal(new RestTask("Choose the format of the dates", "The dates are left as they were.\n\n- [ ] ISO or the format of the country?"), outcome.Rest);
+        Assert.Equal("The export is written.\n\nTOOBUSY-REST: Choose the format of the dates\nThe dates are left as they were.", outcome.Report);
     }
 
-    [Fact]
-    public void ATaskDoneInPartMayLeaveTheRestUnnamed()
+    [Theory]
+    [InlineData("What is left is #34.", true)]
+    [InlineData("Made https://github.com/acme/rocket/issues/34 of what is left.", true)]
+    [InlineData("Left: (#34), #12 is done.", true)]
+    [InlineData("Half of #12 is done.", false)]
+    [InlineData("See https://github.com/acme/rocket/issues/12.", false)]
+    [InlineData("The rest is task # 34, or C# 13.", false)]
+    [InlineData("", false)]
+    public void AReportNamesATaskOtherThanItsOwnByItsNumberOrItsAddress(string report, bool names)
     {
-        var outcome = Outcome.Read("Half of it.\nTOOBUSY: partial");
+        var outcome = Outcome.Read($"{report}\nTOOBUSY: partial");
 
-        Assert.Equal(OutcomeKind.Partial, outcome!.Kind);
-        Assert.Equal("Half of it.", outcome.Report);
-        Assert.Null(outcome.Rest);
-    }
-
-    [Fact]
-    public void WhatIsLeftBelongsOnlyToATaskDoneInPart()
-    {
-        var outcome = Outcome.Read("Report.\nTOOBUSY-REST: Something\nMore.\nTOOBUSY: done");
-
-        Assert.Null(outcome!.Rest);
-        Assert.Contains("TOOBUSY-REST: Something", outcome.Report, StringComparison.Ordinal);
+        Assert.Equal(names, outcome!.Names(12));
     }
 
     [Theory]

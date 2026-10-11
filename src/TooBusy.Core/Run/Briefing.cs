@@ -14,8 +14,18 @@ public static class Briefing
     // `interrupted` is a task taken by its label with nothing of its session here: wrapped up after `/abort`, with a
     // report, or paused by a usage limit elsewhere, with none. Its last comment says which.
     // `lost` is a task that a session worked on before whose conversation is gone, with no report of it.
-    public static string Task(QueueTask task, bool interrupted, bool lost = false)
+    // `ground` is what the session needs to make a new task: its own task stays the run's, and new ones are its.
+    public static string Task(QueueTask task, NewTasks ground, bool interrupted, bool lost = false)
     {
+        // A task that waits for the owner must be one a run takes once the owner has answered: it gets the labels
+        // of this task that let a task in.
+        var take = task.Labels.Where(label => ground.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(ground.Owner, StringComparison.OrdinalIgnoreCase)).ToList();
+        var labels = take.Count == 0 ? ""
+            : $", and {(take.Count == 1 ? "the label" : "the labels")} {string.Join(", ", take.Select(label => $"`{label}`"))}, as task #{task.Number} has, so that a run takes it after that";
+        var milestone = ground.Milestone is { } works ? $"Put it into the milestone `{works}`, the one the owner works on."
+            : task.Milestone is { } own ? $"Put it into the milestone `{own}`, the one of task #{task.Number}."
+            : $"Put it into no milestone, as task #{task.Number} is in none.";
+        var board = ground.Board is null ? "" : $"\n- Put it on the board {ground.Board} with the status `Todo`.";
         var message = new StringBuilder();
         message.Append(CultureInfo.InvariantCulture, $"""
             You are doing task #{task.Number} of this project without its owner. toobusy, the tool that takes the tasks of the project one after another, started this session and reads how it ends.
@@ -30,7 +40,8 @@ public static class Briefing
 
             - Nobody will answer. Ask no questions, wait for no approval and do not enter plan mode: decide yourself and go on. Where the instructions of the project (CLAUDE.md, AGENTS.md, its skills and the like) tell you to ask the owner or to wait for a confirmation, do not: the owner started this run to have the task done.
             - Follow the instructions of the project in everything else: how the work is done, how it is checked, how it is committed and pushed. Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.
-            - The tracker is kept by toobusy. It has already moved the task to In Progress, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
+            - Your task is kept by toobusy. It has already moved the task to In Progress, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
+            - You may make new tasks in the tracker. What cannot be done without the owner becomes one, as said below. Which other tasks a session makes and when, and their labels, their wording and their relations, is said by the instructions of the project.
             - Work in this working copy: make no worktree and do not move to another one. It was clean when you started and it must be clean when you end: everything of yours is committed and pushed, or undone.
             - Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done, and change the list when the plan changes. toobusy shows the list to the owner as the progress of the task.
 
@@ -55,14 +66,21 @@ public static class Briefing
 
             # What cannot be done without the owner
 
-            Do everything that does not depend on the owner, leave nothing broken, and commit and push that part. What is left becomes a new task that waits for the owner. Describe it so that a session that has never seen this one knows exactly what to do: what is left, what is done already and where, and the questions for the owner with the answers you see. When nothing at all can be done without the owner, undo your changes and say what you need.
+            Do everything that does not depend on the owner, leave nothing broken, and commit and push that part. What is left, make a new task of it yourself:
+
+            - Describe it so that a session that has never seen this one knows exactly what to do: what is left, what is done already and where, and the questions for the owner with the answers you see. Name task #{task.Number} in it.
+            - Put the label `{ground.Owner}` on it, so that no run takes it before the owner answers{labels}.
+            - {milestone}{board}
+            - Decide whether it blocks what task #{task.Number} blocks: toobusy closes task #{task.Number}, and what waits for it opens.
+
+            When nothing at all can be done without the owner, make no task: undo your changes and say what you need.
 
             # Your last reply
 
             Your last reply is put into the task as its report: say what was done, what you decided on your own and why, and how it was checked. Its last line is for toobusy, one of:
 
             - `{Outcome.Mark} done`: the task is done, committed and pushed.
-            - `{Outcome.Mark} partial`: a part is done, committed and pushed. After the report and before this line put the line `{Outcome.RestMark} <the title of the new task>` and under it the description of that task.
+            - `{Outcome.Mark} partial`: a part is done, committed and pushed, and you have made the task of what is left. Name that task in the report by its number, as `#<number>`: toobusy closes task #{task.Number} only when the report names it.
             - `{Outcome.Mark} owner`: nothing could be done without the owner. The reply says what is needed, and your changes are undone.
             - `{Outcome.Mark} failed <the reason>`: the work stopped on something you cannot fix, such as a check that fails or a tool that refuses. Leave the working copy as it is.
             """);
@@ -70,8 +88,9 @@ public static class Briefing
     }
 
     // What a session that waits for the owner is told.
-    public static string Alone(int task) => string.Create(CultureInfo.InvariantCulture, $"""
-        The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #{task} from where you stopped. What cannot be decided without the owner goes into the new task for the owner, as the rules of this session say. End your reply with a `{Outcome.Mark}` line.
+    // It says in full what becomes of what the owner must decide, and names the label of the owner: `owner`.
+    public static string Alone(int task, string owner) => string.Create(CultureInfo.InvariantCulture, $"""
+        The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #{task} from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{owner}` on it, so that no run takes it before the owner answers. End your reply with a `{Outcome.Mark}` line.
         """);
 
     // What a session is told when the usage limit it ran into has reset.
@@ -95,12 +114,12 @@ public static class Briefing
         """);
 
     // The comment a task gets when its session ends: what became of it, the report of the session, and the session.
-    public static string Comment(OutcomeKind kind, string report, string session, int? rest = null, string? label = null)
+    public static string Comment(OutcomeKind kind, string report, string session, string? label = null)
     {
         var head = kind switch
         {
             OutcomeKind.Done => "**Done.**",
-            OutcomeKind.Partial => string.Create(CultureInfo.InvariantCulture, $"**Done in part.** What is left is #{rest}, which waits for the owner."),
+            OutcomeKind.Partial => "**Done in part.** What is left is a task that the session made: the report names it.",
             OutcomeKind.Owner => $"**Waits for the owner.** Nothing could be done without you. Take the label `{label}` off when this is answered, and a run takes the task again.",
             _ => "**Interrupted.** Nothing is committed; a run takes the task again.",
         };
@@ -114,16 +133,6 @@ public static class Briefing
     // The comment of a task that a usage limit stopped.
     public static string Paused(string why, string session) =>
         Joined($"**Stopped by a usage limit** ({why}). The uncommitted changes are left in the working copy, and the next run goes on with the same session.", "", $"_Session: `{session}`_");
-
-    // The description of the task that is made of what is left of another: what the session wrote, where it comes
-    // from, and the description of that task, so that nothing has to be looked up.
-    public static string Rest(RestTask rest, QueueTask from, string description) => Joined(
-        rest.Description,
-        string.Create(CultureInfo.InvariantCulture, $"---\n\nLeft from #{from.Number} “{from.Title}”, which toobusy closed as done in part."),
-        description.Trim().Length == 0 ? "" : string.Create(CultureInfo.InvariantCulture, $"<details>\n<summary>The description of #{from.Number}</summary>\n\n{description.Trim()}\n\n</details>"));
-
-    // What a task for the rest is called when the session did not name it.
-    public static string RestTitle(QueueTask from) => $"What is left of “{from.Title}”";
 
     static string Joined(params string[] parts) => string.Join("\n\n", parts.Where(part => part.Trim().Length > 0).Select(part => part.Trim()));
 }

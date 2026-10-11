@@ -103,7 +103,7 @@ public sealed record Workbench(
     // GitHub repository.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort);
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board };
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules), remembered);
         if (Repository is null)

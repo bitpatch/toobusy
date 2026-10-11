@@ -44,7 +44,7 @@ public sealed class SupervisorTests : IDisposable
             """
             ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort
             → #3 Task 3 — started · a new session · fake attach 3
-              #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #3 Task 3 — done in 3 s
               #3 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
@@ -63,11 +63,11 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Contains("assign 3", tracker.Did);
-        Assert.Contains("  #3 is assigned to the current user; the session is told that toobusy keeps the tracker", log.Lines);
+        Assert.Contains("  #3 is assigned to the current user; the session is told that toobusy keeps its task", log.Lines);
     }
 
     [Theory]
-    [InlineData(true, "  #3 is In Progress on the board; the session is told that toobusy keeps the tracker")]
+    [InlineData(true, "  #3 is In Progress on the board; the session is told that toobusy keeps its task")]
     [InlineData(false, null)]
     public async Task ATrackerThatRefusesTheAssignmentDoesNotStopTheRun(bool board, string? note)
     {
@@ -88,7 +88,7 @@ public sealed class SupervisorTests : IDisposable
         if (note is not null)
             Assert.Contains(note, log.Lines);
         else
-            Assert.DoesNotContain(log.Lines, line => line.Contains("keeps the tracker", StringComparison.Ordinal));
+            Assert.DoesNotContain(log.Lines, line => line.Contains("keeps its task", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class SupervisorTests : IDisposable
         tracker.Add(5);
         tracker.Add(7);
         assistant.Session(3).Works().Ends(Done);
-        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(5).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         assistant.Session(7).Works().Ends(Done);
 
         var result = await RunAsync();
@@ -155,7 +155,7 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Add(3);
         tracker.Add(5);
-        assistant.Session(3).Works(4).Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(3).Works(4).Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
 
         var result = await RunAsync();
@@ -172,7 +172,7 @@ public sealed class SupervisorTests : IDisposable
         tracker.Add(5);
         tracker.Add(7);
         assistant.Session(3).Works().Ends(Done);
-        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(5).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         assistant.Session(7).Works().Ends("I tried twice.\nTOOBUSY: failed the tests do not pass");
 
         var result = await RunAsync();
@@ -186,7 +186,7 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Add(3);
         tracker.Add(5);
-        assistant.Session(3).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(3).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         assistant.Session(5)
             .Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(1))))
             .Limit();
@@ -221,18 +221,41 @@ public sealed class SupervisorTests : IDisposable
         Assert.DoesNotContain(log.Lines, line => line.Contains("on the board", StringComparison.Ordinal));
     }
 
-    [Theory]
-    [InlineData("v0.3.0")]
-    [InlineData(null)]
-    public async Task WithoutAMilestoneWhatIsLeftOfATaskHasTheMilestoneOfThatTask(string? milestone)
+    [Fact]
+    public async Task TheFirstMessageNamesWhatANewTaskNeeds()
     {
-        plan = plan with { Milestone = null };
-        tracker.Add(3, milestone: milestone);
-        assistant.Session(3).Works().Ends("Did the half.\nTOOBUSY-REST: Choose the format\nThe dates are left.\nTOOBUSY: partial");
+        plan = plan with { Board = "https://github.com/orgs/acme/projects/4" };
+        tracker.Add(3, labels: ["Feature", "urgent"]);
 
         await RunAsync();
 
-        Assert.Equal(milestone, Assert.Single(tracker.Made).Milestone);
+        var message = Assert.Single(assistant.Started).Message;
+        Assert.Contains("- Put the label `needs-owner` on it, so that no run takes it before the owner answers, and the label `Feature`, as task #3 has, so that a run takes it after that.\n", message, StringComparison.Ordinal);
+        Assert.Contains("- Put it into the milestone `v0.2.0`, the one the owner works on.\n- Put it on the board https://github.com/orgs/acme/projects/4 with the status `Todo`.\n", message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("v0.3.0", "- Put it into the milestone `v0.3.0`, the one of task #3.\n")]
+    [InlineData(null, "- Put it into no milestone, as task #3 is in none.\n")]
+    public async Task WithoutAMilestoneANewTaskGoesWhereTheTaskOfTheSessionIs(string? milestone, string told)
+    {
+        plan = plan with { Milestone = null };
+        tracker.Add(3, milestone: milestone);
+
+        await RunAsync();
+
+        Assert.Contains(told, Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AProjectWithoutABoardNamesNoneToASession()
+    {
+        plan = plan with { Rules = Rules with { Board = false }, Board = null };
+        tracker.Add(3);
+
+        await RunAsync();
+
+        Assert.DoesNotContain("on the board", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -308,42 +331,42 @@ public sealed class SupervisorTests : IDisposable
         Assert.StartsWith("**Failed.** The run stopped over this task: the working tree could not be read after its session.", tracker.Comments[0].Text, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task WhatIsLeftOfATaskDoneInPartBecomesANewTaskForTheOwner()
+    [Theory]
+    [InlineData("Did the half. What is left is #41, with the questions for the owner.")]
+    [InlineData("Did the half.\n\nLeft: https://github.com/acme/rocket/issues/41")]
+    public async Task ATaskDoneInPartIsClosedWithItsReportAndTheRunMakesNothing(string report)
     {
         tracker.Add(3, labels: ["Feature", "urgent"], milestone: "v0.2.0");
-        tracker.Descriptions[3] = "Export the data.";
-        assistant.Session(3).Works().Ends("Did the half.\nTOOBUSY-REST: Choose the format\nThe dates are left.\n- [ ] ISO?\nTOOBUSY: partial");
+        assistant.Session(3).Works().Ends($"{report}\nTOOBUSY: partial");
 
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 0) { Partial = 1 }, result);
-        var made = Assert.Single(tracker.Made);
-        Assert.Equal("Choose the format", made.Title);
-        Assert.Equal(["needs-owner", "Feature"], made.Labels);
-        Assert.Equal("v0.2.0", made.Milestone);
-        Assert.StartsWith("The dates are left.\n- [ ] ISO?\n\n---\n\nLeft from #3 “Task 3”", made.Description, StringComparison.Ordinal);
-        Assert.Contains("<summary>The description of #3</summary>\n\nExport the data.", made.Description, StringComparison.Ordinal);
-        Assert.Equal(["status 3 InProgress", "assign 3", "create 100", "comment 3", "close 3", "status 3 Done"], tracker.Did);
-        Assert.StartsWith("**Done in part.** What is left is #100, which waits for the owner.\n\nDid the half.\n\n", tracker.Comments[0].Text, StringComparison.Ordinal);
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal((3, $"**Done in part.** What is left is a task that the session made: the report names it.\n\n{report}\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
         Assert.Contains("◐ #3 Task 3 — done in part in 3 s", log.Lines);
-        Assert.Contains("  #3 is closed; what is left is #100 “Choose the format”, which waits for the owner with the needs-owner label", log.Lines);
-
-        // The new task waits for the owner: the run does not take it.
-        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+        Assert.Contains("  #3 is closed, with the report of the session as its comment; what is left is a task that the session made", log.Lines);
     }
 
-    [Fact]
-    public async Task APartThatDoesNotNameWhatIsLeftStillMakesTheTask()
+    [Theory]
+    [InlineData("Half of it.")]
+    [InlineData("Half of #3; the rest is for the owner.")]
+    public async Task APartWhoseReportNamesNoOtherTaskStopsTheRunAndLeavesTheTaskToTheOwner(string report)
     {
         tracker.Add(3);
-        assistant.Session(3).Ends("Half of it.\nTOOBUSY: partial");
+        tracker.Add(5);
+        assistant.Session(3).Works().Ends($"{report}\nTOOBUSY: partial");
 
-        await RunAsync();
+        var result = await RunAsync();
 
-        var made = Assert.Single(tracker.Made);
-        Assert.Equal("What is left of “Task 3”", made.Title);
-        Assert.StartsWith("Half of it.\n\n---", made.Description, StringComparison.Ordinal);
+        Assert.Equal(RunEnd.Problem, result.End);
+        Assert.Equal("#3 said that a part is done and named no task of what is left · fake attach 3", result.Why);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.StartsWith(
+            $"**Failed.** The run stopped over this task: its session said that a part is done and named no task of what is left. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\n{report}",
+            tracker.Comments[0].Text,
+            StringComparison.Ordinal);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
     }
 
     [Fact]
@@ -360,7 +383,6 @@ public sealed class SupervisorTests : IDisposable
         Assert.StartsWith("**Waits for the owner.** Nothing could be done without you. Take the label `needs-owner` off", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("◇ #3 Task 3 — waits for the owner after 3 s", log.Lines);
         Assert.Equal([3, 5], assistant.Started.Select(start => start.Task));
-        Assert.Empty(tracker.Made);
     }
 
     [Fact]
@@ -465,15 +487,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task TheDescriptionOfATaskIsNotReadForATaskThatIsDone()
-    {
-        tracker.Add(3);
-        tracker.Refused.Add("description");
-
-        Assert.Equal(new RunResult(RunEnd.Emptied, 1), await RunAsync());
-    }
-
-    [Fact]
     public async Task ATrackerThatRefusesStopsTheRun()
     {
         tracker.Add(3);
@@ -548,13 +561,13 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal([Briefing.Alone(3)], session.Told);
+        Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
         Assert.Equal(
             [
                 "‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3",
                 "  │ CSV or JSON?",
                 "▶ #3 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · fake attach 3",
-                $"  “{Briefing.Alone(3)}”",
+                $"  “{Briefing.Alone(3, "needs-owner")}”",
                 "✔ #3 Task 3 — done in 99 s",
             ],
             log.Lines.Skip(3).Take(5));
@@ -1028,7 +1041,7 @@ public sealed class SupervisorTests : IDisposable
         tracker.Add(7);
         TaskRecord? atWork = null;
         assistant.Session(3).Works(and: () => atWork = state.Record).Ends(Done);
-        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(5).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         assistant.Session(7).Works().Ends("Which key?\nTOOBUSY: owner");
 
         await RunAsync();
@@ -1079,7 +1092,7 @@ public sealed class SupervisorTests : IDisposable
     {
         state.Record = Record(5);
         tracker.Add(5, status: BoardStatus.InProgress);
-        var session = assistant.Session(5).Ends("Half of it.\nTOOBUSY: partial");
+        var session = assistant.Session(5).Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
 
         var result = await RunAsync();
 
@@ -1088,7 +1101,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session ended while nobody watched · fake attach 5", log.Lines);
         Assert.Contains("◐ #5 Task 5 — done in part in 0 s", log.Lines);
-        Assert.Equal(["status 5 InProgress", "assign 5", "create 100", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Equal(["status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done"], tracker.Did);
         Assert.Null(state.Record);
     }
 
@@ -1146,7 +1159,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(1, result.Done);
-        Assert.Equal([Briefing.Alone(5)], session.Told);
+        Assert.Equal([Briefing.Alone(5, "needs-owner")], session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
     }
 
@@ -1410,7 +1423,7 @@ public sealed class SupervisorTests : IDisposable
         tracker.Add(5);
         tracker.Add(7);
         assistant.Session(3).Works().Ends(Done);
-        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(5).Works().Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
         assistant.Session(7).Works().Asks("input needed", "Which key is it?").Then().Works().Ends("Still: which key?\nTOOBUSY: owner");
 
         await RunAsync();

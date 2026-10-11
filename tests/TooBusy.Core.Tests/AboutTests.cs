@@ -7,6 +7,8 @@ public class AboutTests
 {
     static readonly QueueRules Rules = new(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted", Board: true);
 
+    static readonly NewTasks Ground = new("needs-owner", [], "<the milestone the user works on>", "<the address of the board>");
+
     static readonly QueueTask Sample = new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []);
 
     [Fact]
@@ -15,16 +17,16 @@ public class AboutTests
         var text = About.Text(Rules, RunPolicy.Default);
 
         Assert.StartsWith("# How toobusy works\n\ntoobusy takes the tasks of a project's tracker one after another", text, StringComparison.Ordinal);
-        Assert.Contains($"```text\n{Briefing.Task(Sample, interrupted: false)}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.Task(Sample, Ground, interrupted: false)}\n```", text, StringComparison.Ordinal);
         Assert.Contains("```text\n- This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how.", text, StringComparison.Ordinal);
         Assert.Contains("One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description.\n```", text, StringComparison.Ordinal);
-        Assert.Contains($"```text\n{Briefing.Alone(12)}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.Alone(12, "needs-owner")}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterLimit(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.WrapUp(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterStop(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterAbort(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains("```text\n- A session worked on this task before, and its conversation is gone: it left no report.", text, StringComparison.Ordinal);
-        Assert.EndsWith("is the project's to say in its instructions.\n", text, StringComparison.Ordinal);
+        Assert.EndsWith("is the project's to say in its instructions, and so is which tasks it makes besides the one for the owner.\n", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -57,6 +59,8 @@ public class AboutTests
 
         Assert.Contains("- A task with the label `manual` is not taken.\n- The project has no board: a task has no status, and where a status is named below, nothing is moved.\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Only a task with", text, StringComparison.Ordinal);
+        Assert.Contains("- Put the label `manual` on it", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("- Put it on the board", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,6 +71,20 @@ public class AboutTests
         Assert.Contains("No settings are read here, so its labels are not named below: `toobusy init` sets a project up.", text, StringComparison.Ordinal);
         Assert.Contains("- A task that has the label of the owner waits for the owner and is not taken.", text, StringComparison.Ordinal);
         Assert.Contains("takes the label of interrupted tasks off a task that had it", text, StringComparison.Ordinal);
+        Assert.Contains("- Put the label `<the label of the owner>` on it", text, StringComparison.Ordinal);
+        Assert.Contains("- Put it on the board <the address of the board> with the status `Todo`.", text, StringComparison.Ordinal);
+        Assert.Contains("and put the label `<the label of the owner>` on it, so that no run takes it before the owner answers.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ItSaysWhatASessionMayDoInTheTrackerAndWhatIsTheProjectsToSay()
+    {
+        var text = About.Text(Rules, RunPolicy.Default);
+
+        Assert.Contains("## The task of a session is kept by toobusy\n\nA session changes nothing of its own task:", text, StringComparison.Ordinal);
+        Assert.Contains("## A session makes new tasks itself\n\nA session may make new tasks in the tracker, and toobusy makes none. toobusy asks for one of them: what cannot be done without the owner becomes a new task with the `needs-owner` label", text, StringComparison.Ordinal);
+        Assert.Contains("Which other tasks a session makes and when, such as the findings of an audit or a proposal, and their labels, their wording and their relations, is the project's to say in its instructions.", text, StringComparison.Ordinal);
+        Assert.Contains("An instruction to make other tasks is followed.", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -76,7 +94,8 @@ public class AboutTests
 
         foreach (var line in new[] { "done", "partial", "owner", "interrupted", "failed <the reason>" })
             Assert.Contains($"| `TOOBUSY: {line}` |", text, StringComparison.Ordinal);
-        Assert.Contains("after `TOOBUSY-REST:`", text, StringComparison.Ordinal);
+        Assert.Contains("| `TOOBUSY: partial` | the same, and the report names another task, as `#34` or by its address: the task of what is left, which the session made | puts the report into the task as a comment, closes the task and moves it to `Done`; it makes no task |", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("TOOBUSY-REST", text, StringComparison.Ordinal);
     }
 
     [Fact]

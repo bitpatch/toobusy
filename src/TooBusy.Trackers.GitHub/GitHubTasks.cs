@@ -77,17 +77,6 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         + (board is null ? "" : " " + Statuses.Trim())
         + " } } } }";
 
-    public async Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken)
-    {
-        var answer = await AskAsync(
-            ["issue", "view", Text(number), "--repo", repository, "--json", "body", "--jq", "[.body] | @tsv"],
-            $"#{number} cannot be read.",
-            cancellationToken);
-
-        // The description is one line, as the queue gives its fields, and may be empty.
-        return Unescaped(answer.Split('\n')[0].TrimEnd('\r'));
-    }
-
     public async Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {
         if (board is null || BoardParts(board) is not var (kind, login, project))
@@ -148,26 +137,6 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
 
     public Task CloseAsync(int number, CancellationToken cancellationToken) =>
         AskAsync(["issue", "close", Text(number), "--repo", repository], $"#{number} could not be closed.", cancellationToken);
-
-    public async Task<int> CreateAsync(NewTask task, CancellationToken cancellationToken)
-    {
-        var failed = $"The task “{task.Title}” could not be made.";
-        var answer = await AskAsync(
-            [
-                "issue", "create", "--repo", repository, "--title", task.Title, "--body", task.Description,
-                .. task.Labels.SelectMany(label => (string[])["--label", label]),
-                .. task.Milestone is null ? [] : (string[])["--milestone", task.Milestone],
-            ],
-            failed,
-            cancellationToken);
-
-        // The tool answers with the address of the issue, which ends with its number.
-        if (!int.TryParse(answer.Trim().Split('/')[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
-            throw new TrackerException(failed);
-
-        await SetStatusAsync(number, BoardStatus.Todo, cancellationToken);
-        return number;
-    }
 
     // What the tool prints when it does what it is asked; otherwise the tracker says that it did not.
     async Task<string> AskAsync(string[] arguments, string failed, CancellationToken cancellationToken)

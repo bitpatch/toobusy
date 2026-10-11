@@ -1,16 +1,13 @@
 namespace TooBusy.Core.Queue;
 
-// The tasks of a project in its tracker: reading them for the queue and changing them as a run goes. It is a run
-// that changes the tracker, never the assistant. Everything throws TrackerException when the tracker refuses or
-// does not answer; the message says why, in words for the user.
+// The tasks of a project in its tracker: reading them for the queue and changing them as a run goes. The task of a
+// session is changed by the run, never by the assistant; a new task is made by the assistant, never by the run.
+// Everything throws TrackerException when the tracker refuses or does not answer; the message says why, in words
+// for the user.
 public interface ITaskTracker
 {
     // The open tasks of the milestone, or of the whole project when the milestone is null.
     Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken);
-
-    // The description of a task, which may be empty. A session reads its task on its own: a run needs the
-    // description only for the task it makes of what is left of another.
-    Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken);
 
     // Moves the task on the board, putting it there when it is not; does nothing in a project without a board.
     Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken);
@@ -25,9 +22,6 @@ public interface ITaskTracker
     Task CommentAsync(int number, string text, CancellationToken cancellationToken);
 
     Task CloseAsync(int number, CancellationToken cancellationToken);
-
-    // Makes a task and gives its number; it stands on the board as one to do.
-    Task<int> CreateAsync(NewTask task, CancellationToken cancellationToken);
 }
 
 // A task as the queue reads it. Status is where it stands on the board, and StatusName what the board calls that.
@@ -56,5 +50,3 @@ public enum BoardStatus
     Done,
     Other,
 }
-
-public sealed record NewTask(string Title, string Description, IReadOnlyList<string> Labels, string? Milestone);

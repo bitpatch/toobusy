@@ -5,8 +5,20 @@ using TooBusy.Core.Queue;
 namespace TooBusy.Core.Run;
 
 // What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
-// and the effort the tasks are done with.
-public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort);
+// and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
+// a run needs it only to tell a session where a new task stands.
+public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
+{
+    public string? Board { get; init; }
+}
+
+// What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
+// one of to be taken, the milestone the user works on, null for none, and the address of the board, null in a
+// project without one.
+public sealed record NewTasks(string Owner, IReadOnlyList<string> Take, string? Milestone, string? Board)
+{
+    public static NewTasks Of(RunPlan plan) => new(plan.Rules.Owner, plan.Rules.Take, plan.Milestone, plan.Rules.Board ? plan.Board : null);
+}
 
 // The times and the counts of a run.
 public sealed record RunPolicy

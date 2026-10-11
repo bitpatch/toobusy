@@ -77,7 +77,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.StartsWith("# How toobusy works\n", output, StringComparison.Ordinal);
         Assert.Contains("No settings are read here, so its labels are not named below", output, StringComparison.Ordinal);
-        Assert.Contains(Briefing.Task(new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []), interrupted: false), output, StringComparison.Ordinal);
+        Assert.Contains(Briefing.Task(new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []), new NewTasks("<the label of the owner>", [], "<the milestone the user works on>", "<the address of the board>"), interrupted: false), output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -522,7 +522,7 @@ public sealed class CliAppTests : IDisposable
             """
             ✻ No milestone · 1 task in the queue · the assistant's own model · high effort
             → #12 Export the data — started · a new session · claude attach abc12345
-              #12 is assigned to the current user; the session is told that toobusy keeps the tracker
+              #12 is assigned to the current user; the session is told that toobusy keeps its task
             ✔ #12 Export the data — done in 0 s
               #12 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
@@ -533,7 +533,7 @@ public sealed class CliAppTests : IDisposable
 
         var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
         Assert.Equal(["--effort", "high", "-n", "#12 Export the data"], started.Skip(7).Take(4));
-        Assert.Equal(Briefing.Task(new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []), interrupted: false), started[^1]);
+        Assert.Equal(Briefing.Task(new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []), new NewTasks("manual", [], null, null), interrupted: false), started[^1]);
 
         // The session reads its task on its own: the run asks the tracker for nothing of it.
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments is ["issue", "view", ..]);
@@ -1220,7 +1220,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--demo");
 
         // The whole of a demo: a task whose session a kill stopped and which goes on with it, a task that is done, a
-        // session that asks and is told to go on alone, a task done in part whose rest is a new task for the owner,
+        // session that asks and is told to go on alone, a task done in part whose session made a task of what is left,
         // a usage limit that is waited out, a task that opened after another one, and the tasks that are held.
         Assert.Equal(0, exit);
         Assert.Equal(
@@ -1230,34 +1230,34 @@ public sealed class CliAppTests : IDisposable
               Opens later: #105 after #102
               Held: #106 it has the manual label · #107 its status is In Progress
             → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
-              #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #100 Rename the settings page — done in 6 s
               #100 is closed, with the report of the session as its comment
             → #101 Show the total of an order in its header — started · a new session · claude attach 4f2a101 (made up)
-              #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #101 Show the total of an order in its header — done in 9 s
               #101 is closed, with the report of the session as its comment
             → #102 Export the orders as a file — started · a new session · claude attach 4f2a102 (made up)
-              #102 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #102 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
               │ The task does not say what kind of file the export is. Should it be CSV or JSON?
             ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
-              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner goes into the new task for the owner, as the rules of this session say. End your reply with a `TOOBUSY:` line.”
+              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `needs-owner` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.”
             ✔ #102 Export the orders as a file — done in 21 s
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session · claude attach 4f2a103 (made up)
-              #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ◐ #103 Fix the rounding of a discount — done in part in 10 s
-              #103 is closed; what is left is #108 “Decide what a discount of more than the price does”, which waits for the owner with the needs-owner label
+              #103 is closed, with the report of the session as its comment; what is left is a task that the session made
             → #104 Update the dependencies — started · a new session · claude attach 4f2a104 (made up)
-              #104 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #104 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ‖ #104 ran into a usage limit: You have hit your usage limit.
             ‖ #104 waits 7 s for the 5-hour limit to reset, then goes on · /stop pauses it for the next run
             ▶ #104 goes on after the reset of the limit · claude attach 4f2a104 (made up)
             ✔ #104 Update the dependencies — done in 16 s
               #104 is closed, with the report of the session as its comment
             → #105 Describe the export in the manual — started · a new session · claude attach 4f2a105 (made up)
-              #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps the tracker
+              #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
               Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label

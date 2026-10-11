@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TooBusy.Core.Run;
 
 public enum OutcomeKind
@@ -5,7 +7,7 @@ public enum OutcomeKind
     // The task is done, committed and pushed.
     Done,
 
-    // A part is done; what is left is a new task for the owner.
+    // A part is done; what is left is a new task, which the session made.
     Partial,
 
     // Nothing could be done without the owner.
@@ -18,16 +20,14 @@ public enum OutcomeKind
     Interrupted,
 }
 
-// What is left of a task that was done in part: a task of its own, as the session described it.
-public sealed record RestTask(string Title, string Description);
-
 // How a task went, as the last reply of its session says. The reply ends with a line for toobusy,
-// `TOOBUSY: done`, and what stands before that line is the report of the session. A task that was done in part
-// names what is left after the report: a line `TOOBUSY-REST: <title>` and the description under it.
-public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = null, RestTask? Rest = null)
+// `TOOBUSY: done`, and what stands before that line is the report of the session.
+public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = null)
 {
     public const string Mark = "TOOBUSY:";
-    public const string RestMark = "TOOBUSY-REST:";
+
+    // What stands before the number of a task where a report names one: `#34`, or the address of an issue.
+    static readonly string[] Naming = ["#", "/issues/"];
 
     // What a session may write around the line without meaning anything by it.
     static readonly char[] Decoration = [' ', '\t', '\r', '*', '_', '`', '>'];
@@ -51,13 +51,24 @@ public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = n
 
         var found = Kinds[known].Kind;
         var reason = said.Length > word.Length ? said[word.Length..].Trim(' ', ':', '-', '—') : "";
-        var rest = found == OutcomeKind.Partial ? Array.FindLastIndex(lines, last, line => line.Trim(Decoration).StartsWith(RestMark, StringComparison.OrdinalIgnoreCase)) : -1;
-        if (rest < 0)
-            return new Outcome(found, Text(lines[..last]), reason.Length == 0 ? null : reason);
+        return new Outcome(found, Text(lines[..last]), reason.Length == 0 ? null : reason);
+    }
 
-        var title = lines[rest].Trim(Decoration)[RestMark.Length..].Trim(Decoration);
-        var description = Text(lines[(rest + 1)..last]);
-        return new Outcome(found, Text(lines[..rest]), null, title.Length == 0 && description.Length == 0 ? null : new RestTask(title, description));
+    // Whether the report names a task other than `own`, as a session that made a task of what is left does. It is
+    // the report that is read, not the tracker: what the named task is, is the session's to see to.
+    public bool Names(int own)
+    {
+        foreach (var naming in Naming)
+        {
+            for (var at = Report.IndexOf(naming, StringComparison.OrdinalIgnoreCase); at >= 0; at = Report.IndexOf(naming, at + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                var digits = Report[(at + naming.Length)..].TakeWhile(char.IsAsciiDigit).ToArray();
+                if (digits.Length is > 0 and < 10 && int.Parse(digits, CultureInfo.InvariantCulture) != own)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     static readonly (string Word, OutcomeKind Kind)[] Kinds =
