@@ -7,7 +7,7 @@ namespace TooBusy.Assistants.ClaudeCode;
 
 // Claude Code as the assistant of a run. A task is done by a background session, `claude --bg`: it goes on by itself
 // in the working copy, the owner can open it with `claude attach`, and it is kept when the run ends. What a session
-// is doing is read from the list of the sessions, `claude agents --json`, and from the conversation Claude Code
+// is doing is read from the list of the sessions, `claude agents --json --all`, and from the conversation Claude Code
 // writes. The commands must start at the root of the project: the runner is the one of that folder.
 public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root) : IAssistant
 {

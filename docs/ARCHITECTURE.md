@@ -7,7 +7,7 @@ This describes how the code is laid out and why. The behaviour of the tool is de
 ```
 src/
   TooBusy.Core/                    domain and use cases; depends on nothing
-  TooBusy.Infrastructure/          processes, git, operating system services
+  TooBusy.Infrastructure/          processes, git, the files of the settings and of a run, operating system services
   TooBusy.Trackers.GitHub/         task tracker adapter: GitHub Issues and Projects
   TooBusy.Assistants.ClaudeCode/   assistant adapter: Claude Code
   TooBusy.Cli/                     composition root, commands, console; the `toobusy` binary
@@ -28,7 +28,7 @@ A test project is added together with the first code of the project it tests.
 - `TooBusy.Infrastructure` and every adapter reference `TooBusy.Core` only. Adapters do not reference each other.
 - `TooBusy.Cli` references everything and is the only place where implementations are chosen and wired together.
 
-`TooBusy.Architecture.Tests` reads the project files and fails when a reference breaks these rules. A new project needs a rule there.
+`TooBusy.Architecture.Tests` reads the project files and fails when a project reference breaks these rules; the packages of a project are not checked there. A new project needs a rule there.
 
 ## Core and its ports
 
@@ -38,16 +38,16 @@ A test project is added together with the first code of the project it tests.
 |---|---|---|
 | `ITaskTracker` | reading the open tasks and the description of one, and changing one: its status on the board, its labels, a comment, closing, making a new task | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
 | `IAssistant`, `IAssistantSession` | starting a session with a message, looking at it, telling it something more, asking it something without cutting its turn, stopping it; finding the session of an earlier run by what was kept of it, a `SessionTrace`; the limits of usage | `ClaudeCode` in `TooBusy.Assistants.ClaudeCode`; `ImitatedAssistant` in a demo |
-| `IWorkspace` | the working copy: how many files differ from what is committed, how many commits are not pushed | `GitWorkspace` in `TooBusy.Infrastructure` |
+| `IWorkspace` | the working copy: how many files differ from what is committed, how many commits are not pushed | `GitWorkspace` in `TooBusy.Infrastructure`; in a demo one that is always clean, inside `ImitatedRun` |
 | `IProcessRunner` | running a command with a timeout and cancellation, in a folder | `ProcessRunner` in `TooBusy.Infrastructure` |
 | `IClock` | the time, and waiting | `SystemClock` in `TooBusy.Infrastructure` |
-| `IMachine` | keeping the machine awake, notifying the owner | `LocalMachine` in `TooBusy.Infrastructure` |
+| `IMachine` | keeping the machine awake, notifying the owner | `LocalMachine` in `TooBusy.Infrastructure`; in a demo one that does neither, inside `ImitatedRun` |
 | `IRunState` | what a run leaves for the next one: the record of the task it has a session for, a `TaskRecord` | `RunStateFile` in `TooBusy.Infrastructure`; `UnwrittenState` in a demo |
 | `IRunView` | where a run tells what happens: the lines of its log, every task that is over, and what it is doing now | `RunFeed` and `PlainRun` in `TooBusy.Cli` |
 
 Core is tested with hand-written fakes of these ports. A demo is such a fake offered to the user: imitated tracker and sessions behind the same ports.
 
-Sessions are identified by the task they belong to, and nothing in the ports assumes that only one runs at a time. The first version runs one; parallel sessions in git worktrees must fit the same ports.
+Sessions are identified by the task they belong to, and the ports of the tracker and of the assistant do not assume that only one runs at a time. `IRunState` and `IWorkspace` do, as they are now: the one keeps the record of a single task, the other reads a single working copy. The first version runs one session; parallel sessions in git worktrees must fit the same ports, with a record and a working copy for each.
 
 ## Run
 
@@ -56,16 +56,16 @@ Sessions are identified by the task they belong to, and nothing in the ports ass
 `TooBusy.Core/Run` holds the run:
 
 - `Supervisor` is the run itself, behind `IQueueRun`: the loop over the tasks, the watching of a session, the limits, the pause, and telling the tracker how a task went. It writes the record of a task when its session starts and whenever what the session is found by changes, and forgets it at an outcome; before the queue it looks at the record of an earlier run, and goes on with that session in the way it was left: `TaskLineup.Recorded` says whether the task is still gone on with, and `Taking` puts it before the others. It is one flow of control. Commands reach it through `Send`, which only puts them in a line that the run looks at in one place, so nothing in it is shared between threads; a kill is the cancellation of the run. Everything it knows of time comes from `IClock`, so the tests run it start to finish in no time, with a clock that moves only when it is waited on.
-- `Outcome` is the line for toobusy at the end of a reply: the contract with the assistant, read here and written nowhere else.
+- `Outcome` is the line for toobusy at the end of a reply: the contract with the assistant, read here. Its words are written out once more only in the plays of a demo, which are replies as a session would give them.
 - `Briefing` is every text toobusy sends to a session, and what it writes into the tracker from what the session answers. The texts are those of the tool and know nothing of a project.
 - `About` is what `toobusy about` prints: how a run works, put together from the messages of `Briefing`, the lines of `Outcome`, the policy and, where there are settings, the rules of the queue, so that it tells what a run does and nothing else.
 - `RunPolicy` is the times and the counts of a run; a demo has its own. `RunPlan` is what the user and the settings give it: the milestone, the rules of the queue, the model and the effort.
-- `RunLine`, `TaskEnd` and `RunStatus` are what a run tells: a line of its log with the mark of what it tells; a task that is over, told once however it ended, with its mark and the time it took; and what the run is doing now, with the commands that mean something at the moment and, while a session waits for the owner, what the session said. `RunResult` says how the run ended and, when it did not simply run out of tasks, why.
+- `RunLine`, `TaskEnd` and `RunStatus` are what a run tells: a line of its log with the mark of what it tells; a task that is over, told once however it ended, with its mark and the time it took; and what the run is doing now, with the commands that mean something at the moment and, while a session waits for the owner, what the session said. `RunResult` says how the run ended and, when it neither ran out of tasks nor was stopped by its owner, why.
 
 The adapters know their tools and nothing of a run:
 
-- `GitHubTasks` asks `gh` as the other GitHub adapters do, and the tool itself turns the answers into lines of tab-separated fields. The statuses of a board are known by the names GitHub gives them.
-- `ClaudeCode` does a task in a background session of Claude Code. `ClaudeFolders` is where its files are; `SessionSettings` is the settings a session is started with: a hook that prints the request of the run after every step, a status line that writes the state of the session, the limits among it, to a file, and no worktree. `Transcript` reads the conversation Claude Code writes, from where the reading stopped: the steps of the session, its last reply, a usage limit; and, from its start, the plan the session keeps as a list of tasks, which a look gives as `PlanStep`s. The session is found in `claude agents --json`. A session of an earlier run is found there too, by its name or its conversation; one that is not there is lost at once, and nothing is left of one that no process has and whose conversation is not on the machine. When a session is told something, what it said before does not count any more.
+- `GitHubTasks` asks `gh` as the other GitHub adapters do, and the tool itself turns the answers into lines of tab-separated fields. The statuses of a board are known by the names GitHub gives them, whatever their case and whatever stands between their letters.
+- `ClaudeCode` does a task in a background session of Claude Code. `ClaudeFolders` is where its files are; `SessionSettings` is the settings a session is started with: a hook that prints the request of the run after every step, a status line that writes the state of the session, the limits among it, to a file, and no worktree. `Transcript` reads the conversation Claude Code writes, from where the reading stopped: the steps of the session, its last reply, a usage limit; and, from its start, the plan the session keeps as a list of tasks, which a look gives as `PlanStep`s. The session is found in `claude agents --json --all`. A session of an earlier run is found there too, by its id, the one `claude attach` takes, or by its conversation; one that is not there is lost at once, and nothing is left of one that no process has and whose conversation is not on the machine. When a session is told something, what it said before does not count any more.
 - `LocalFolder` is `.toobusy/local` of a project, which keeps itself out of git with a `.gitignore` of its own. `RunStateFile` is the record there, `session.json`, put in place whole.
 
 `Workbench.OpenRun` puts a run together: the real adapters, or `ImitatedRun`, the real `Supervisor` over made-up tasks and sessions that are plays written in the code, lasting as long as the clock says.
@@ -74,23 +74,23 @@ The adapters know their tools and nothing of a run:
 
 The settings of a project live in three places:
 
-- `TooBusy.Core/Settings` holds the model (`ProjectSettings`), the names of the keys (`SettingsKeys`) and the validation rules (`SettingsValidator`). The validator knows nothing of TOML: it takes a `SettingsDocument`, every value under its full dotted key with the line it is written on, and gives back the settings or the errors, each with its key and line.
+- `TooBusy.Core/Settings` holds the model (`ProjectSettings`), the names of the keys (`SettingsKeys`) and the validation rules (`SettingsValidator`). The validator knows nothing of TOML: it takes a `SettingsDocument`, every value under its full dotted key with the line it is written on, and gives back the settings or the errors, each with its key and, where the file has a place for it, its line.
 - `TooBusy.Infrastructure/Settings` reaches the disk. `ProjectLocator` walks up to the root of the git working copy, `SettingsFile` is `.toobusy/settings.toml` at that root, and `SettingsToml` turns TOML text into a `SettingsDocument` and settings back into text.
 - `TooBusy.Cli` asks for the project and its settings before a command runs, prints the "not set up" message, and maps the outcomes to the exit codes in `ExitCode`.
 
-TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its syntax tree only (`SyntaxParser`): the tree keeps the place of every value, and nothing of it needs reflection. The object serializer of Tomlyn is not used. Writing does not print the tree: `SettingsToml.Write` edits the existing text at the places the tree names, replacing a value that differs, adding a missing key at the end of its section and a missing section, with its comment, at the end of the file. Everything else, comments and unknown keys included, stays character for character, and a new file is the same edit of an empty text. The result is parsed again before it is returned; a layout that cannot be edited this way, such as a section written as an inline table, is refused with a `FormatException` instead of being written wrong.
+TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its syntax tree only (`SyntaxParser`): the tree keeps the place of every value, and nothing of it needs reflection. The object serializer of Tomlyn is not used. Writing does not print the tree: `SettingsToml.Write` edits the existing text at the places the tree names, replacing a value that differs, removing the line of a key the settings have no more, adding a missing key at the end of its section, or before everything else when it has no section, and a missing section, with its comment, at the end of the file. Everything else, comments and unknown keys included, stays character for character, and a new file is the same edit of an empty text. The result is parsed again before it is returned; a layout that cannot be edited this way, such as a section written as an inline table, is refused with a `FormatException` instead of being written wrong, and so is a text that is not TOML. `SettingsFile` then writes the file anew, as it writes a first one.
 
 ## Setup
 
-`TooBusy.Core/Setup` holds the steps of `toobusy init` (`ProjectSetup`) and the ports they are written against:
+`TooBusy.Core/Setup` holds the steps of `toobusy init` (`ProjectSetup`) and the ports they are written against, but for the store of the settings, which stands with the settings:
 
 | Port | What it hides | Implementations |
 |---|---|---|
 | `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation; waiting for something that is read. Every question can be gone back from, and so can a wait: the reading is told to stop | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests; none for `init --yes`, where `ProjectSetup` takes what every question proposes |
 | `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which runs the checks of the doctor that need no settings and adds the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
 | `ISetupTracker` | whether a board can be read, the labels; making a board, linking one to the repository and making a label, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
-| `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
-| `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
+| `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner`; in a demo `ImitatedBoards`, which adds made-up ones to them |
+| `ISettingsStore`, in `TooBusy.Core/Settings` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure`; in a demo `UnwrittenSettings`, which remembers instead of writing |
 
 `TooBusy.Core/Queue` holds the milestone to work on. It is the choice of the user, not a setting of the project. `TooBusy.Core/Assistant` holds two more such choices, the model and the effort the tasks are done with by default: `ModelChoice`, and `ClaudeCodeOptions` with the models and the levels that are offered. The lists are those of Claude Code, the only assistant so far, and they stay in Core until the port of the assistant is asked for them. The choices have two ports:
 
@@ -103,17 +103,17 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 
 `ProjectSetup` is a walk over its steps: an answer moves it forward, going back from a question moves it to the step before, and going back from the first one leaves the setup. It keeps the answers, so that a step that is asked again proposes what was answered. Nothing is changed before the last step is confirmed; a new board is an answer like any other until then.
 
-The options of `init` reach the steps as `SetupProposals`: what an option says is proposed before the value of the settings and before what a first setup proposes. The board of an option is checked when the boards are read and its labels when the labels are, once. `--yes` is the same walk without a dialog: `ProjectSetup` then answers every question with what it proposes and the last one with a yes, so a setup that asks nothing cannot differ from one where Enter is pressed all the way. What an option says and cannot be is a warning among the notes where somebody is asked, and where nobody is it ends the setup as failed, before anything is changed; so does a proposed text that its question refuses, and a board that cannot be read. The result carries the notes and a line for each thing that was done on GitHub, which `CliApp` prints as plain lines.
+The options of `init` reach the steps as `SetupProposals`: what an option says is proposed before the value of the settings and before what a first setup proposes. The board of an option is checked when the boards are read and its labels when the labels are, once. `--yes` is the same walk without a dialog: `ProjectSetup` then answers every question with what it proposes and the last one with a yes, so a setup that asks nothing does what one does where Enter is pressed all the way. The question about the board is where the two can differ: with no board to keep and none proposed, the screen opens on the list of the boards, where Enter takes the first of them, and a setup that asks nothing takes no board. What an option says and cannot be is a warning among the notes where somebody is asked, and where nobody is it ends the setup as failed, before anything is changed; so does a proposed text that its question refuses, and a board that cannot be read. The result carries the notes and a line for each thing that was done on GitHub, which `CliApp` prints as plain lines.
 
 The setup never asks for the repository: `ISetupEnvironment` gives the one of the `origin` remote, and the labels are read from it. `BoardSuggestions` is what the question about the board does with a typed text: it finds the boards that fit it and turns the address of any page of a project into the address of its board.
 
-`Workbench` in `TooBusy.Cli` is where these ports are put together for a project, in one place: the real adapters, or, for `--demo`, the imitations of `TooBusy.Cli/Imitation`. A demo is the real steps and the real screens over a machine where everything is installed, a tracker with made-up labels that makes and links nothing, settings that are read from the file, made up where there is none, and remembered instead of written, and choices of the milestone, the model and the effort that are forgotten when the demo ends. The `origin` remote, the boards and the milestones are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards, owners and milestones are added after the real ones until there are enough to scroll.
+`Workbench` in `TooBusy.Cli` is where these ports are put together for a project, in one place: the real adapters, or, for `--demo`, the imitations of `TooBusy.Cli/Imitation`. A demo is the real steps and the real screens over a machine where everything is installed, a tracker with made-up labels that makes and links nothing, settings that are read from the file and remembered instead of written, and choices of the milestone, the model and the effort that are forgotten when the demo ends. The demos that show a project that is ready, `toobusy --demo`, `run --demo` and `doctor --demo`, make the settings up where there is no file, and start with the choices made. The `origin` remote, the boards and the milestones are not imitated: they are read through `git` and `gh`, which changes nothing, and made-up boards, owners and milestones are added after the real ones until there are enough to scroll.
 
 `Session` is what happens on the page from the moment it is opened: the setup when the project needs it, the choices of the milestone, the model and the effort when the user has none, the menu and the run, each a screen that takes the page for a while. A run that is opened from the menu comes back to it; `toobusy run` runs the queue alone and leaves. It remembers what was done for the report that `CliApp` leaves in the terminal, which says nothing of a run again: a run leaves its own tape there. `Workbench.OutlookAsync` says what a run would take, for the menu: how many tasks, and the one it goes on with first, the task of the record or an interrupted one.
 
 ## Doctor
 
-`TooBusy.Core/Doctor` holds the checks of everything a run needs. `Checkup` runs them in their order and knows which check waits for which: `MachineAsync` is the five that need no settings, the tools and their logins, and `RunAsync` adds the settings, the repository, the board and the labels. A check ends as a `CheckResult`: passed, failed or skipped, with what it found or what is wrong and, for a failure, its fix. `Fixes` is the table of the fixes, a function of the tool, the platform and whether its package manager is there. The checks have two ports:
+`TooBusy.Core/Doctor` holds the checks of everything a run needs. `Checkup` runs them in their order and knows which check waits for which: `MachineAsync` is the five that need no settings, the tools and their logins, and `RunAsync` adds the settings, the repository, the board and the labels. A check ends as a `CheckResult`: passed, failed or skipped, with what it found or what is wrong and, for a failure, its fix. `Fixes` is the table of the fixes, a function of the tool, the platform and whether its package manager is there. The checks read the settings through `ISettingsStore`, and have two ports of their own:
 
 | Port | What it hides | Implementations |
 |---|---|---|
@@ -142,7 +142,9 @@ The tests read a screen as text. What it looks like is checked with `tools/scree
 
 ## Adding a tracker or an assistant
 
-A new project `TooBusy.Trackers.<Name>` or `TooBusy.Assistants.<Name>` implements the port, gets a rule in the architecture tests, and is registered in `TooBusy.Cli` under the name the settings use. Core does not change.
+A new project `TooBusy.Trackers.<Name>` or `TooBusy.Assistants.<Name>` implements the ports and gets a rule in the architecture tests.
+
+Nothing chooses an adapter by its name yet. `Workbench` puts the GitHub and the Claude Code adapters together whatever `tracker.type` and `assistant.type` say, and the validator lets them say `github` and `claude-code` only: the two names are constants of `SettingsKeys`. A second adapter brings that choice into `Workbench` and its name into `SettingsKeys`. Core changes with it, too, where it still knows the only tracker and the only assistant: the checks and the fixes of the doctor name `gh` and `claude`, the validator knows what the address of a GitHub board looks like, `RepositoryName` reads a GitHub remote, the steps of the setup write the two names, and `ClaudeCodeOptions` holds the models and the levels of Claude Code.
 
 ## Native AOT
 

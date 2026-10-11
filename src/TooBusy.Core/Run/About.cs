@@ -60,7 +60,7 @@ public static class About
 
             ## The tracker is kept by toobusy
 
-            A session changes nothing in the tracker: not the status of its task and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to `In Progress` and takes {interrupted} off a task that had it. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
+            A session changes nothing in the tracker: not the status of its task and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to `In Progress`; once the session has started, it takes {interrupted} off a task that had it. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
 
             ## What a session is told
 
@@ -139,7 +139,7 @@ public static class About
             | Last line | toobusy checks | toobusy does |
             |---|---|---|
             | `{Outcome.Mark} done` | the working copy is clean and every commit is pushed | puts the report into the task as a comment, closes the task and moves it to `Done` |
-            | `{Outcome.Mark} partial` | the same | makes a new task of what the reply says after `{Outcome.RestMark}`, its title on that line and its description under it, with {owner}, the labels of the first task that let a task in, and the same milestone; puts the report into the first task as a comment that names the new one, closes it and moves it to `Done` |
+            | `{Outcome.Mark} partial` | the same | makes a new task of what the reply says after `{Outcome.RestMark}`, its title on that line and its description under it, with {owner}, the labels of the first task that let a task in, and the milestone the user works on; puts the report into the first task as a comment that names the new one, closes it and moves it to `Done` |
             | `{Outcome.Mark} owner` | the working copy is clean | puts {owner} on the task and the report into it as a comment, and moves it back to `Todo`; no run takes it while it has the label |
             | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
             | `{Outcome.Mark} failed <the reason>` | nothing | stops the run; the task stays in `In Progress` and the working copy as it is, for the owner to look at |

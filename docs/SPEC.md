@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy about`, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
 
 ## Setting a project up
 
@@ -13,6 +13,7 @@ In scope:
 - the milestone to work on: the choice of the user, kept on their machine, and `toobusy milestone`;
 - the model and the effort the tasks are done with by default: choices of the user too, `toobusy model` and `toobusy effort`;
 - `toobusy` without a command: the page with the menu;
+- `toobusy about`: the text that tells how a run works;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
 - the message of `toobusy` and `toobusy run` in a project that is not set up.
 
@@ -60,15 +61,15 @@ type = "claude-code"
 
 The settings do not name the repository. The tasks are the issues of the repository the project is cloned from: the GitHub repository of the `origin` remote. A project whose `origin` is not a GitHub repository has no tasks to take.
 
-An unknown key, a missing required key and a value of the wrong type are errors that name the file, the key and the line. Validation of the file never calls the tracker: whether the board and the labels exist is `doctor`'s business.
+An unknown key, an unknown section, a key that is set twice and a value of the wrong type are errors that name the file, the key and the line. A missing required key is named with the line of its section, and without a line when the file has no such section; a file that is not TOML is an error with its line and no key. A label name must not be empty, and where the table says that two settings must not share a label, the labels are compared whatever their case. Validation of the file never calls the tracker: whether the board and the labels exist is `doctor`'s business.
 
-The file that `init` writes carries a short comment over each section. `init` on an existing file changes the values it asks about and keeps every other key and comment as it is.
+The file that `init` writes carries a short comment over each section. `init` on an existing file changes the values it asks about and keeps every other key and comment as it is; a key the settings have no more, as the board of a project that gives it up, loses its line. A file that cannot be changed in place, because it is not TOML or is laid out in a way toobusy cannot edit, is written anew, and nothing of what it had is kept.
 
 #### The milestone to work on
 
 Only the tasks of one milestone are taken, and the user says which: one of the open milestones of the repository, or none, and then tasks are taken whatever their milestone. toobusy never chooses a milestone on its own.
 
-The choice is personal. It is not a setting of the project and is not committed: it is kept on the machine of the user, for each project apart, in `projects.toml` of the user's own toobusy folder. That folder is `$XDG_CONFIG_HOME/toobusy` when the variable is set, `%APPDATA%\toobusy` on Windows, and `~/.config/toobusy` otherwise.
+The choice is personal. It is not a setting of the project and is not committed: it is kept on the machine of the user, for each project apart, in `projects.toml` of the user's own toobusy folder. That folder is `$XDG_CONFIG_HOME/toobusy` when the variable is set, `%APPDATA%\toobusy` on Windows, and `~/.config/toobusy` otherwise. On a machine that names none of them, every command that works in a project fails with `toobusy: there is no home folder to keep your choices in` and exit code 2; a demo, which keeps nothing, does not.
 
 ```toml
 ["/Users/ann/Projects/rocket"]
@@ -77,7 +78,7 @@ model = "opus"          # an empty name means the assistant's own model
 effort = "high"
 ```
 
-A project is known by the path of its root, so a second clone and a worktree have choices of their own. The milestone is kept by its title. The file holds every personal choice of a project, the model and the effort among them, each under its own key; a key that is not there is a choice that is not made. toobusy writes the file whole; a file it cannot read counts as one that says nothing.
+A project is known by the path of its root, so a second clone and a worktree have choices of their own. The milestone is kept by its title. The file holds every personal choice of a project, the model and the effort among them, each under its own key; a key that is not there is a choice that is not made. toobusy writes the file whole; a file that is not TOML counts as one that says nothing, and is replaced when a choice is saved.
 
 A choice is checked against the open milestones whenever it is used:
 
@@ -103,7 +104,7 @@ A session of the assistant is started with the model and the effort.
 
 ### Not set up
 
-In a git repository without `.toobusy/settings.toml`, `toobusy run` (with any options) and, without a terminal, `toobusy` print to the error stream and exit with code 2:
+In a git repository without `.toobusy/settings.toml`, `toobusy run` and, without a terminal, `toobusy` print to the error stream and exit with code 2:
 
 ```
 toobusy: this project is not set up yet.
@@ -112,7 +113,7 @@ Run `toobusy init` to set it up.
 
 The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
 
-In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. `--help`, `--version` and `about` work everywhere.
+In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. Nor does `run --demo`, which makes the settings up, as [a demo](#toobusy-init) of a project that is ready does. `--help`, `--version` and `about` work everywhere.
 
 ### The screen
 
@@ -136,7 +137,7 @@ From top to bottom the screen is:
  ────────────────────────────────────────────────────
  ↑↓ move · space select · enter confirm · ctrl+c exit     the keys
 
- ●──◉──○                                                  the steps, on grey
+ ●──◉──○──○──○                                            the steps, on grey
 ```
 
 - The bar names the tool and the folder of the project, shown from `~` when it is under the home folder, and says at its right what the command is doing. It is three lines on a grey ground: an empty one, the text, an empty one.
@@ -149,7 +150,7 @@ From top to bottom the screen is:
 - While toobusy reads something from the tracker, the choice says what it reads and, under it, shows eleven dots that a light runs along, from the first to the last and back, a second and a half each way: the dot it is on is in the accent, and those it has left fade behind it to the muted colour of the rest. A terminal of sixteen colours has the lit dot without the fade, and without colours the dots stand still. Nobody has to wait: the keys work while toobusy reads. Where there is somewhere to go back to, `Back` stands under the dots from the first moment, and Enter or Escape goes back at once; where Escape leaves the page it leaves it from here too, asked twice, and so does Ctrl+C twice. What was being read is told to stop and is not waited for, so a tracker that never answers holds nobody. Where what is read belongs to one row of a list, the dots stand on that row, after its name, and the rest of the list is used meanwhile.
 - The keys are hints of the form `enter choose`: the name of each key is a little lighter than what it does, so that the eye finds it.
 - Choices stand one under another, never side by side.
-- The body between the bar and the question gives way when the window is short, its oldest lines first.
+- The question, the choice and the keys stand at the bottom of the window, over the steps of a setup, and the body stands under the bar: in a window taller than the picture above the empty lines are between the body and the question. The body gives way when the window is short, its oldest lines first.
 - The last line of the setup, after an empty one, shows its steps on the same grey as the bar, as marks joined by lines and without their names: `●` for those that are done, `◉` for the one that is asked, `○` for those to come. The confirmation is not a step: when it is asked, every mark is done. Marks that do not fit go on to the next line.
 - No line is longer than the window is wide: what does not fit is cut with `…`. The screen is drawn again when the size of the window changes.
 
@@ -163,7 +164,7 @@ Every command takes its colours from one palette, defined in one place. Each rol
 
 | Role | Dark | Light | Marks |
 |---|---|---|---|
-| accent | `#D4503F` | `#B03A2E` | the selected line, the cursor, the chosen tab (as its ground), the mark of a text field, the step that is asked, a command in a message |
+| accent | `#D4503F` | `#B03A2E` | the selected line, the cursor, the chosen tab (as its ground, which is the light value in a dark terminal too), the step that is asked, the mark that turns and the steps of a plan that are done on the page of a run, the sign of a check that is running, a command in a message |
 | error | `#F0647E` | `#C2255C` | `✘` and the text of a failure, the reason an answer is refused |
 | success | `#4EC97A` | `#1A7F37` | `✔`, steps that are done, a board that is linked |
 | warning | `#E5C07B` | `#9A6700` | `!` and the text of a warning |
@@ -172,29 +173,34 @@ Every command takes its colours from one palette, defined in one place. Each rol
 
 The bar and the steps of a screen stand on a grey a little off the background, `#303030` in a dark terminal and `#E4E4E4` in a light one; a terminal of sixteen colours has no such ground. The accent is Claude's clay shifted toward red; the error is pinker than the accent, so that the two are told apart. The palette is provisional: the brand colours are a later design decision. There is no colour when `NO_COLOR` is set or the output is not a terminal.
 
-**Which value is used.** The terminal says what it can show; toobusy does not ask it for its background. A terminal with truecolor (`COLORTERM` is `truecolor` or `24bit`) gets the dark values, unless `COLORFGBG` names a light background (its last field is `7` or `15`), and then the light ones. A terminal without truecolor gets the nearest of the sixteen colours: red for the accent, bright magenta for the error, green, yellow and bright black for muted. Dark is the default; a light terminal that does not say so gets the dark values, and some of them, the warning above all, are hard to read on it.
+**Which value is used.** The terminal says what it can show; toobusy does not ask it for its background. A terminal with truecolor (`COLORTERM` is `truecolor` or `24bit`) gets the dark values, unless `COLORFGBG` names a light background (its last field is `7` or `15`), and then the light ones. A terminal without truecolor gets the nearest of the sixteen colours: red for the accent, bright magenta for the error, green, yellow, bright black for muted and white for quiet; the chosen tab is shown reversed. Dark is the default; a light terminal that does not say so gets the dark values, and some of them, the warning above all, are hard to read on it.
 
 ### `toobusy init`
 
-`init` asks what it needs, shows what it is about to do, and does it when the user saves: it writes `.toobusy/settings.toml` and, when the user asked for that, makes a GitHub project and links the project of the tasks to the repository. Until then it changes nothing, and it never touches the working copy or git.
+`init` asks what it needs, shows what it is about to do, and does it when the user saves: it writes `.toobusy/settings.toml`, makes a GitHub project when the user asked for a new one, links the project of the tasks to the repository when it is not linked yet, and makes the two labels a run puts on tasks when the repository does not have them. Until then it changes nothing, and it never touches the working copy or git.
 
 The steps, in order:
 
-1. **Environment.** The checks of [`doctor`](#toobusy-doctor) that need no settings: whether `git`, `gh` and `claude` are installed and whether `gh` and Claude Code are logged in; and whether the `origin` remote is a GitHub repository. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh`, or when the `origin` remote is not a GitHub repository, the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
+1. **Environment.** The checks of [`doctor`](#toobusy-doctor) that need no settings: whether `git`, `gh` and `claude` are installed and whether `gh` and Claude Code are logged in; and whether the `origin` remote is a GitHub repository. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a `gh` that is logged in, or when the `origin` remote is not a GitHub repository, nothing is verified, and the setup says so: the labels are typed and not chosen, a board is taken by its address without being checked, nothing is linked and no label is made. With a `gh` that is logged in the boards of the user are listed all the same, and a new board can be made.
 2. **Tracker.** GitHub is the only one; it is shown, not asked.
 3. **Project.** The GitHub Projects board of the tasks, optional. A project that has one already, the board of the settings or one that is linked to the repository, shows it as the first of two choices, as it stands in the list of the boards, with `Choose another project` under it; one Enter keeps it. That choice, and a project without a board, open four ways to answer, as tabs that Tab goes through: one of the boards the user can reach, the address of a board, a new board with its owner and title, or no board. The address of any page of a project is taken as its board. A chosen board is checked for access and for the token scope it needs.
-4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first.
+4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first. A label of the settings that the repository has no more stays among the choices, here and in the questions below.
 5. **Labels to take.** A multiple choice over the remaining labels; nothing chosen means any task.
 6. **Owner's label.** The label a run puts on a task that cannot go on without the owner: one of the labels of the repository that are not labels to take, or `New label…`, the last of the list, where a name is typed. A first setup proposes `needs-owner`: the label of that name when the repository has it, a new one otherwise.
 7. **Interrupt label.** The label a run puts on a task it had to stop, chosen in the same way among the labels that neither block nor let a task in and are not the owner's. A first setup proposes `interrupted`.
 8. **Assistant.** Claude Code is the only one; it is shown, not asked.
-9. **The last page.** What saving will do, in the words of the questions and not as the text of the file, and under it the question with three choices: `Save and exit`, `Exit without saving` and `Back`. A first setup shows the answers and says that they will be written. A setup that exists says what changes in it, each setting as it was and as it will be: `Project: Rocket → none`. Under it stand the things to be done on GitHub: a new board to make, a board to link to the repository, a label to make. A board that is not linked to the repository yet is linked; one that is linked is left alone, and no link of another board is ever taken away. A label of the two that the repository does not have is made: `The label “needs-owner” will be made in acme/rocket.` `Exit without saving` does nothing and exits with code 1. On `Save and exit` the board is made, the board is linked, the labels are made and the file is written, in that order. When GitHub refuses any of it, the file is not written, and `init` says what was refused, naming the board when it was made already, and exits with code 1. When there is nothing to write and nothing to do on GitHub, `init` has no last page, says `Nothing to change: the settings already say this.` and exits with code 0.
+9. **The last page.** What saving will do, in the words of the questions and not as the text of the file, and under it the question with three choices: `Save and exit`, `Exit without saving` and `Back`. A first setup shows the answers and says that they will be written. A setup that exists says what changes in it, each setting as it was and as it will be, a board by its title and its address: `Project: Rocket  https://github.com/orgs/acme/projects/1 → none`. Under it stand the things to be done on GitHub: a new board to make, a board to link to the repository, a label to make. A board that is not linked to the repository yet is linked; one that is linked is left alone, and no link of another board is ever taken away. A label of the two that the repository does not have is made: `The label “needs-owner” will be made in acme/rocket.` `Exit without saving` does nothing and exits with code 1. On `Save and exit` the board is made, the board is linked, the labels are made and the file is written, in that order. When GitHub refuses any of it, the file is not written, and `init` says what was refused, naming the board when it was made already, and exits with code 1. When there is nothing to write and nothing to do on GitHub, `init` has no last page, says `Nothing to change: the settings already say this.` and exits with code 0.
 
 **Going back.** Escape goes back from every question to the one before, which proposes what was answered there. Escape from the first question leaves the setup with nothing changed and exit code 1, as leaving with Ctrl+C does, and it is asked about in the same way: the keys say `esc exit` there, the first Escape gives `press esc again to exit`, and the second one leaves.
 
 After writing, `init` says that the file is to be committed.
 
-**An existing setup.** When the settings exist, `init` runs the same steps with the current values proposed, so pressing Enter through it changes nothing. A settings file that does not validate is reported with its errors, and `init` proposes whatever it could read.
+**An existing setup.** When the settings exist, `init` runs the same steps with the current values proposed, so pressing Enter through it changes nothing, but for two things:
+
+- Settings without a board propose nothing for the project: the question is asked as in a first setup, with the board that is linked to the repository as the one Enter keeps, or else with the list of the boards open. `No project` has to be chosen again to keep it so.
+- The labels are written in the order and the spelling the repository lists them in. A list of the settings that stands in another order is shown as a change, and is written in the order of the repository.
+
+A settings file that does not validate is reported with its errors, and nothing of it is proposed: the questions propose what a first setup does.
 
 **Without questions.** Every answer has an option, and `--yes` accepts the proposed value of every question the options leave open, the confirmation included:
 
@@ -204,9 +210,9 @@ After writing, `init` says that the file is to be committed.
 | `--new-board <title>` | a new board with this title |
 | `--board-owner <login>` | whose the new board will be: the user or one of their organisations; without it, the owner of the repository when a board can be made there, and otherwise the first GitHub names |
 | `--no-board` | no board |
-| `--blocking-label <name>` | a blocking label; repeatable |
+| `--blocking-label <name>` | a blocking label; repeatable, and several names can be given at once, separated by commas |
 | `--no-blocking-labels` | no blocking label |
-| `--take-label <name>` | a label to take; repeatable |
+| `--take-label <name>` | a label to take; repeatable, with commas in the same way |
 | `--no-take-labels` | no label to take: any task |
 | `--owner-label <name>` | the owner's label |
 | `--interrupt-label <name>` | the interrupt label |
@@ -214,9 +220,9 @@ After writing, `init` says that the file is to be committed.
 
 An option that names labels names all of them: `--blocking-label manual` over settings that block two labels leaves one. Options that answer one question differently, such as `--board` with `--no-board` or `--take-label` with `--no-take-labels`, and `--board-owner` without `--new-board`, are a wrong command line: exit code 2.
 
-Without `--yes` the options are the proposed answers of the interactive setup, before those of the settings that exist: the board of `--board` is the one Enter keeps, `--new-board` and `--no-board` open the question on their tab, the labels are marked or pointed at. An option that cannot be taken, a text that is not the address of a board, an owner a board cannot be made for, a label the repository does not have, is said as a warning over the questions, and its question is asked as if the option were not given.
+Without `--yes` the options are the proposed answers of the interactive setup, before those of the settings that exist: the board of `--board` is the one Enter keeps, `--new-board` and `--no-board` open the question on their tab, the labels are marked or pointed at. An option that cannot be taken, a text that is not the address of a board, an owner a board cannot be made for, a label the repository does not have, is said as a warning over the questions. A board or an owner that cannot be taken leaves its question as if the option were not given; of the labels an option names, those the repository has are proposed, and the others are left out.
 
-With `--yes` there is no screen, with a terminal or without one. Every question gets what it proposes: the option, else the value of the settings that exist, else what a first setup proposes, where the board is the one linked to the repository or none, no label blocks, any task is taken, and the two labels are `needs-owner` and `interrupted`. Then the same things are done as on `Save and exit`: a new board is made, the board is linked, the labels are made, the file is written. What comes out is plain lines: the name of the command and the folder, what is wrong with the machine as the setup says it, the answers as in the report, a line for each thing that was done on GitHub, `The label “needs-owner” was made in acme/rocket.`, and how the setup ended. Settings that already say all of it end with `Nothing to change: the settings already say this.` and exit code 0.
+With `--yes` there is no screen, with a terminal or without one. Every question gets what it proposes: the option, else the value of the settings that exist, else what a first setup proposes, where the board is the one linked to the repository or none, no label blocks, any task is taken, and the two labels are `needs-owner` and `interrupted`. Settings without a board have no value to keep there: over them `--yes` takes the board that is linked to the repository, when there is one, unless `--no-board` is given. Then the same things are done as on `Save and exit`: a new board is made, the board is linked, the labels are made, the file is written. What comes out is plain lines: the name of the command and the folder, what is wrong with the machine as the setup says it, the answers as in the report, a line for each thing that was done on GitHub, `The label “needs-owner” was made in acme/rocket.`, and how the setup ended. Settings that already say all of it end with `Nothing to change: the settings already say this.` and exit code 0.
 
 With `--yes` a value that fails the check of its question is an error with exit code 1, and nothing is made, linked or written. The last line names the question and says why: `✘ Labels to take: acme/rocket has no label “nice”. The settings were not written.` The checks are those of the questions:
 
@@ -224,7 +230,7 @@ With `--yes` a value that fails the check of its question is an error with exit 
 - a blocking label or a label to take that the repository does not have, and a label to take that is a blocking label, whether an option names it or the settings do;
 - an owner's label that is a label to take, and an interrupt label that is a label to take, a blocking label or the owner's label. These two need not be in the repository: one that is not there is made, as the interactive setup makes it.
 
-Settings that exist and do not validate are an error too: their errors are printed, and the file stays as it is, because nobody is there to see a first setup written in its place. What GitHub refuses on saving fails as it does in the interactive setup, after the lines of what was done before it. Where the tracker cannot be read, without a working `gh` or a GitHub `origin`, `--yes` does what the interactive setup does: it says that nothing is verified, takes the options as they are typed, checks the labels against each other only, makes and links nothing, and writes the file.
+Settings that exist and do not validate are an error too: their errors are printed, and the file stays as it is, because nobody is there to see a first setup written in its place. What GitHub refuses on saving fails as it does in the interactive setup, after the lines of what was done before it. Where nothing is verified, without a `gh` that is logged in or a GitHub `origin`, `--yes` does what the interactive setup does: it says that nothing is verified, takes the options as they are typed, checks the labels against each other only, links nothing, makes no label, and writes the file. A new board is not a typed value: with a `gh` that is logged in it is made, and without one `--new-board` is an error, as GitHub names nobody it can be made for.
 
 Without a terminal and without `--yes`, `init` changes nothing and fails with exit code 1:
 
@@ -233,12 +239,12 @@ toobusy: `init` asks questions and needs a terminal.
 Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.
 ```
 
-**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, with `--yes` as well as on the screen, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`. A run of a demo is the real run over made-up tasks and made-up sessions, described with [the page of a run](#a-demo-of-a-run). The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
+**A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the settings that exist are read, nothing is made, linked or written, with `--yes` as well as on the screen, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. In a folder whose `origin` remote is not a GitHub repository the setup of a demo says, as the real one does, that nothing is verified, and its labels are typed. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`, where nothing is made up for them: the settings are those the project has, when it has any, and nothing is chosen yet. Without a terminal `toobusy --demo` is no different from `toobusy`: it prints the help or the "not set up" message. A run of a demo is the real run over made-up tasks and made-up sessions, described with [the page of a run](#a-demo-of-a-run). The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
 
-**The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name.
+**The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name; in the question about the project it takes the place of the line that explains the tab, and a board that cannot be reached is said over the question.
 
 - **`Back`.** Wherever Escape goes back and does not leave the page, a list ends with a row `Back` that does what Escape does: in the lists the menu opens and in the steps of a setup opened from it, in a selection, a multiple choice, a confirmation and the lists of the boards. Where Escape would leave the page there is no `Back`: in the menu, which has `Exit`, in the first question of `init`, on the first run and in `toobusy milestone`, `model` and `effort`. A page that waits for the tracker has it under its dots. A question that is answered with a text has no list to end with it, and a list of the boards that a filter has emptied has none either; Escape goes back from them. The row names its key at its right, `Back  esc`, and the line of the keys does not say `esc back` then: it says so only where there is no such row. Where Escape leaves the page, the keys go on saying `esc exit`, except in the menu, whose `Exit` row names the key at its right in the same way: `Exit  esc`.
-- A selection moves with Up and Down, a multiple choice marks with the space bar, and the last question of a setup is `Save and exit` over `Exit without saving`. A list that does not fit shows eight rows, five for the boards, and says above and below how many rows are beyond them: `↑ 2 more`, `↓ 4 more`.
+- A selection moves with Up and Down, or with `k` and `j`, a multiple choice marks with the space bar, and the last question of a setup is `Save and exit` over `Exit without saving`. A list that does not fit shows eight rows, five for the boards, and says above and below how many rows are beyond them: `↑ 2 more`, `↓ 4 more`.
 - A text is edited where the cursor is: Left, Right, Home and End move it, Backspace and Delete remove a character, and Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W do what they do in a shell. A pasted text is drawn once.
 
 The question about the project, when the ways to answer are open:
@@ -256,11 +262,11 @@ The question about the project, when the ways to answer are open:
  type to filter · ↑↓ move · enter choose · ctrl+c exit
 ```
 
-Every tab stands on the grey of the bar, its name a little quieter than a plain text, and the chosen one is white on the deeper accent; without colours the chosen one is in brackets. The place under the tabs is as tall as the list of the boards, whatever tab is open, so that nothing moves when the tab changes: a list starts at its top, and the line where a text is typed, with what is said about it, stands at its bottom, with empty lines between.
+Every tab stands on the grey of the bar, its name a little quieter than a plain text, and the chosen one is white on the deeper accent; without colours the chosen one is in brackets. The place under the tabs is as tall as the tallest of the tabs, whatever tab is open, so that nothing moves when the tab changes: a list starts at its top, and the line where a text is typed, with what is said about it, stands at its bottom, with empty lines between.
 
-- **Your projects** lists the open boards of the user and of their organisations, those linked to the repository first, each by its title with its address beside it. Typing narrows the list, the best fit first: the board of that address, a title that starts with the text, a title that has it inside, an address that has it, as the name of the owner is. The boards come from one request through `gh` with a timeout of three seconds; when `gh` is missing, not logged in, lacks the scope to read projects or is too slow, this tab is not there.
+- **Your projects** lists the open boards of the user and of their organisations, those linked to the repository first, each by its title with its address beside it. Typing narrows the list, the best fit first: the board of that address, a title that starts with the text, a title that has it inside, an address that has it, as the name of the owner is. The boards come from one request through `gh` with a timeout of three seconds, which is made once more without the repository when it fails, as it does over a repository that cannot be read; when `gh` is missing, not logged in, lacks the scope to read projects or is too slow, this tab is not there.
 - **By URL** takes the address of a board or of any page of it.
-- **New project** asks whose the board will be and for its title. The owners, the user and their organisations, are a list at the top of the tab, as the boards are in theirs: Up and Down move the pointer, which starts on the owner of the repository. The title is typed in the line at the bottom. The board is made only when the setup is confirmed. The tab is not there when `gh` gave no owners.
+- **New project** asks whose the board will be and for its title. The owners, the user and their organisations, are a list at the top of the tab, as the boards are in theirs: Up and Down move the pointer, which starts on the owner of the repository when a board can be made there, and on the user otherwise. The title is typed in the line at the bottom. The board is made only when the setup is confirmed. The tab is not there when `gh` gave no owners.
 - **No project** leaves the setting out.
 
 Escape from these tabs comes back to those two choices when the project has a board, and goes back a step when it has none.
@@ -301,13 +307,13 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 
 | Choice | Opens |
 |---|---|
-| `Run` | the run, on its tape; when it is over the menu is back by itself, with how the run went said above it |
+| `Run` | the run, on its tape; when it is over the menu is back by itself, with how the run went said above it. The checks of [`doctor`](#toobusy-doctor) are not made first, as `toobusy run` makes them: what is missing stops the run when it is met |
 | `Assistant` | the model and the effort, described below; Escape goes back to the menu |
 | `Milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
 | `Settings` | the steps of `init` with the current values proposed; Escape from the first of them goes back to the menu, and so does the end of the setup, whose last line is shown above the menu |
 | `Exit` | nothing: it leaves the page, as Escape twice and Ctrl+C twice do |
 
-After `Run` stands the number of tasks a run would take as things are: those that are ready and those that open after them. It is counted when the menu opens, and again after a run, after a change of the milestone and after the settings. While the tracker is read, the dots of a wait run in its place, the row is muted, and Enter does nothing on it. A run that would take no task is not opened either: the row says `no tasks`, and Enter counts again, for what has changed meanwhile. When the tasks cannot be read the row says so, and the run is opened all the same: it says why it stops.
+After `Run` stands the number of tasks a run would take as things are: those that are ready and those that open after them. It is counted when the menu opens, and again after a run, after a change of the milestone and after the settings. While the tracker is read, the dots of a wait run in its place, the row is muted, and Enter does nothing on it. A run that would take no task is not opened either: the row says `no tasks`, and Enter counts again, for what has changed meanwhile. When the tasks cannot be read the row says so, `the tasks cannot be read`, and the run is opened all the same: it says why it stops. Where the `origin` remote is not a GitHub repository there is no run to open: the menu stays, and says so above itself.
 
 When the task that a run would take first is one that an earlier run had to stop, a task with the label of interrupted tasks, the row says so instead of the number, in the colour of a warning: `Run  interrupted: #71 Paint the windows yellow`. It is the task the next run goes on with, and Enter opens that run as it does on a count; the number of the tasks comes back when no task is interrupted any more. A title that does not fit is cut, and the number is not. A task that is interrupted and held, or that waits for another one, is not taken first, so the row does not name it. The row names in the same way the task that an earlier run left with a session, the task of [the record](#going-on-with-a-session): a run goes on with it before any other, whatever its status.
 
@@ -332,7 +338,7 @@ These lists end with `Back`, as every list does that there is somewhere to go ba
 
 The answers of `Settings` are written to the settings of the project and are to be committed; the milestone, the model and the effort are kept on the machine of the user.
 
-When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone, the model and the effort when they were chosen. A run has left its tape in the terminal already, with its tasks and how they went; after a run with nothing else to report, nothing more is printed. The exit code is 0, and 1 when a setup failed on GitHub; after a run it is the exit code of the last one.
+When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone, the model and the effort when they were chosen. A run has left its tape in the terminal already, with its tasks and how they went; after a run with nothing else to report, nothing more is printed. A demo adds that what was chosen is not remembered and, after a run, that the tasks and the sessions were made up. The exit code is 0, and 1 when a setup failed on GitHub; after a run it is the exit code of the last one.
 
 Without a terminal there is nobody to ask: `toobusy` prints its help in a project that is set up and the "not set up" message in one that is not.
 
@@ -345,16 +351,16 @@ Without a terminal there is nobody to ask: `toobusy` prints its help in a projec
 | `toobusy milestone <title>` | chooses the open milestone with that title and prints it with its due date and its open tasks. The title is taken whatever the case of its letters, unless two milestones differ only in it |
 | `toobusy milestone --none` | chooses to work without a milestone |
 | `toobusy milestone` in a terminal | opens the list of the milestones on a page; Escape leaves the choice as it was |
-| `toobusy milestone` without a terminal | prints the choice: `Milestone: v0.3.0`, `Milestone: no milestone` or `Milestone: not chosen`, and after a milestone that is not open any more, `(not open any more)` |
+| `toobusy milestone` without a terminal | prints the choice: `Milestone: v0.3.0`, `Milestone: no milestone` or `Milestone: not chosen`, and after a milestone that is not open any more, `(not open any more)`. Under a choice that nothing can be run with stands how to make one: ``Choose it with `toobusy milestone <title>` or `toobusy milestone --none`.`` |
 
-A title that no open milestone has fails with exit code 1 and names the open ones:
+A title that no open milestone has fails with exit code 1 and names the open ones, or says `The repository has no open milestones.` in their place:
 
 ```
 toobusy: there is no open milestone “v0.1.0”.
 The open ones: v0.2.0, v0.3.0
 ```
 
-It fails in the same way when the milestones cannot be read. A title together with `--none` is a wrong command line.
+When the milestones cannot be read it fails with exit code 1 as well, and says that in one line: `toobusy: the milestones of acme/rocket cannot be read`, or, in a project whose `origin` remote is not a GitHub repository, that there are no milestones to choose from. A title together with `--none` is a wrong command line.
 
 ### `toobusy model` and `toobusy effort`
 
@@ -362,13 +368,15 @@ It fails in the same way when the milestones cannot be read. A title together wi
 
 | Command | Does |
 |---|---|
-| `toobusy model <name>` | chooses the model with that name, as it is written, and prints `Model: <name>`. An empty name fails with exit code 1 |
+| `toobusy model <name>` | chooses the model with that name, as it is written but for the spaces around it, and prints `Model: <name>`. A name that is empty or all spaces fails with exit code 1 |
 | `toobusy model --default` | chooses the assistant's own model |
 | `toobusy model` in a terminal | opens the list of the models on a page; Escape leaves the choice as it was |
 | `toobusy model` without a terminal | prints the choice: `Model: opus`, `Model: the assistant's own` or `Model: not chosen` |
 | `toobusy effort <level>` | chooses the level, whatever the case of its letters, and prints `Effort: <level>` |
 | `toobusy effort` in a terminal | opens the list of the levels on a page; Escape leaves the choice as it was |
 | `toobusy effort` without a terminal | prints the choice: `Effort: high` or `Effort: not chosen` |
+
+Without a terminal a choice that is not made is followed by a line that says how to make it: ``Choose it with `toobusy model <name>` or `toobusy model --default`.`` and ``Choose it with `toobusy effort <level>`: low, medium, high, xhigh, max.``
 
 A name together with `--default` is a wrong command line. A level that the assistant does not have fails with exit code 1 and names the levels:
 
@@ -381,12 +389,16 @@ The levels: low, medium, high, xhigh, max
 
 `run` takes the tasks of the queue one after another, as [Running the tasks](#running-the-tasks) describes.
 
+`run` does not start over settings that do not validate: it prints `toobusy: the settings of this project are not valid.` and the errors, a line each, and exits with code 1. Then come the checks of [`doctor`](#toobusy-doctor), and after them the choices of the user.
+
 `run` does not start without a milestone to work on. When the user has not chosen one, or the chosen one is not open any more, it exits with code 1:
 
 ```
 toobusy: the milestone to work on is not chosen.
 Run `toobusy milestone` to choose it.
 ```
+
+For a milestone that is not open any more the first line names it instead: `toobusy: the milestone “v0.2.0” is not open any more.`
 
 Nor does it start before the model and the effort are chosen. The first that is missing is named, in the same way and with the same exit code:
 
@@ -399,13 +411,15 @@ A project whose `origin` remote is not a GitHub repository has no tasks to take:
 
 In a terminal `run` shows the run on its tape, and leaves the tool when the run is over: no menu is opened, and no key is waited for. Without a terminal it prints the log of the run line by line, takes no commands, and stopping the tool kills the run.
 
+The exit code says how the run ended: 0 for a run that ran out of tasks, that its owner stopped with `stop` or `abort`, or that a usage limit paused; 1 for one that stopped because something was wrong; 130 for one that was killed.
+
 ### `toobusy about`
 
 `about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions and the skills of the project to it. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
 
 It prints, as Markdown and in this order: which tasks a run takes and how it does them; that toobusy keeps the tracker, and what it does there before a session; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit, those for a session that a later run goes on with, and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
 
-In a project that is set up the labels of its settings are named, `the needs-owner label`, and it is said whether the project has a board. Where there are no settings, or they do not validate, the labels are spoken of without their names, and the text says that no settings are read.
+In a project that is set up the labels of its settings are named, as in ``the `needs-owner` label``, and it is said whether the project has a board. Where there are no settings, or they do not validate, the labels are spoken of without their names, and the text says that no settings are read.
 
 `about` reads nothing but the settings: it needs no network, no terminal and no `gh`, works outside a git working copy, as `--help` does, and exits with code 0.
 
@@ -446,6 +460,8 @@ A check whose need is not met is skipped and says what it waits for; the board o
 
 A tool is on the path when it tells its version: `git --version`, `gh --version`, `claude --version`. The `git` that macOS has before its developer tools are installed is on the path and only says how to install them, so it does not count. Claude Code is logged in when `claude auth status` exits with 0 and its answer, which is JSON, does not have `"loggedIn": false`; nothing of a session is started for it. Labels are compared whatever their case, as GitHub does.
 
+One thing a run needs is not checked: that Claude Code trusts the folder of the project. A run finds that out when it starts its first session, and says to run `claude` there once.
+
 **Fixes.** Each failure names a fix for the platform the tool runs on:
 
 | | macOS | Linux | Windows |
@@ -462,16 +478,16 @@ A command of a package manager is proposed only when that manager is on the path
 
 **A demo.** `doctor --demo` runs the same checks over a made-up machine that has it all: every tool, both logins, a repository and a board that can be read, and every label the settings name; where the project has no settings they are made up. Each check takes a moment, so that the line of a running check can be looked at, and the last line says that the checks were made up.
 
-**Use by other commands.** `init` runs the checks that need no settings and goes on whatever they say. `run` runs all of them before anything else, after it has found the settings and before it asks for the milestone, the model and the effort. When one fails it prints the failures with their fixes, as errors, says that the run did not start, and exits with code 1. In a terminal the check that is running is shown while it runs and leaves nothing behind. A demo of a run checks nothing.
+**Use by other commands.** `init` runs the checks that need no settings and goes on whatever they say. `toobusy run` runs all of them before anything else, after it has found the settings and before it asks for the milestone, the model and the effort. When one fails it prints the failures with their fixes, as errors, says that the run did not start, and exits with code 1. In a terminal the check that is running is shown while it runs and leaves nothing behind. A demo of a run checks nothing, and neither does a run that is opened from the menu of `toobusy`.
 
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | done |
-| 1 | failed: a check did not pass, a value was refused, the setup was declined or left, the milestone to work on, the model or the effort is not chosen, a run stopped because something was wrong |
-| 2 | there is no project, the project is not set up, or the command line is wrong |
-| 130 | a run was killed while a session worked |
+| 0 | done; a run that ran out of tasks, that its owner stopped, or that a usage limit paused |
+| 1 | failed: a check did not pass, a value was refused, `init` was declined or left, the settings do not validate, the milestone to work on, the model or the effort is not chosen, a run stopped because something was wrong |
+| 2 | there is no project, the project is not set up, there is no home folder to keep the choices in, or the command line is wrong |
+| 130 | a run was killed |
 
 ### Tests
 
@@ -506,7 +522,7 @@ A task is **held**, and no run takes it as things are, when one of these is so, 
 | there are labels to take and it has none of them | `it has none of the labels to take: feature, bug` |
 | the project has a board, and the task does not stand there as one to do | `its status is In Progress`, `it is not on the board` |
 
-In a project with a board a task is taken only from the status `Todo`. The three statuses a run knows are those GitHub gives a new board, `Todo`, `In Progress` and `Done`, whatever the case of their letters. A project without a board has no statuses, and nothing of them is asked.
+In a project with a board a task is taken only from the status `Todo`. The three statuses a run knows are those GitHub gives a new board, `Todo`, `In Progress` and `Done`, whatever the case of their letters and whatever stands between the letters: `To do` and `in-progress` are those statuses too. A project without a board has no statuses: no task is held by one, and none is moved.
 
 A task **waits** for the open tasks that block it and for its own open sub-issues. It opens when they are closed, and is held while one of them is held or is not among the tasks that were read: `it waits for #7 (it has the manual label)`.
 
@@ -522,7 +538,7 @@ The tasks that can be taken now are taken in this order: those with the label of
 6. **The session is watched** until its turn ends with a line for toobusy.
 7. **The outcome is checked** against the working copy, and the tracker is told.
 
-A session of Claude Code is a background one, started with `claude --bg`: it goes on by itself, the owner can open it with `claude attach <id>`, and it is kept when the run ends. Every line of the run that speaks of a session names that command. The session is started in the permission mode `auto`, with nobody to answer its permission prompts, and works in the working copy itself, without a worktree. Claude Code must trust the folder: where it does not, the run stops and says to run `claude` there once.
+A session of Claude Code is a background one, started with `claude --bg`: it goes on by itself, and the owner can open it with `claude attach <id>`. The run stops it when its task is over, and never removes it: it stays among the sessions of Claude Code, with its conversation. The lines of a run that call for a look at a session name that command: a task that is taken, a session that waits or is told to go on, a kill, and a run that stops because something is wrong with a task. The session is started in the permission mode `auto`, with nobody to answer its permission prompts, and works in the working copy itself, without a worktree. Claude Code must trust the folder: where it does not, the run stops and says to run `claude` there once. A task whose session did not start, for this or for another reason, goes back to `Todo`.
 
 ### What a session is told
 
@@ -537,7 +553,7 @@ The first message of a session names the task and gives the rules. It starts wit
 - a task that was interrupted before has the report of that session as its last comment that starts with `**Interrupted.**`;
 - a task that a session worked on before and left no report of, its conversation being gone, may have the changes of that session in the working copy: the session looks at them, keeps what is right and undoes what is not;
 - what cannot be done without the owner, as described below;
-- the last reply is the report of the task, and its last line is one of:
+- the last reply is the report of the task, and its last line is one of the first four of these. The fifth is not in the first message: only the request of [`/abort`](#stopping) asks for it:
 
 | Line | Means |
 |---|---|
@@ -551,7 +567,7 @@ The line is read whatever its case and whatever marks of emphasis stand around i
 
 ### How a task ends
 
-What the session says is checked first: after `done`, `partial`, `owner` and `interrupted` the working tree must be clean, and after `done` and `partial` the branch must have no commit that its upstream lacks. Then the tracker is told:
+What the session says is checked first: after `done`, `partial`, `owner` and `interrupted` the working tree must be clean, and after `done` and `partial` the branch must have no commit that its upstream lacks; a branch without an upstream has nothing to lack, and passes. Then the tracker is told:
 
 | Outcome | The tracker |
 |---|---|
@@ -562,7 +578,13 @@ What the session says is checked first: after `done`, `partial`, `owner` and `in
 
 Every comment starts with what became of the task, `**Done.**` for one, and ends with the session.
 
-**The run stops**, with exit code 1 and the task left as it is, in `In Progress`, when the session failed, when it ended without saying how the task went, when the check of the working copy did not pass, when the tracker refused something, and when the same task came up again right after its session. `Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d · the next task did not start · 3 done`. The next task is never built on a doubt. Such a task is for the owner: what was written down of it is forgotten, and no run goes on with it by itself.
+**The run stops**, with exit code 1 and the task left as it is, in `In Progress`, when the session failed, when it ended without saying how the task went, when the check of the working copy did not pass, when the tracker refused something, and when the same task came up again right after its session. `Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d · the next task did not start · 3 done`. The next task is never built on a doubt. Such a task is for the owner: what was written down of it is forgotten, and no run goes on with its session by itself. In a project with a board its status, `In Progress`, keeps it out of the next run; a project without a board has nothing that does, and the next run takes it as any other task, with a new session.
+
+Three things differ from that:
+
+- A board that does not take a closed task to `Done` does not stop the run: the task is closed, the log says what was refused, and the run goes on.
+- A session that says `interrupted` when nobody asked it to wrap up is taken at its word, as the table says, and then the run stops.
+- A session that does not start, as in a folder that Claude Code does not trust, sends its task back to `Todo` before the run stops.
 
 ### What cannot be done without the owner
 
@@ -570,7 +592,7 @@ The session is told to do everything that does not depend on the owner, to leave
 
 - its title and its description are those the session wrote after `TOOBUSY-REST:`: what is left, what is done already and where, and the questions for the owner with the answers the session sees. They are written for a session that has never seen this one. A session that named nothing gives a task called `What is left of “<title>”` with its report as the description;
 - under the description stand the task it comes from and, folded, the description of that task;
-- it has the label of the owner, the labels of the first task that are labels to take, and the same milestone, and stands on the board as one to do.
+- it has the label of the owner, the labels of the first task that are labels to take, and the milestone the user works on, which is the one of the first task; for a user who works without a milestone it has none, whatever the first task has. It stands on the board as one to do.
 
 No run takes the new task while it has the label of the owner. The owner answers in it, takes the label off, and a run takes it as any other task.
 
@@ -602,17 +624,17 @@ A run is stopped with the commands of the menu of its page, `stop`, `continue` a
 | `/stop` | the current task is finished, and no other is taken: `Stopped by /stop · 3 done`. Between tasks the queue stops at once |
 | `/continue` | takes `/stop` back |
 | `/abort` | stops as soon as possible, with nothing committed and a report in the task. It cannot be taken back |
-| Ctrl+C twice | kills the run: the session is stopped at once, and the task stays in `In Progress` as it is; the next run goes on with its session. The exit code is 130 |
+| Ctrl+C twice | kills the run: the session is stopped at once, and the task stays in `In Progress` as it is; the next run goes on with its session. A kill during the wait for a usage limit pauses the task instead, as described below. The exit code is 130 |
 
 **`/abort`.** The session is asked to wrap up: to let the command that runs finish and start no new step, to commit and push nothing, to undo its uncommitted changes, and to reply with a report for the session that will go on with the task — what was found out and decided, what was undone, file by file, and what is left — ended with `TOOBUSY: interrupted`. The request reaches a session that works after its next step, without cutting its turn: a hook of the session prints it. A session that has not wrapped up in ten minutes, and one that waits for the owner, has its turn cut and gets the request as a message. When the session ends, the task gets the label of interrupted tasks and the report, goes back to `Todo`, and the run stops; the next run takes the task first and goes on with the same session, which is told to do again what it undid. Where the conversation is gone, as on another machine, a new session is told that the report of the one before is among the comments.
 
 ### Usage limits
 
-Claude Code has two limits of usage, a five-hour one and a weekly one; a run knows them from the status line of its last session.
+Claude Code has two limits of usage, a five-hour one and a weekly one; a run knows how much of them is used from the status line of its last session, and that a session ran into one from its conversation. A limit counts as spent at 99%.
 
-- **Before a task.** The weekly limit holds no task back: a task is started however much of it is used, and a session that runs into it is handled as one inside a task. At 96% of the five-hour limit the run waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait.
-- **Inside a task.** A session that runs into a limit is stopped. The run waits for the reset of the five-hour limit, or for half an hour when it does not know the time, and the same session goes on with a message that says so. A task waits so ten times at most.
-- **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session.
+- **Before a task.** The weekly limit holds no task back: a task is started however much of it is used, and a session that runs into it is handled as one inside a task. At 96% of the five-hour limit, when the time of its reset is known, the run waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait. A limit whose reset is not known holds no task back.
+- **Inside a task.** A session that runs into a limit is stopped. When the five-hour limit is spent and the time of its reset is known, the run waits for the reset and a minute more; otherwise it waits for half an hour. Then the same session goes on with a message that says so. A task waits so ten times at most.
+- **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops, aborts or kills the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session.
 
 ### Going on with a session
 
@@ -661,9 +683,9 @@ One that wrapped up is told:
 
 > toobusy runs again: go on with task #12. You wrapped it up when the owner stopped the run, and your report is the last comment of the task that starts with **Interrupted.**: do again what you undid, and do what is left. The rules of this session hold as before: commit and push the finished work as the instructions of the project say, and end your last reply with a `TOOBUSY:` line.
 
-**What a run does not go on with.** A failure stays for the owner: when the session failed, did not say how the task went, or the check of the working copy did not pass, the record is forgotten as the run stops, the task stays in `In Progress`, and the next run does not take it. A task that came to an outcome is forgotten before the tracker is told, so that nothing is told twice: when the tracker refuses then, the task is left for the owner too.
+**What a run does not go on with.** A failure stays for the owner: when the session failed, did not say how the task went, or the check of the working copy did not pass, the record is forgotten as the run stops and the task stays in `In Progress`, where the next run does not take it. That is the board's doing: in a project without a board the next run takes the task as any other, with a new session. A task that came to an outcome is forgotten before the tracker is told, so that nothing is told twice: when the tracker refuses then, the task is left for the owner too. Only a task that was wrapped up keeps its record through that, and so does a task that the tracker refused while it was being taken, after its session was started or told to go on: the next run goes on with that session.
 
-On another machine there is no record: a task that was interrupted or paused is taken first by its label, with a new session, and one that a kill left in `In Progress` is not taken.
+On another machine there is no record: a task that was interrupted or paused is taken first by its label, with a new session, and one that a kill left in `In Progress` is not taken, in a project with a board.
 
 ### Local state
 
@@ -671,7 +693,7 @@ What a run leaves on the machine lies in `.toobusy/local/`: the record of the ta
 
 ### The machine
 
-On macOS the machine is kept awake while a run lasts and no longer, so that back in the menu it may sleep, and the owner gets a notification when a session waits for an answer, when a task is paused, and when the run ends. On other systems neither is done yet.
+On macOS the machine is kept awake while a run lasts and no longer, so that back in the menu it may sleep, and the owner gets a notification when a session waits for an answer, when a task is paused, and when the run ends, unless it was killed. On other systems neither is done yet.
 
 ### The page of a run
 
@@ -693,20 +715,20 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
 ```
 
 - **What stays.** A task that is over is one line: the mark of how it went in its colour, `✔` done, `◐` done in part, `◇` waits for the owner, `■` interrupted or killed, `✖` failed, `‖` paused by a usage limit; its number and its title, `#71 Paint the windows yellow`, the number being what finds the task in the tracker; and, muted, the time it took. A title that does not fit gives way to the time, and the number is never the part that is cut. Nothing is said of a task that starts. What a run warns of, `▲`, stays as a line too. These lines are written for good: as they grow in number the bar scrolls up with them into the history of the terminal, and the terminal scrolls back to them.
-- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark turns in the accent: a cell full of dots with a gap that runs around it clockwise, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽`, a turn in two thirds of a second; without colours a `●` stands there still. After it stand the number and the title of the task, as they do on its line when it is over. Under the title, muted, stand the time the task has been worked on and what its session is doing; keeping its plan is not said there. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, and a run that was told to stop that this is its last task. Between tasks the first line says what the run is doing.
+- **The task that is worked on** stands under them, redrawn in its place. Before its title a mark turns in the accent: a cell full of dots with a gap that runs around it clockwise, `⣾ ⣷ ⣯ ⣟ ⡿ ⢿ ⣻ ⣽`, a turn in two thirds of a second; without colours a `●` stands there still. After it stand the number and the title of the task, as they do on its line when it is over. Under the title, muted, stand the time the task has been worked on and what its session is doing; keeping its plan is not said there. A session that waits says so and when it is told to go on alone, a wait for a limit when it ends, a run that was told to stop that this is its last task, and one that was told to abort that the session is wrapping up. Between tasks the first line says what the run is doing.
 - **The plan of the session** is a third line under these two, a bar with a cell for each step of the plan, `▰▰▰▱▱▱▱`: a step that is done is a full cell in the accent, a step the session is at blinks between the accent and the muted colour, and a step that is not begun is an empty cell, muted. The bar is the list as it is: when the session adds steps, takes some out or marks them, the bar is built anew, with as many cells as the list has. A session that keeps no plan has no such line. Without colours nothing blinks, and a step the session is at is an empty cell. The plan of a Claude Code session is the list of tasks it keeps with `TaskCreate` and `TaskUpdate`, read from its conversation.
-- **A session that waits for the owner** shows, under these lines, what it said last, eight lines of it at most, and how its session is opened to answer it. When it goes on, there is the title, the time and the step again, and nothing else.
+- **A session that waits for the owner** shows, under these lines, what it said last, seven lines of it at most, as the width breaks them, and under them how its session is opened to answer it. When it goes on, there is the title, the time and the step again, and nothing else.
 - **The commands** have their place between two rules. Nothing is typed there: the line says `press / to show the menu` after the pointer of a menu, `❯`, which blinks there as it does on the chosen line of the menu that opens in its place. `/` opens the menu of the commands that mean something at the moment, each with what it does; Up and Down move, Enter runs one, Escape closes the menu. They are `hold` and `send now` while a session waits for the owner, then `stop`, `continue` and `abort`. A session that waits for the owner brings `hold` and `send now` without being asked; Escape puts them away, and `/` opens the whole menu.
 - **Under the second rule** stand the keys and, at the right edge, how much of the two limits is used, when it is known. After the first Ctrl+C the line says `press ctrl+c again to stop the session and exit`.
-- **The end.** When the run is over, what was redrawn is erased, and under the tasks the tape says how the run went: `5 tasks in 1 h 12 min · 4 done · 1 done in part`, and under that, for a run that did not simply run out of tasks, what ended it: `‖ Stopped: #71 is paused: the weekly limit is spent`. The page does not wait to be left: a run that was opened from the menu goes back to it, with this said above the menu, and `toobusy run` leaves the tool.
+- **The end.** When the run is over, what was redrawn is erased, and under the tasks the tape says how the run went: `5 tasks in 1 h 12 min · 4 done · 1 done in part`, and under that, for a run that did not simply run out of tasks, what ended it, on as many lines as it takes: `‖ Stopped, as you asked`, `✖ Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d`, or `‖ Stopped: #71 is paused: the weekly limit is spent. Its changes stay in the working tree, and the next run goes on with its session`. The page does not wait to be left: a run that was opened from the menu goes back to it, with this said above the menu, and `toobusy run` leaves the tool.
 
-No line of a tape wraps: lines are cut a column short of the window, and the terminal is told not to wrap while the tape is unrolled. What is redrawn is never taller than the window: what a session said gives way first. When the window changes its size the whole tape is drawn anew to the new one: the terminal is erased, its history too, and the bar, every line that stays and what is redrawn under them are written again, a title or a warning laid out to the new width. What the terminal had in its history before the run is gone with that. A terminal that jumps to its last line whenever something is written lets the history be read only between two drawings, which come once in a second while a task is worked on.
+No line of a tape wraps: lines are cut a column short of the window, and the terminal is told not to wrap while the tape is unrolled. What is redrawn is never taller than the window: what a session said gives way first. When the window changes its size the whole tape is drawn anew to the new one: the terminal is erased, its history too, and the bar, every line that stays and what is redrawn under them are written again, a title or a warning laid out to the new width. What the terminal had in its history before the run is gone with that. A terminal that jumps to its last line whenever something is written does not let the history be read while a task is worked on: what is redrawn is drawn anew once in a second, and in a terminal with colours the mark that turns and what blinks are written with every beat as well, eighty milliseconds apart.
 
 Without a terminal the lines of the log are printed as they come: the run, each task that starts and how it ends, what is done to the tracker, every wait and every command, each with its mark: `✻` the run, `→` a task that is started, `▶` goes on, and the marks above.
 
 ### A demo of a run
 
-`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that a run was killed over, which stands in `In Progress` with a made-up record, and whose session goes on; a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. The menu of a demo opens with that task named at `Run`, `interrupted: #100 Rename the settings page`, as the task of a record is. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first and goes on with its session. When that task is taken again, the made-up tasks start over, as they do after any other run; the task a run was killed over is among the first of them only.
+`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that a run was killed over, which stands in `In Progress` with a made-up record, and whose session goes on; a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. The menu of a demo opens with that task named at `Run`, `interrupted: #100 Rename the settings page`, as the task of a record is. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first, goes on with its session, and then takes the rest of the same tasks. After that run the made-up tasks start over, as they do after any run that leaves no task interrupted and no record; the task a run was killed over is among the first of them only. Without a terminal the log of a demo starts with `Demo: nothing is changed.`
 
 ### Tests
 

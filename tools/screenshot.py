@@ -5,8 +5,9 @@ Runs the real binary in a pseudo-terminal, presses the keys of a scenario and dr
 to PNG files, each with the same screen as text next to it. It is there to check the look of a page: the colours,
 the grounds and the blinking, which the tests see only as escape sequences.
 
-    tools/screenshot.py init --demo -- shot:project tab tab type:Rocket shot:new-project blink
+    tools/screenshot.py init --demo -- "until:Choose another" shot:project down enter until:Filter tab tab type:Rocket shot:new-project blink
 
+A page that reads something first shows its dots for a while: `until:` waits for what the scenario is about.
 What stands before `--` are the arguments of toobusy, what stands after it is the scenario, a step per argument:
 
     tab shift+tab enter esc up down left right home end space backspace delete ctrl+<letter>

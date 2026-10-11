@@ -19,7 +19,7 @@ What does not, yet:
 - No installer and no released binaries.
 - GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
 - Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The settings hold the board and the labels, and nothing else. The messages a session gets, the permissions of the assistant, the names of the board's statuses and the checks around a task are not settings yet: a run knows the statuses `Todo`, `In Progress` and `Done`, and takes one task at a time.
+- The settings hold the board and the labels, and nothing else to choose: the tracker and the assistant are named there, with one value each. The messages a session gets, the permissions of the assistant, the names of the board's statuses and the checks around a task are not settings yet: a run knows the statuses `Todo`, `In Progress` and `Done`, and takes one task at a time.
 
 ## The idea
 
@@ -48,7 +48,7 @@ For another machine put its [runtime identifier](https://learn.microsoft.com/dot
 
 ## Trying it without changing anything
 
-`--demo` is an option of every command: it shows the tool over made-up data, and nothing is made, linked, written or remembered. The demos read only what is safe to read: the `origin` remote of the folder and, through `gh`, your boards and the open milestones. Run them in a terminal, inside any git repository:
+`--demo` is an option of every command: it shows the tool over made-up data, and nothing is made, linked, written or remembered. The demos read only what is safe to read: the settings of the project when it has them, the `origin` remote of the folder and, through `gh`, your boards and the open milestones. Run them in a terminal, inside any git repository:
 
 ```sh
 toobusy --demo           # the whole tool: the menu, and from it a run, the choices and the setup
@@ -93,7 +93,7 @@ Without questions, as in a script: `toobusy init --yes` takes what the options s
 toobusy doctor
 ```
 
-It checks everything a run needs: `git`, `gh` and Claude Code with their logins, the settings, the repository, the board and the labels. It prints a line per check and, under a failed one, the command that fixes it. It changes nothing, and exits with 0 when nothing failed.
+It checks everything a run needs: `git`, `gh` and Claude Code with their logins, the settings, the repository, the board and the labels. It prints a line per check and, under a failed one, the command that fixes it. It changes nothing, and exits with 0 when nothing failed. One thing it does not check is that Claude Code trusts the folder: a run says so when it cannot start its first session.
 
 ## Starting a run
 
@@ -114,9 +114,9 @@ toobusy run
 
 What to know before the first run:
 
-- **Which tasks are taken.** The open issues of your milestone that have a label to take and no blocking label, the lowest number first. In a project with a board a task is taken only from the status `Todo`.
+- **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the owner's label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the status `Todo`.
 - **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own.
-- **Each task gets a session of Claude Code of its own**, a background one in the permission mode `auto`, with nobody to answer its prompts. Every line of a run that speaks of a session names the command that opens it: `claude attach <id>`.
+- **Each task gets a session of Claude Code of its own**, a background one in the permission mode `auto`, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
 - **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`): it changes the code, checks it, commits and pushes. toobusy keeps the tracker: it moves the task on the board, writes the report of the session into the task as a comment, and closes it.
 - **A task that needs you is not guessed at.** What can be done without you is done, and what is left becomes a new task with the owner's label and the questions for you. Answer in it, take the label off, and a later run takes it.
 - **Stopping.** Press `/` during a run for its menu: `stop` finishes the current task and takes no other, `abort` stops as soon as possible with nothing committed. Ctrl+C twice kills the run; the next run goes on with the same session.

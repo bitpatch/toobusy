@@ -62,10 +62,8 @@ toobusy grows out of a single-file .NET script that runs the task queue of one p
 
 ## Open questions for the specification
 
-- The format and the full schema of the settings in `.toobusy/`.
-- How the queue rules are expressed, and how far they go beyond labels and statuses.
-- The contract between toobusy and the assistant: the prompts it ships, the outcome line, what the project must provide.
+The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, and the commands with their options. What is still open:
+
+- The rest of the schema of the settings in `.toobusy/`: the statuses of a board, the prompts as templates, the permissions of the assistant.
 - What the project-specific checks and commands look like, and when they run.
-- How the tracker is reached: through its command-line tool or directly through its API.
-- The set of commands and their options.
 - How installation and updates work on each platform.
