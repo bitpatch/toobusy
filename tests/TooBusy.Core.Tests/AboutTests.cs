@@ -41,6 +41,7 @@ public class AboutTests
         Assert.Contains("takes the `interrupted` label off a task that had it", text, StringComparison.Ordinal);
         Assert.Contains("the task gets the `interrupted` label and a comment that starts with `**Stopped by a usage limit**`", text, StringComparison.Ordinal);
         Assert.Contains("No limit holds a task back: a task is started however much of a limit is used.", text, StringComparison.Ordinal);
+        Assert.Contains("in the language the instructions of the project call for; the words of toobusy around it are in English.", text, StringComparison.Ordinal);
         Assert.Contains("| `TOOBUSY: owner` | the working copy is clean | puts the `needs-owner` label on the task", text, StringComparison.Ordinal);
         Assert.Contains("| `TOOBUSY: interrupted` | the working copy is clean | puts the `interrupted` label on the task", text, StringComparison.Ordinal);
         Assert.Contains("A task that was closed since, or got the `needs-owner` label or a label that keeps a task out, is not taken.", text, StringComparison.Ordinal);

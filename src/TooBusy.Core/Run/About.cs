@@ -146,7 +146,7 @@ public static class About
 
             The run stops as well, with the task left as it is, when a check does not pass, and when a session ended its turn without such a line and telling it to go on brought none. The next task is never started on a doubt.
 
-            A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**` or `**Interrupted.**`, and ends with the session.
+            A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**` or `**Interrupted.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
 
             ## What holds over the instructions of a project
 

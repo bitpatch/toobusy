@@ -575,7 +575,7 @@ What the session says is checked first: after `done`, `partial`, `owner` and `in
 | owner | the task gets the label of the owner and the report as a comment, and goes back to `Todo` |
 | interrupted | the task gets the label of interrupted tasks and the report as a comment, and goes back to `Todo` |
 
-Every comment starts with what became of the task, `**Done.**` for one, and ends with the session.
+Every comment starts with what became of the task, `**Done.**` for one, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
 
 **The run stops**, with exit code 1 and the task left as it is, in `In Progress`, when the session failed, when it ended without saying how the task went, when the check of the working copy did not pass, when the tracker refused something, and when the same task came up again right after its session. `Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d · the next task did not start · 3 done`. The next task is never built on a doubt. Such a task is for the owner: what was written down of it is forgotten, and no run goes on with its session by itself. In a project with a board its status, `In Progress`, keeps it out of the next run; a project without a board has nothing that does, and the next run takes it as any other task, with a new session.
 
