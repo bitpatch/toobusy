@@ -88,17 +88,23 @@ public abstract record BoardAnswer
 
 // What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
 // leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an
-// empty name of the skill: no skill.
+// empty name of the skill: no skill. The commands around a task have no question: null leaves a command as the
+// settings have it.
 public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
     IReadOnlyList<string>? Take = null,
     string? Owner = null,
     string? Interrupted = null,
-    string? Skill = null)
+    string? Skill = null,
+    CommandProposal? Before = null,
+    CommandProposal? After = null)
 {
     public static SetupProposals None { get; } = new();
 }
+
+// A command around a task as an option names it: the line for the shell, or null for no command.
+public sealed record CommandProposal(string? Line);
 
 // The board as an option names it: by an address, as a new one with its title and the login of whose it will be,
 // which is the first of those it can be made for when it is not given, or none.

@@ -153,7 +153,7 @@ public class AboutTests
     {
         Assert.Contains("This project runs `make free` before a task, and nothing after it.", About.Text(Rules, RunPolicy.Default, commands: new("make free", null)), StringComparison.Ordinal);
         Assert.Contains("This project runs `make stop` after a task, and nothing before it.", About.Text(Rules, RunPolicy.Default, commands: new(null, "make stop")), StringComparison.Ordinal);
-        Assert.Contains("This project has none: they are written into `.toobusy/settings.toml` by hand, and `toobusy init` keeps them.", About.Text(Rules, RunPolicy.Default), StringComparison.Ordinal);
+        Assert.Contains("This project has none: `toobusy init --before <command>` and `toobusy init --after <command>` set them.", About.Text(Rules, RunPolicy.Default), StringComparison.Ordinal);
         Assert.Contains("No settings are read here, so it is not said whether this project has them.", About.Text(null, RunPolicy.Default), StringComparison.Ordinal);
     }
 

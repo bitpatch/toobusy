@@ -27,6 +27,10 @@ public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer
     // What was done on GitHub, a line for each thing, in the order it was done; a setup that failed did these
     // before it was refused.
     public IReadOnlyList<string> Done { get; init; } = [];
+
+    // The commands around a task that the options set, changed or took away, each as it was and as it is now; no
+    // question asks for them, so they are not among the answers.
+    public IReadOnlyList<SetupAnswer> Commands { get; init; } = [];
 }
 
 // The steps of `toobusy init`: it asks what the settings need, shows what would change, and on a yes makes it so.
@@ -48,6 +52,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string InterruptLabel = "Interrupt label";
     const string SkillLabel = "Skill";
     const string SkillHint = "A session starts with this skill of the project. Leave empty to start without one.";
+
+    // The commands around a task, which no step asks for: the options name them.
+    const string BeforeLabel = "Before a task";
+    const string AfterLabel = "After a task";
 
     // The last choice of a label: one that the repository does not have yet.
     const string NewLabel = "New label…";
@@ -89,6 +97,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The name of the skill; empty for a project that names none.
     string? skill;
 
+    // The commands around a task: those of the settings, but for what the options say of them.
+    TaskCommands commands = TaskCommands.None;
+
     // What is said of a skill that the settings will name and nobody has written yet; empty when nothing is.
     IReadOnlyList<SetupNote> unwritten = [];
 
@@ -129,6 +140,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         var step = 0;
         try
         {
+            commands = new TaskCommands(
+                Offered(proposals.Before, current?.Commands.Before, "--before"),
+                Offered(proposals.After, current?.Commands.After, "--after"));
             if (machine.TrackerReachable)
             {
                 Show(0);
@@ -167,7 +181,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                         break;
                     default:
                         if (await ConcludeAsync(cancellationToken) is { } outcome)
-                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. unwritten], Done = done };
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. unwritten], Done = done, Commands = CommandChanges() };
                         answered = false;
                         break;
                 }
@@ -218,6 +232,18 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             default:
                 return null;
         }
+    }
+
+    // A command around a task: the one its option names, or the one of the settings when no option speaks of it.
+    // An empty one is refused as the settings refuse it, and the command stays as it is.
+    string? Offered(CommandProposal? proposed, string? now, string option)
+    {
+        if (proposed is null)
+            return now;
+        if (proposed.Line is null || !string.IsNullOrWhiteSpace(proposed.Line))
+            return proposed.Line?.Trim();
+        Reject($"{option}: A command must not be empty: give --no-{option[2..]} to run none.");
+        return now;
     }
 
     // What an option says cannot be taken. A setup that asks nothing stops there; one that asks says so and asks
@@ -480,7 +506,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         }
         else if (writing)
         {
+            // No answer above names a command of the options: a first setup says it under them.
             coming.Add(new SetupNote(SetupTone.Plain, $"The answers above will be written to {store.DisplayPath}."));
+            coming.AddRange(CommandChanges().Select(change => new SetupNote(SetupTone.Change, $"{change.Label}: {change.Value}")));
         }
 
         if (made is not null)
@@ -547,7 +575,19 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             (InterruptLabel, before.Queue.Labels.Interrupted, interrupted!),
             (SkillLabel, before.Skill ?? "none", skill is { Length: > 0 } ? skill : "none"),
         ];
-        return [.. settings.Where(setting => setting.Before != setting.After).Select(setting => $"{setting.Name}: {setting.Before} → {setting.After}")];
+        return
+        [
+            .. settings.Where(setting => setting.Before != setting.After).Select(setting => $"{setting.Name}: {setting.Before} → {setting.After}"),
+            .. CommandChanges().Select(change => $"{change.Label}: {change.Value}"),
+        ];
+    }
+
+    // The commands around a task that differ from those of the settings, each as `before → after`.
+    List<SetupAnswer> CommandChanges()
+    {
+        var before = current?.Commands ?? TaskCommands.None;
+        (string Name, string? Before, string? After)[] around = [(BeforeLabel, before.Before, commands.Before), (AfterLabel, before.After, commands.After)];
+        return [.. around.Where(command => command.Before != command.After).Select(command => new SetupAnswer(command.Name, $"{command.Before ?? "none"} → {command.After ?? "none"}"))];
     }
 
     // A board as people know it: by its title when it is known, with its address.
@@ -561,8 +601,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     {
         Skill = skill is { Length: > 0 } ? skill : null,
 
-        // The commands around a task are not asked for: they are those of the file.
-        Commands = current?.Commands ?? TaskCommands.None,
+        // The commands around a task are not asked for: they are those of the file, but for what the options say.
+        Commands = commands,
     };
 
     void Show(int step, IReadOnlyList<SetupNote>? more = null) =>

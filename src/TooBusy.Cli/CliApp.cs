@@ -71,10 +71,14 @@ public static class CliApp
         var interrupt = new Option<string?>("--interrupt-label") { Description = "The label of a task that a run had to stop; it is made when the repository does not have it.", HelpName = "name" };
         var skill = new Option<string?>("--skill") { Description = "The skill of the project a session starts with, by its name; it says how a task is done here without you.", HelpName = "name" };
         var noSkill = new Option<bool>("--no-skill") { Description = "No skill: a session starts with the message of toobusy alone." };
+        var before = new Option<string?>("--before") { Description = "The command a run runs before a task is taken: a line for the shell.", HelpName = "command" };
+        var noBefore = new Option<bool>("--no-before") { Description = "No command before a task." };
+        var after = new Option<string?>("--after") { Description = "The command a run runs after the session of a task, however the task went: a line for the shell.", HelpName = "command" };
+        var noAfter = new Option<bool>("--no-after") { Description = "No command after a task." };
         var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
         var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.")
         {
-            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, yes,
+            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -87,6 +91,8 @@ public static class CliApp
                 (result.GetValue(blocking) is { Length: > 0 } && result.GetValue(noBlocking), "toobusy: give `--blocking-label` or `--no-blocking-labels`, not both"),
                 (result.GetValue(take) is { Length: > 0 } && result.GetValue(noTake), "toobusy: give `--take-label` or `--no-take-labels`, not both"),
                 (result.GetValue(skill) is not null && result.GetValue(noSkill), "toobusy: give `--skill` or `--no-skill`, not both"),
+                (result.GetValue(before) is not null && result.GetValue(noBefore), "toobusy: give `--before` or `--no-before`, not both"),
+                (result.GetValue(after) is not null && result.GetValue(noAfter), "toobusy: give `--after` or `--no-after`, not both"),
             ];
             if (clashes.FirstOrDefault(clash => clash.Wrong) is { Wrong: true } clash)
             {
@@ -103,7 +109,9 @@ public static class CliApp
                 result.GetValue(noTake) ? [] : result.GetValue(take) is { Length: > 0 } takes ? takes : null,
                 result.GetValue(owner),
                 result.GetValue(interrupt),
-                result.GetValue(noSkill) ? "" : result.GetValue(skill));
+                result.GetValue(noSkill) ? "" : result.GetValue(skill),
+                result.GetValue(noBefore) ? new CommandProposal(null) : result.GetValue(before) is { } first ? new CommandProposal(first) : null,
+                result.GetValue(noAfter) ? new CommandProposal(null) : result.GetValue(after) is { } last ? new CommandProposal(last) : null);
 
             if (FindProject(context) is not { } root)
                 return ExitCode.NotReady;
@@ -617,6 +625,10 @@ public static class CliApp
         setup ??= new SetupResult(SetupOutcome.Left, []);
         foreach (var answer in setup.Answers)
             context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
+
+        // No question asks for the commands around a task: what the options made of them is said after the answers.
+        foreach (var command in setup.Commands)
+            context.Output.WriteLine($"{palette.Success("✔")} {command.Label,-16} {command.Value}");
 
         // A setup that asked nothing showed nobody what it was about to do on GitHub: it says what it did. A demo
         // did none of it.

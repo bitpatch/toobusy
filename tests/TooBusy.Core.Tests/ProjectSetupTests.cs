@@ -968,6 +968,105 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task AFirstSetupHasNoCommandsUnlessTheOptionsNameThem()
+    {
+        var without = await RunAsync();
+        Assert.Equal(TaskCommands.None, store.Saved!.Commands);
+        Assert.Empty(without.Commands);
+
+        var result = await RunAsync(new SetupProposals(Before: new("scripts/dev.sh ports free"), After: new(" scripts/dev.sh server stop ")));
+
+        Assert.Equal(new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop"), store.Saved!.Commands);
+        Assert.Equal([new SetupAnswer("Before a task", "none → scripts/dev.sh ports free"), new SetupAnswer("After a task", "none → scripts/dev.sh server stop")], result.Commands);
+
+        // No question asks for them: they stand on the last page, under what is said of the answers.
+        Assert.DoesNotContain(dialog.Asked, label => label.Contains("task", StringComparison.Ordinal));
+        Assert.Equal(
+            [
+                new SetupNote(SetupTone.Plain, "The answers above will be written to .toobusy/settings.toml."),
+                new SetupNote(SetupTone.Change, "Before a task: none → scripts/dev.sh ports free"),
+                new SetupNote(SetupTone.Change, "After a task: none → scripts/dev.sh server stop"),
+            ],
+            dialog.Shown.Notes.Take(3));
+        Assert.DoesNotContain(result.Answers, answer => answer.Value.Contains("dev.sh", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheOptionsSetChangeAndTakeAwayTheCommandsOfSettingsThatExist()
+    {
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing;
+
+        // Set: nothing else changes, and the settings are written for the command alone.
+        var set = await RunAsync(new SetupProposals(Before: new("make free")));
+
+        Assert.Equal(SetupOutcome.Written, set.Outcome);
+        Assert.Equal(new TaskCommands("make free", null), store.Saved!.Commands);
+        Assert.Equal(
+            [new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"), new SetupNote(SetupTone.Change, "Before a task: none → make free")],
+            dialog.Shown.Notes);
+        Assert.Equal([new SetupAnswer("Before a task", "none → make free")], set.Commands);
+
+        // Changed and taken away, each as it was and as it will be; the one no option speaks of is kept.
+        store.Current = Existing with { Commands = new("make free", "make stop") };
+        var changed = await RunAsync(new SetupProposals(Before: new("make ports"), After: new(null)));
+
+        Assert.Equal(new TaskCommands("make ports", null), store.Saved!.Commands);
+        Assert.Equal(
+            [new SetupNote(SetupTone.Change, "Before a task: make free → make ports"), new SetupNote(SetupTone.Change, "After a task: make stop → none")],
+            dialog.Shown.Notes.Skip(1));
+        Assert.Equal([new SetupAnswer("Before a task", "make free → make ports"), new SetupAnswer("After a task", "make stop → none")], changed.Commands);
+
+        var kept = await RunAsync(new SetupProposals(After: new(null)));
+
+        Assert.Equal(new TaskCommands("make free", null), store.Saved!.Commands);
+        Assert.Equal([new SetupAnswer("After a task", "make stop → none")], kept.Commands);
+    }
+
+    [Fact]
+    public async Task OptionsThatSayWhatTheSettingsSayOfTheCommandsChangeNothing()
+    {
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Commands = new("make free", null) };
+
+        var result = await RunUnaskedAsync(new SetupProposals(Before: new("make free"), After: new(null)));
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Empty(result.Commands);
+        Assert.Null(store.Saved);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task WithoutQuestionsAnEmptyCommandFailsBeforeAnythingIsChanged(string empty)
+    {
+        var before = await RunUnaskedAsync(new SetupProposals(Before: new(empty)));
+
+        Assert.Equal(SetupOutcome.Failed, before.Outcome);
+        Assert.Equal("--before: A command must not be empty: give --no-before to run none.", before.Failure);
+        Assert.Empty(before.Commands);
+
+        var after = await RunUnaskedAsync(new SetupProposals(After: new(empty)));
+
+        Assert.Equal("--after: A command must not be empty: give --no-after to run none.", after.Failure);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Labelled);
+    }
+
+    [Fact]
+    public async Task OnTheScreenAnEmptyCommandIsSaidAndTheCommandStaysAsItIs()
+    {
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Commands = new("make free", null) };
+
+        var result = await RunAsync(new SetupProposals(Before: new(" ")));
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Contains(new SetupNote(SetupTone.Warning, "--before: A command must not be empty: give --no-before to run none."), result.Notes);
+    }
+
+    [Fact]
     public async Task AChangeOfTheSkillIsSaidAsItWasAndAsItWillBe()
     {
         store.Current = Existing;
@@ -1292,6 +1391,8 @@ public class ProjectSetupTests
             $"take = {string.Join(", ", settings.Queue.Labels.Take)}",
             $"owner = {settings.Queue.Labels.Owner}",
             $"interrupted = {settings.Queue.Labels.Interrupted}",
-            $"skill = {settings.Skill}") + "\n";
+            $"skill = {settings.Skill}",
+            $"before = {settings.Commands.Before}",
+            $"after = {settings.Commands.After}") + "\n";
     }
 }

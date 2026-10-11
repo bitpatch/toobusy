@@ -1996,7 +1996,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("init", "--help");
 
         Assert.Equal(0, exit);
-        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "-y, --yes"])
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "-y, --yes"])
             Assert.Contains(option, output, StringComparison.Ordinal);
     }
 
@@ -2068,6 +2068,83 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("✔ Skill            night-shift", output, StringComparison.Ordinal);
         Assert.Equal(written, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task WithYesTheOptionsOfTheCommandsSetChangeAndTakeThemAway()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
+
+        // A first setup has none without the options, and writes what they say.
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill", "--before", "scripts/dev.sh ports free", "--after", "scripts/dev.sh server stop"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(
+            "✔ Assistant        Claude Code" + Environment.NewLine
+            + "✔ Before a task    none → scripts/dev.sh ports free" + Environment.NewLine
+            + "✔ After a task     none → scripts/dev.sh server stop" + Environment.NewLine,
+            output,
+            StringComparison.Ordinal);
+        Assert.EndsWith("[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n", File.ReadAllText(file), StringComparison.Ordinal);
+
+        // Without an option they are kept, and nothing is said of them.
+        var written = File.ReadAllText(file);
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes"]);
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("a task", output, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Equal(written, File.ReadAllText(file));
+
+        // One is changed and the other taken away.
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--before", "make free", "--no-after"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Before a task    scripts/dev.sh ports free → make free" + Environment.NewLine + "✔ After a task     scripts/dev.sh server stop → none" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.EndsWith("[task]\nbefore = \"make free\"\n", File.ReadAllText(file), StringComparison.Ordinal);
+
+        (exit, _, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-before"]);
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("before", File.ReadAllText(file).Split("[task]")[^1], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--before", "")]
+    [InlineData("--after", "  ")]
+    public async Task WithYesAnEmptyCommandFailsAndNothingIsWritten(string option, string empty)
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", option, empty]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith($"✘ {option}: A command must not be empty: give --no-{option[2..]} to run none. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Take(2).SequenceEqual(["label", "create"]));
+    }
+
+    [Fact]
+    public async Task WithoutYesTheCommandsOfTheOptionsStandOnTheLastPageAndAreWrittenOnSave()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        var processes = GitHub(milestones: "", Labels);
+
+        // Enter on every question keeps what the settings say; the last page has the command alone to change.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--before", "scripts/dev.sh ports free");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("This will change in .toobusy/settings.toml:", output, StringComparison.Ordinal);
+        Assert.Contains("Before a task: none → scripts/dev.sh ports free", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("After a task", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Before a task    none → scripts/dev.sh ports free" + Environment.NewLine + "✔ The settings are written to .toobusy/settings.toml. Commit the file.", Report(output), StringComparison.Ordinal);
+        Assert.EndsWith("[task]\nbefore = \"scripts/dev.sh ports free\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2275,6 +2352,8 @@ public sealed class CliAppTests : IDisposable
     [InlineData("toobusy: give `--blocking-label` or `--no-blocking-labels`, not both", "--blocking-label", "manual", "--no-blocking-labels")]
     [InlineData("toobusy: give `--take-label` or `--no-take-labels`, not both", "--take-label", "bug", "--no-take-labels")]
     [InlineData("toobusy: give `--skill` or `--no-skill`, not both", "--skill", "task-auto", "--no-skill")]
+    [InlineData("toobusy: give `--before` or `--no-before`, not both", "--before", "make free", "--no-before")]
+    [InlineData("toobusy: give `--after` or `--no-after`, not both", "--after", "make stop", "--no-after")]
     public async Task OptionsThatAnswerTheSameQuestionDifferentlyAreAWrongCommandLine(string message, params string[] options)
     {
         GitRepository();

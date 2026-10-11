@@ -42,7 +42,7 @@ public static class About
             (_, { Before: { } first, After: { } last }) => $"This project runs `{first}` before a task and `{last}` after it.",
             (_, { Before: { } first }) => $"This project runs `{first}` before a task, and nothing after it.",
             (_, { After: { } last }) => $"This project runs `{last}` after a task, and nothing before it.",
-            _ => "This project has none: they are written into `.toobusy/settings.toml` by hand, and `toobusy init` keeps them.",
+            _ => "This project has none: `toobusy init --before <command>` and `toobusy init --after <command>` set them.",
         };
 
         var text = new StringBuilder();

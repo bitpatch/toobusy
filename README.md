@@ -90,7 +90,7 @@ The last page shows what saving will do. Until you choose `Save and exit` nothin
 
 The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 
-Two settings are not asked for and are written into the file by hand: the commands a run runs around every task, for what must not depend on a session remembering it.
+Two settings are not asked for: the commands a run runs around every task, for what must not depend on a session remembering it. Options of `init` set them, `toobusy init --before "scripts/dev.sh ports free" --after "scripts/dev.sh server stop"`, and `--no-before` and `--no-after` take them away; the last page shows what changes before it is saved.
 
 ```toml
 [task]
@@ -98,7 +98,7 @@ before = "scripts/dev.sh ports free"    # before a task is taken; when it fails,
 after = "scripts/dev.sh server stop"    # after the session of a task, however the task went
 ```
 
-Each is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. `init` keeps them, `doctor` does not run them, and a demo runs none. What they do, the instructions and the skill of your project need not tell a session to do.
+Each is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. Without an option `init` keeps them, `doctor` does not run them, and a demo runs none. What they do, the instructions and the skill of your project need not tell a session to do.
 
 Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way.
 
