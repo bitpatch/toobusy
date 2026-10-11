@@ -666,32 +666,18 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task BeforeATaskTheNearLimitIsWaitedOut()
-    {
-        tracker.Add(3);
-        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 97.2, FakeClock.Start + TimeSpan.FromHours(2)), new UsageWindow("weekly", 40, null));
-
-        var result = await RunAsync();
-
-        Assert.Equal(1, result.Done);
-        Assert.Contains("‖ The 5-hour limit is at 97%: waiting 2 h 01 min for its reset", log.Lines);
-        Assert.Contains("▶ The 5-hour limit has reset", log.Lines);
-        Assert.True(clock.Now - FakeClock.Start >= TimeSpan.FromMinutes(121));
-        Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.WaitingForLimit, Task: null } && status.Until == FakeClock.Start + TimeSpan.FromMinutes(121));
-    }
-
-    [Fact]
-    public async Task ALimitBelowTheLineOrWithoutAKnownResetIsNotWaitedFor()
+    public async Task TheNearLimitHoldsNoTaskBack()
     {
         tracker.Add(3);
         tracker.Add(5);
-        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 95.9, FakeClock.Start + TimeSpan.FromHours(2)), null);
-        assistant.Session(3).Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 99, null), null)).Ends(Done);
+        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 99.5, FakeClock.Start + TimeSpan.FromHours(2)), new UsageWindow("weekly", 40, null));
 
         var result = await RunAsync();
 
-        Assert.Equal(2, result.Done);
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([3, 5], assistant.Started.Select(started => started.Task));
         Assert.True(clock.Now - FakeClock.Start < TimeSpan.FromMinutes(1));
+        Assert.DoesNotContain(log.Statuses, status => status.Phase == RunPhase.WaitingForLimit);
     }
 
     [Fact]
@@ -716,20 +702,6 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-    }
-
-    [Fact]
-    public async Task StopBreaksTheWaitForALimitBeforeATask()
-    {
-        tracker.Add(3);
-        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 97, FakeClock.Start + TimeSpan.FromHours(2)), null);
-        clock.At(TimeSpan.FromMinutes(10), () => Run.Send(RunCommand.Stop));
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
-        Assert.Empty(assistant.Started);
-        Assert.Contains("‖ The queue stops before the next task", log.Lines);
     }
 
     [Fact]

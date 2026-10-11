@@ -90,7 +90,7 @@ public static class About
 
             ### After a usage limit
 
-            A session that runs into a usage limit is stopped with its uncommitted changes left in the working copy. A run waits for a limit that resets soon. For one that does not, it leaves the task to the next run: the task gets {interrupted} and a comment that starts with `**Stopped by a usage limit**`, and goes back to `Todo`. When the limit has reset, in the same run or in the next one, the same session is told:
+            No limit holds a task back: a task is started however much of a limit is used. A session that runs into a usage limit is stopped with its uncommitted changes left in the working copy. A run waits for a limit that resets soon. For one that does not, it leaves the task to the next run: the task gets {interrupted} and a comment that starts with `**Stopped by a usage limit**`, and goes back to `Todo`. When the limit has reset, in the same run or in the next one, the same session is told:
 
             ```text
             {Briefing.AfterLimit(Sample.Number)}

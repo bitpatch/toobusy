@@ -27,10 +27,8 @@ public sealed record RunPolicy
     // How long a session has to wrap up after `/abort` before its turn is cut.
     public TimeSpan AbortGrace { get; init; } = TimeSpan.FromMinutes(10);
 
-    // At this much of the near limit, in percent, no task is started before its reset; at Spent a limit counts as
-    // run into. The far limit holds no task back before it is run into.
-    public double Limit { get; init; } = 96;
-
+    // At this much of a limit, in percent, it counts as run into. No limit holds a task back before a session runs
+    // into it.
     public double Spent { get; init; } = 99;
 
     // How long after the reset of a limit a run goes on, how long it waits for a reset it does not know the time

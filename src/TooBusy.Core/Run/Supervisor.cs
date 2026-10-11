@@ -135,16 +135,6 @@ public sealed class Supervisor(
 
             first = false;
             limits = assistant.ReadLimits().At(clock.Now);
-            if (limits.Near is { ResetsAt: { } reset } near && near.Used >= policy.Limit)
-            {
-                var until = reset + policy.ResetMargin;
-                Say(RunMark.Paused, $"{Capital(Limit(near))} is at {Spoken.Percent(near.Used)}: waiting {Spoken.Time(until - clock.Now)} for its reset");
-                Show(new RunStatus(RunPhase.WaitingForLimit, $"Waiting for {Limit(near)} to reset") { Until = until });
-                if (await WaitAsync(until, kill))
-                    Say(RunMark.GoesOn, $"{Capital(Limit(near))} has reset");
-                continue;
-            }
-
             var task = lineup.Ready[0];
             if (task.Number == last)
                 return Stop($"#{task.Number} came up again after its session");
@@ -776,8 +766,6 @@ public sealed class Supervisor(
 
     static string Reset(UsageWindow window) =>
         window.ResetsAt is { } reset ? string.Create(CultureInfo.InvariantCulture, $", it resets {reset.UtcDateTime:yyyy-MM-dd HH:mm} UTC") : "";
-
-    static string Capital(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     // What is tried for good measure: a refusal of it changes nothing of what the run does next.
     static async Task Quietly(Func<Task> attempt)

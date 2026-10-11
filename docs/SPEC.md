@@ -531,7 +531,7 @@ The tasks that can be taken now are taken in this order: those with the label of
 
 1. **The working tree** must be clean: no changed file and none that git does not know. Otherwise the run stops with `the working tree is not clean: commit or stash the changes first`. Only the changes of the task an earlier run left with a session are started over.
 2. **The queue** is read, and the task of the record, or else the first task that can be taken, is the one.
-3. **The limits** of usage are looked at, as described below.
+3. **The limits** of usage are read for the page of the run. They hold no task back, as described below.
 4. **The task is moved to `In Progress`** on the board. Nothing of the task is read for the session, which reads it on its own.
 5. **A session is started** with the model and the effort of the user, and the task and the session are written down on the machine. A task that was interrupted loses its label then.
 6. **The session is watched** until its turn ends with a line for toobusy.
@@ -631,7 +631,7 @@ A run is stopped with the commands of the menu of its page, `stop`, `continue` a
 
 Claude Code has two limits of usage, a five-hour one and a weekly one; a run knows how much of them is used from the status line of its last session, and that a session ran into one from its conversation. A limit counts as spent at 99%.
 
-- **Before a task.** The weekly limit holds no task back: a task is started however much of it is used, and a session that runs into it is handled as one inside a task. At 96% of the five-hour limit, when the time of its reset is known, the run waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait. A limit whose reset is not known holds no task back.
+- **Before a task.** No limit holds a task back: a task is started however much of either is used, and a session that runs into a limit is handled as one inside a task.
 - **Inside a task.** A session that runs into a limit is stopped. When the five-hour limit is spent and the time of its reset is known, the run waits for the reset and a minute more; otherwise it waits for half an hour. Then the same session goes on with a message that says so. A task waits so ten times at most.
 - **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops, aborts or kills the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session.
 
@@ -658,7 +658,7 @@ The record is local state and not a setting: a conversation lives on one machine
 1. It reads the record and the working tree. Changes in the working tree are those of the task of the record, and with no record, or with one of a session that wrapped up, which left none, they stop the run.
 2. It reads the queue.
 3. A task of the record that is not among the open tasks of the milestone any more, as one that was closed, or that got the label of the owner or a blocking label since, or lost its label to take, is not taken: its session is stopped, the record is forgotten, the log says so, and the checks start again, without a record. `▲ #12 was left with a session by an earlier run, but it is not gone on with: it has the manual label · its session is stopped and forgotten`.
-4. Otherwise the task of the record is the one that is taken, before those that were interrupted and before the rest. The limits of usage are looked at as before any task.
+4. Otherwise the task of the record is the one that is taken, before those that were interrupted and before the rest.
 5. The session is looked for, and the task goes on in the way the session was left, as the cases below say. The task is moved to `In Progress` and loses the label of interrupted tasks only when its session goes on.
 
 **The cases.** The log says how the task was taken: `→ #12 Export the data — taken again · its session was stopped, and goes on · claude attach 1a2b3c4d`.
