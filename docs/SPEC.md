@@ -98,7 +98,6 @@ The model and the effort a task is done with by default are choices of the user 
 - **The model** is the assistant's own, which names no model and leaves the choice to the assistant, or a model by its name. The list offers `Assistant's own`, the names `fable`, `opus`, `sonnet` and `haiku`, and `Other…`, where any name is typed as the assistant takes it. A name is not checked.
 - **The effort** is one of the levels `low`, `medium`, `high`, `xhigh` and `max`. A user who has not chosen is proposed `high`. A level is taken whatever the case of its letters; an effort in the file that is not a level counts as one that is not chosen.
 
-- **The weekly limit** is how much of the weekly limit of usage a run may use, in percent: at that much of it a run takes no next task. The list offers 50%, 60%, 70%, 80%, 90% and 96%. Nothing has to be chosen: a user who has not chosen has 96%. It is kept in the same file, as a number, `limit = 80`; a number that is not a share of anything counts as one that is not chosen.
 
 A session of the assistant is started with the model and the effort.
 
@@ -251,7 +250,7 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 1. **A project that is not set up** is set up: the steps of `init`, on the same page. Leaving them, or declining at the end, leaves the page.
 2. **A user without a milestone to work on**, one who has not chosen or whose milestone is not open any more, chooses one from the list. Leaving the list leaves the page.
 3. **A user who has not chosen the model or the effort** chooses them, the model first. Leaving either list leaves the page.
-4. **The menu.** Above it stand the settings, the milestone, the model, the effort and the weekly limit as they are; the milestone stands again, in the colour of success, after the choice that changes it.
+4. **The menu.** Above it stand the settings, the milestone, the model and the effort as they are; the milestone stands again, in the colour of success, after the choice that changes it.
 
 ```
  ✔ Project          https://github.com/orgs/bitpatch/projects/4
@@ -262,7 +261,6 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
  ✔ Milestone        v0.3.0 · due 2030-01-15 · 12 open tasks
  ✔ Model            opus
  ✔ Effort           high
- ✔ Weekly limit     96%
 
  What to do
  ────────────────────────────────────────────────────────────
@@ -278,7 +276,7 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 | Choice | Opens |
 |---|---|
 | `Run` | the run, on its tape; when it is over the menu is back by itself, with how the run went said above it |
-| `Assistant` | the model, the effort and the weekly limit, described below; Escape goes back to the menu |
+| `Assistant` | the model and the effort, described below; Escape goes back to the menu |
 | `Milestone` | the list of the milestones; Escape goes back to the menu with the milestone as it was |
 | `Settings` | the steps of `init` with the current values proposed; Escape from the first of them goes back to the menu, and so does the end of the setup, whose last line is shown above the menu |
 | `Exit` | nothing: it leaves the page, as Escape twice and Ctrl+C twice do |
@@ -287,15 +285,14 @@ After `Run` stands the number of tasks a run would take as things are: those tha
 
 When the task that a run would take first is one that an earlier run had to stop, a task with the label of interrupted tasks, the row says so instead of the number, in the colour of a warning: `Run  interrupted: #71 Paint the windows yellow`. It is the task the next run goes on with, and Enter opens that run as it does on a count; the number of the tasks comes back when no task is interrupted any more. A title that does not fit is cut, and the number is not. A task that is interrupted and held, or that waits for another one, is not taken first, so the row does not name it.
 
-After `Assistant` stand the model and the effort that are chosen; the assistant's own model is `own model` there. It opens a list of the three choices of the user, each with what is chosen after its name:
+After `Assistant` stand the model and the effort that are chosen; the assistant's own model is `own model` there. It opens a list of the two choices of the user, each with what is chosen after its name:
 
 ```
  Assistant
  ────────────────────────────────────────────────────────────
- ❯ Model         opus
-   Effort        high
-   Weekly limit  96%
-   Back          esc
+ ❯ Model   opus
+   Effort  high
+   Back    esc
  ────────────────────────────────────────────────────────────
  ↑↓ move · enter choose · ctrl+c exit
 ```
@@ -304,13 +301,12 @@ After `Assistant` stand the model and the effort that are chosen; the assistant'
 |---|---|
 | `Model` | the list of the models; Escape goes back with the model as it was |
 | `Effort` | the list of the levels; Escape goes back with the effort as it was |
-| `Weekly limit` | the list of the shares, the pointer on the one in force; Escape goes back with the limit as it was |
 
-The three lists end with `Back`, as every list does that there is somewhere to go back from.
+These lists end with `Back`, as every list does that there is somewhere to go back from.
 
-The answers of `Settings` are written to the settings of the project and are to be committed; the milestone, the model, the effort and the weekly limit are kept on the machine of the user.
+The answers of `Settings` are written to the settings of the project and are to be committed; the milestone, the model and the effort are kept on the machine of the user.
 
-When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone, the model, the effort and the weekly limit when they were chosen. A run has left its tape in the terminal already, with its tasks and how they went; after a run with nothing else to report, nothing more is printed. The exit code is 0, and 1 when a setup failed on GitHub; after a run it is the exit code of the last one.
+When the page is closed, the terminal gets the name of the tool and the folder, the report of a setup that was gone through, and the milestone, the model and the effort when they were chosen. A run has left its tape in the terminal already, with its tasks and how they went; after a run with nothing else to report, nothing more is printed. The exit code is 0, and 1 when a setup failed on GitHub; after a run it is the exit code of the last one.
 
 Without a terminal there is nobody to ask: `toobusy` prints its help in a project that is set up and the "not set up" message in one that is not.
 
@@ -454,7 +450,7 @@ A command of a package manager is proposed only when that manager is on the path
 ### Tests
 
 - The settings: reading, every validation rule, writing, and that a rewrite keeps unknown comments.
-- The choice of the milestone against made-up lists of open milestones, the order of the milestones, and the file the choices are kept in: the milestone, the model, the effort and the weekly limit, each apart.
+- The choice of the milestone against made-up lists of open milestones, the order of the milestones, and the file the choices are kept in: the milestone, the model and the effort, each apart.
 - What is asked of `gh`, argument by argument, and what is made of its answers and its failures, with the commands of the machine faked.
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn. A tape is read as the rows the terminal's own screen has after it, sequence by sequence, so that a tape that has lost count of its lines fails. A key that a test holds back for something that never happens fails the test instead of letting the page go on for ever.
@@ -587,7 +583,7 @@ A run is stopped with the commands of the menu of its page, `stop`, `continue` a
 
 Claude Code has two limits of usage, a five-hour one and a weekly one; a run knows them from the status line of its last session.
 
-- **Before a task.** At the share of the weekly limit that the user chose, 96% until they choose, the run stops. At 96% of the five-hour limit it waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait.
+- **Before a task.** The weekly limit holds no task back: a task is started however much of it is used, and a session that runs into it is handled as one inside a task. At 96% of the five-hour limit the run waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait.
 - **Inside a task.** A session that runs into a limit is stopped. The run waits for the reset of the five-hour limit, or for half an hour when it does not know the time, and the same session goes on with a message that says so. A task waits so ten times at most.
 - **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session. A pause whose changes are gone is forgotten; one whose task the queue does not take stops the run while the changes wait.
 
@@ -624,7 +620,7 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
 - **A session that waits for the owner** shows, under these lines, what it said last, eight lines of it at most, and how its session is opened to answer it. When it goes on, there is the title, the time and the step again, and nothing else.
 - **The commands** have their place between two rules. Nothing is typed there: the line says `press / to show the menu` after the pointer of a menu, `❯`, which blinks there as it does on the chosen line of the menu that opens in its place. `/` opens the menu of the commands that mean something at the moment, each with what it does; Up and Down move, Enter runs one, Escape closes the menu. They are `hold` and `send now` while a session waits for the owner, then `stop`, `continue` and `abort`. A session that waits for the owner brings `hold` and `send now` without being asked; Escape puts them away, and `/` opens the whole menu.
 - **Under the second rule** stand the keys and, at the right edge, how much of the two limits is used, when it is known. After the first Ctrl+C the line says `press ctrl+c again to stop the session and exit`.
-- **The end.** When the run is over, what was redrawn is erased, and under the tasks the tape says how the run went: `5 tasks in 1 h 12 min · 4 done · 1 done in part`, and under that, for a run that did not simply run out of tasks, what ended it: `‖ Stopped: the weekly limit is at 80%`. The page does not wait to be left: a run that was opened from the menu goes back to it, with this said above the menu, and `toobusy run` leaves the tool.
+- **The end.** When the run is over, what was redrawn is erased, and under the tasks the tape says how the run went: `5 tasks in 1 h 12 min · 4 done · 1 done in part`, and under that, for a run that did not simply run out of tasks, what ended it: `‖ Stopped: #71 is paused: the weekly limit is spent`. The page does not wait to be left: a run that was opened from the menu goes back to it, with this said above the menu, and `toobusy run` leaves the tool.
 
 No line of a tape wraps: lines are cut a column short of the window, and the terminal is told not to wrap while the tape is unrolled. What is redrawn is never taller than the window: what a session said gives way first. When the window changes its size the whole tape is drawn anew to the new one: the terminal is erased, its history too, and the bar, every line that stays and what is redrawn under them are written again, a title or a warning laid out to the new width. What the terminal had in its history before the run is gone with that. A terminal that jumps to its last line whenever something is written lets the history be read only between two drawings, which come once in a second while a task is worked on.
 

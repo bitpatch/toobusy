@@ -9,17 +9,16 @@ public sealed class AssistantScreenTests : IDisposable
     public void Dispose() => terminal.Dispose();
 
     [Fact]
-    public void TheModelTheEffortAndTheWeeklyLimitAreOfferedWithWhatIsChosen()
+    public void TheModelAndTheEffortAreOfferedWithWhatIsChosen()
     {
         terminal.Keys.Press(Keys.Down, Keys.Enter);
 
         Assert.Equal(AssistantAction.Effort, Ask());
         terminal.AssertSaw("""
              Assistant
-             ❯ Model         opus
-               Effort        high
-               Weekly limit  80%
-               Back          esc
+             ❯ Model   opus
+               Effort  high
+               Back    esc
              ↑↓ move · enter choose · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
     }
@@ -30,14 +29,6 @@ public sealed class AssistantScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(AssistantAction.Effort, Ask(at: 1));
-    }
-
-    [Fact]
-    public void TheLastOfTheThreeIsTheWeeklyLimit()
-    {
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
-
-        Assert.Equal(AssistantAction.Limit, Ask());
     }
 
     [Theory]
@@ -53,6 +44,6 @@ public sealed class AssistantScreenTests : IDisposable
     AssistantAction? Ask(int at = 0)
     {
         using var page = terminal.Open();
-        return AssistantScreen.Ask(page, "opus", "high", "80%", at);
+        return AssistantScreen.Ask(page, "opus", "high", at);
     }
 }

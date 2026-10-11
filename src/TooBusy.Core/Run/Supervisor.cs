@@ -130,14 +130,6 @@ public sealed class Supervisor(
 
             first = false;
             limits = assistant.ReadLimits().At(clock.Now);
-            if (limits.Far is { } spent && spent.Used >= plan.Share)
-            {
-                var why = $"{Limit(spent)} is at {Spoken.Percent(spent.Used)}{Reset(spent)}";
-                Say(RunMark.Paused, $"Stopped: {why} · {done} done");
-                machine.Notify($"Stopped: {Limit(spent)} is at {Spoken.Percent(spent.Used)}");
-                return new RunResult(RunEnd.Limited, done, why);
-            }
-
             if (limits.Near is { ResetsAt: { } reset } near && near.Used >= policy.Limit)
             {
                 var until = reset + policy.ResetMargin;

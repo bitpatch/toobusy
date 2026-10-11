@@ -339,7 +339,7 @@ public sealed class RunScreenTests : IDisposable
 
     [Theory]
     [InlineData(RunEnd.Emptied, null, "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", null)]
-    [InlineData(RunEnd.Limited, "the weekly limit is at 80%", "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", " ‖ Stopped: the weekly limit is at 80%")]
+    [InlineData(RunEnd.Limited, "#5 is paused: the weekly limit is spent", "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", " ‖ Stopped: #5 is paused: the weekly limit is spent")]
     [InlineData(RunEnd.Problem, "#5 left changes in the working tree · claude attach 1a2b", "3 tasks in 0 s · 1 done · 1 done in part · 1 for the owner", " ✖ Stopped: #5 left changes in the working tree · claude attach 1a2b")]
     public async Task WhenTheRunIsOverThePageSaysHowItWentAndIsLeftWithoutAKey(RunEnd end, string? why, string tasks, string? reason)
     {

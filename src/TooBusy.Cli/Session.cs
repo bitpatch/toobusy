@@ -8,8 +8,8 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli;
 
 // What happens on the page of toobusy from the moment it is opened: the setup, the choices of the milestone, the
-// model, the effort and the weekly limit, the menu and the run, each a screen that takes the page for a while. It
-// remembers what was done, for the report that is left in the terminal when the page is closed.
+// model and the effort, the menu and the run, each a screen that takes the page for a while. It remembers what was
+// done, for the report that is left in the terminal when the page is closed.
 public sealed class Session(Page page, Workbench bench)
 {
     IReadOnlyList<Milestone>? open;
@@ -27,11 +27,8 @@ public sealed class Session(Page page, Workbench bench)
 
     public string? ChosenEffort { get; private set; }
 
-    // The share of the weekly limit that was chosen on the page; null when none was.
-    public int? ChosenShare { get; private set; }
-
     // Whether anything was chosen on the page.
-    public bool Chose => Chosen is not null || ChosenModel is not null || ChosenEffort is not null || ChosenShare is not null;
+    public bool Chose => Chosen is not null || ChosenModel is not null || ChosenEffort is not null;
 
     // How the runs that were on the page ended, in their order; null is one that never got to its end.
     public List<RunResult?> Runs { get; } = [];
@@ -146,20 +143,6 @@ public sealed class Session(Page page, Workbench bench)
         return true;
     }
 
-    // Asks how much of the weekly limit a run may use and remembers the answer; false when the user went back
-    // instead.
-    public bool ChooseLimit()
-    {
-        Clear("Choosing the weekly limit", null);
-        page.Keys = "esc back";
-        if (LimitScreen.Ask(page, Share()) is not { } share)
-            return false;
-
-        bench.Personal.SaveShare(share);
-        ChosenShare = share;
-        return true;
-    }
-
     // Runs the queue on a tape under the bar of the page, until the run is over, and says how it went in one
     // line. How it ended is remembered whatever way the page was left.
     public async Task<string> RunAsync(IQueueRun run, CancellationToken cancellationToken)
@@ -186,21 +169,17 @@ public sealed class Session(Page page, Workbench bench)
         while (true)
         {
             Clear("Assistant", note);
-            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", LimitScreen.Describe(Share()), (int)at) is not { } action)
+            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", (int)at) is not { } action)
                 return;
 
             at = action;
             note = action switch
             {
                 AssistantAction.Model => ChooseModel(leavesPage: false) ? null : "The model is left as it was.",
-                AssistantAction.Effort => ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.",
-                _ => ChooseLimit() ? null : "The weekly limit is left as it was.",
+                _ => ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.",
             };
         }
     }
-
-    // The share of the weekly limit that is in force: the proposed one until the user chooses.
-    int Share() => bench.Personal.LoadShare() ?? UsageShare.Proposed;
 
     // The model and the effort in a few words, as the menu shows them.
     string Assistant() =>
@@ -267,7 +246,7 @@ public sealed class Session(Page page, Workbench bench)
         if (bench.Personal.LoadModel() is { } model)
             body.Add(Picker.Answer("Model", ModelScreen.Describe(model)));
         if (bench.Personal.LoadEffort() is { } effort)
-            body.AddRange([Picker.Answer("Effort", effort), Picker.Answer("Weekly limit", LimitScreen.Describe(Share()))]);
+            body.Add(Picker.Answer("Effort", effort));
 
         if (note is not null)
             body.AddRange([Line.Empty, Line.Of(note, Tone.Muted)]);

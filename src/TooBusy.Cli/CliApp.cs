@@ -435,7 +435,7 @@ public static class CliApp
             context.Output.WriteLine(context.OutputPalette.Muted("`toobusy about` tells how a run works, for you and for your assistant."));
     }
 
-    // What was chosen on the page: the milestone, the model, the effort, the weekly limit; false when nothing was.
+    // What was chosen on the page: the milestone, the model, the effort; false when nothing was.
     static bool ReportChoices(CliContext context, Session session, bool demo)
     {
         (string Label, string? Value)[] choices =
@@ -443,7 +443,6 @@ public static class CliApp
             ("Milestone", session.Chosen is { } milestone ? milestone.Title ?? "none" : null),
             ("Model", session.ChosenModel is { } model ? ModelScreen.Describe(model) : null),
             ("Effort", session.ChosenEffort),
-            ("Weekly limit", session.ChosenShare is { } share ? LimitScreen.Describe(share) : null),
         ];
         var chosen = choices.Where(choice => choice.Value is not null).ToList();
         foreach (var (label, value) in chosen)

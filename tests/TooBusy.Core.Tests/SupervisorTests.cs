@@ -684,32 +684,16 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task AFarLimitThatIsUsedUpStopsTheRun()
-    {
-        tracker.Add(3);
-        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 96.5, FakeClock.Start + TimeSpan.FromDays(3)));
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Limited, 0, "the weekly limit is at 96%, it resets 2030-01-04 09:00 UTC"), result);
-        Assert.Empty(assistant.Started);
-        Assert.Contains("‖ Stopped: the weekly limit is at 96%, it resets 2030-01-04 09:00 UTC · 0 done", log.Lines);
-    }
-
-    [Fact]
-    public async Task TheFarLimitStopsTheRunAtTheShareTheUserChose()
+    public async Task TheFarLimitHoldsNoTaskBack()
     {
         tracker.Add(3);
         tracker.Add(5);
-        plan = plan with { Share = 80 };
-        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 79.9, null));
-        assistant.Session(3).Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 80, null))).Ends(Done);
+        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(3)));
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Limited, 1, "the weekly limit is at 80%"), result);
-        Assert.Equal(3, Assert.Single(assistant.Started).Task);
-        Assert.Contains("‖ Stopped: the weekly limit is at 80% · 1 done", log.Lines);
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([3, 5], assistant.Started.Select(started => started.Task));
     }
 
     [Fact]

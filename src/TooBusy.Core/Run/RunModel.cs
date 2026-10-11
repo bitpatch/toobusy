@@ -4,22 +4,9 @@ using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Run;
 
-// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, the model and
-// the effort the tasks are done with, and the share of the far limit of usage the run may use.
-public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort, int Share = UsageShare.Proposed);
-
-// How much of the far limit of usage, the weekly one of Claude Code, a run may use, in percent: at that much of it
-// no next task is taken. It is the choice of the user.
-public static class UsageShare
-{
-    // The shares that are offered.
-    public static IReadOnlyList<int> Offered { get; } = [50, 60, 70, 80, 90, 96];
-
-    // The share of a user who has not chosen.
-    public const int Proposed = 96;
-
-    public static bool Is(int percent) => percent is > 0 and <= 100;
-}
+// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
+// and the effort the tasks are done with.
+public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort);
 
 // The times and the counts of a run.
 public sealed record RunPolicy
@@ -41,7 +28,7 @@ public sealed record RunPolicy
     public TimeSpan AbortGrace { get; init; } = TimeSpan.FromMinutes(10);
 
     // At this much of the near limit, in percent, no task is started before its reset; at Spent a limit counts as
-    // run into. The line of the far limit is the share of the plan.
+    // run into. The far limit holds no task back before it is run into.
     public double Limit { get; init; } = 96;
 
     public double Spent { get; init; } = 99;

@@ -791,9 +791,9 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("Model         the assistant's own", output, StringComparison.Ordinal);
-        Assert.Contains("Model         opus", output, StringComparison.Ordinal);
-        Assert.Contains("Effort        xhigh", output, StringComparison.Ordinal);
+        Assert.Contains("Model   the assistant's own", output, StringComparison.Ordinal);
+        Assert.Contains("Model   opus", output, StringComparison.Ordinal);
+        Assert.Contains("Effort  xhigh", output, StringComparison.Ordinal);
         Assert.Contains("Assistant  opus · xhigh", output, StringComparison.Ordinal);
         Assert.Contains("  haiku\u001b[K\r\n   Other…", output, StringComparison.Ordinal);
         Assert.Contains("Back", output, StringComparison.Ordinal);
@@ -808,37 +808,6 @@ public sealed class CliAppTests : IDisposable
             Report(output).Split(Environment.NewLine));
         Assert.Equal("Model: opus", (await RunAsync("model")).Output.Trim());
         Assert.Equal("Effort: xhigh", (await RunAsync("effort")).Output.Trim());
-    }
-
-    [Fact]
-    public async Task TheAssistantOfTheMenuChangesTheWeeklyLimit()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        await ChooseAllAsync();
-
-        // The assistant; the weekly limit, which is the proposed one: two above it; `Back`, and out. Then the same
-        // way again, to see what is in force, and back from the list.
-        var keys = new Keys().Press(
-            Keys.Down, Keys.Enter,
-            Keys.Down, Keys.Down, Keys.Enter, Keys.Up, Keys.Up, Keys.Enter,
-            Keys.Down, Keys.Enter,
-            Keys.Up, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, []);
-
-        Assert.Equal(0, exit);
-        Assert.Contains("Weekly limit  96%", output, StringComparison.Ordinal);
-        Assert.Contains("Weekly limit  80%", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Weekly limit     80%", output, StringComparison.Ordinal);
-        Assert.Equal(
-            [
-                $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}",
-                "✔ Weekly limit     80%",
-                "",
-            ],
-            Report(output).Split(Environment.NewLine));
-        Assert.Contains("limit = 80", File.ReadAllText(Path.Combine(personal.FullName, "projects.toml")), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1079,7 +1048,6 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Weekly limit     96%", output, StringComparison.Ordinal);
         Assert.Contains("❯ Run        5 tasks", output, StringComparison.Ordinal);
 
         // The menu that the run comes back to says how the run went.

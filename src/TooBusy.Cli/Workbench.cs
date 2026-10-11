@@ -96,13 +96,13 @@ public sealed record Workbench(
     public Checkup Checkup => new(Machine, Settings, Repository);
 
     // A run of the queue over the settings and the choices of the user as they are now; the milestone is null for
-    // tasks whatever their milestone, and the share of the weekly limit is the proposed one until the user chooses. In a demo the run is an imitated one. Otherwise the tasks are the issues of
+    // tasks whatever their milestone. In a demo the run is an imitated one. Otherwise the tasks are the issues of
     // the repository, Claude Code does them in the working copy, and what the run leaves on this machine is kept in
     // the local folder of the project. Null when the project has no tasks to take: its `origin` remote is not a
     // GitHub repository.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort, Personal.LoadShare() ?? UsageShare.Proposed);
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort);
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules));
         if (Repository is null)
