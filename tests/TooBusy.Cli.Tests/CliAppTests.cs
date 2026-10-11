@@ -1261,7 +1261,7 @@ public sealed class CliAppTests : IDisposable
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
               Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label
-            ✔ No task is left · 6 done
+            ✔ No task is left · 5 done · 1 done in part
               Worked 69 s
 
             """.ReplaceLineEndings(),

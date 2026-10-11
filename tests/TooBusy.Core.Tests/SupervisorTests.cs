@@ -134,6 +134,71 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ATaskDoneInPartIsCountedApartFromThoseThatAreDone()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+        assistant.Session(3).Works().Ends(Done);
+        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(7).Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2) { Partial = 1 }, result);
+        Assert.Equal("✔ No task is left · 2 done · 1 done in part", log.Lines[^2]);
+        Assert.Contains("No task is left: 2 done · 1 done in part", machine.Notified);
+    }
+
+    [Fact]
+    public async Task ARunThatIsStoppedCountsATaskDoneInPartApart()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works(4).Ends("Half of it.\nTOOBUSY: partial");
+        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 0) { Partial = 1 }, result);
+        Assert.Contains("‖ Stopped by /stop · 0 done · 1 done in part", log.Lines);
+        Assert.Contains("Stopped: 0 done · 1 done in part", machine.Notified);
+    }
+
+    [Fact]
+    public async Task ARunThatStopsOverATaskCountsATaskDoneInPartApart()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+        assistant.Session(3).Works().Ends(Done);
+        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(7).Works().Ends("I tried twice.\nTOOBUSY: failed the tests do not pass");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 1, "#7 failed · fake attach 7") { Partial = 1 }, result);
+        Assert.Contains("✖ Stopped: #7 failed · fake attach 7 · the next task did not start · 1 done · 1 done in part", log.Lines);
+    }
+
+    [Fact]
+    public async Task APauseCountsATaskDoneInPartApart()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(5)
+            .Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(1))))
+            .Limit();
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Limited, result.End);
+        Assert.Equal(1, result.Partial);
+        Assert.Contains(log.Lines, line => line.StartsWith("‖ #5 is paused: the weekly limit is spent", StringComparison.Ordinal) && line.EndsWith("and the next run goes on with its session · 0 done · 1 done in part", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task WithNoTaskToTakeTheRunEndsAtOnce()
     {
         var result = await RunAsync();
@@ -252,7 +317,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal(new RunResult(RunEnd.Emptied, 0) { Partial = 1 }, result);
         var made = Assert.Single(tracker.Made);
         Assert.Equal("Choose the format", made.Title);
         Assert.Equal(["needs-owner", "Feature"], made.Labels);
@@ -1018,7 +1083,7 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal(new RunResult(RunEnd.Emptied, 0) { Partial = 1 }, result);
         Assert.Equal(1, session.Looks);
         Assert.Empty(session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session ended while nobody watched · fake attach 5", log.Lines);

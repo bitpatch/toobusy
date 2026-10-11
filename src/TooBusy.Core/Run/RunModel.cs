@@ -183,8 +183,11 @@ public enum RunEnd
 }
 
 // How a run ended. Why says what ended a run that neither ran out of tasks nor was stopped by the owner: the limit,
-// the problem, or what a kill left behind.
-public sealed record RunResult(RunEnd End, int Done, string? Why = null);
+// the problem, or what a kill left behind. A task that was done in part is counted apart from those that are done.
+public sealed record RunResult(RunEnd End, int Done, string? Why = null)
+{
+    public int Partial { get; init; }
+}
 
 // Times as a run says them.
 public static class Spoken

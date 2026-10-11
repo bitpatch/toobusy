@@ -634,7 +634,7 @@ A run is stopped with the commands of the menu of its page, `stop`, `continue` a
 
 | Command | Does |
 |---|---|
-| `/stop` | the current task is finished, and no other is taken: `Stopped by /stop · 3 done`. Between tasks the queue stops at once |
+| `/stop` | the current task is finished, and no other is taken: `Stopped by /stop · 3 done · 1 done in part`. Between tasks the queue stops at once |
 | `/continue` | takes `/stop` back |
 | `/abort` | stops as soon as possible, with nothing committed and a report in the task. It cannot be taken back |
 | Ctrl+C twice | kills the run: the session is stopped at once, and the task stays in `In Progress` as it is; the next run goes on with its session. A kill during the wait for a usage limit pauses the task instead, as described below. The exit code is 130 |
@@ -739,7 +739,7 @@ A run is a tape on the terminal's own screen, under the bar of the page, which i
 
 No line of a tape wraps: lines are cut a column short of the window, and the terminal is told not to wrap while the tape is unrolled. What is redrawn is never taller than the window: what a session said gives way first. When the window changes its size the whole tape is drawn anew to the new one: the terminal is erased, its history too, and the bar, every line that stays and what is redrawn under them are written again, a title or a warning laid out to the new width. What the terminal had in its history before the run is gone with that. A terminal that jumps to its last line whenever something is written does not let the history be read while a task is worked on: what is redrawn is drawn anew once in a second, and in a terminal with colours the mark that turns and what blinks are written with every beat as well, eighty milliseconds apart.
 
-Without a terminal the lines of the log are printed as they come: the run, each task that starts and how it ends, what is done to the tracker, every wait and every command, each with its mark: `✻` the run, `→` a task that is started, `▶` goes on, and the marks above.
+Without a terminal the lines of the log are printed as they come: the run, each task that starts and how it ends, what is done to the tracker, every wait and every command, each with its mark: `✻` the run, `→` a task that is started, `▶` goes on, and the marks above. A line that ends a run or pauses a task counts the tasks the run closed, and so does the notification of a run that ran out of tasks or was stopped by `/stop`: those that are done, `3 done`, and apart from them those that are done in part, when there are any, `✔ No task is left · 5 done · 1 done in part`.
 
 ### A demo of a run
 

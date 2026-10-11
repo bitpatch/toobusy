@@ -44,7 +44,10 @@ public sealed class Supervisor(
 
     // The record of the task that is worked on, as it was written last.
     TaskRecord? record;
+
+    // The tasks the run closed: those that are done, and those that are done in part.
     int done;
+    int partial;
 
     // What the pause of a task or a kill said last: it is why the run ended.
     string? left;
@@ -64,7 +67,7 @@ public sealed class Supervisor(
             }
             catch (OperationCanceledException) when (kill.IsCancellationRequested)
             {
-                result = new RunResult(RunEnd.Killed, done, left);
+                result = Ended(RunEnd.Killed, left);
             }
             catch (TrackerException refused)
             {
@@ -91,9 +94,9 @@ public sealed class Supervisor(
             kill.ThrowIfCancellationRequested();
             if (stopping)
             {
-                Say(aborting ? RunMark.Interrupted : RunMark.Paused, $"Stopped {(aborting ? "after /abort" : "by /stop")} · {done} done");
-                machine.Notify($"Stopped: {done} done");
-                return new RunResult(RunEnd.Stopped, done);
+                Say(aborting ? RunMark.Interrupted : RunMark.Paused, $"Stopped {(aborting ? "after /abort" : "by /stop")} · {Went()}");
+                machine.Notify($"Stopped: {Went()}");
+                return Ended(RunEnd.Stopped);
             }
 
             // The record of an earlier run is looked at before the queue. A task that has one left its changes in
@@ -128,9 +131,9 @@ public sealed class Supervisor(
             {
                 if (!first && lineup.Held.Count > 0)
                     Say(RunMark.Note, Held(lineup));
-                Say(RunMark.Done, $"No task is left · {done} done");
-                machine.Notify($"No task is left: {done} done");
-                return new RunResult(RunEnd.Emptied, done);
+                Say(RunMark.Done, $"No task is left · {Went()}");
+                machine.Notify($"No task is left: {Went()}");
+                return Ended(RunEnd.Emptied);
             }
 
             first = false;
@@ -296,7 +299,7 @@ public sealed class Supervisor(
             if (watched.Paused)
             {
                 mark = RunMark.Paused;
-                return new RunResult(RunEnd.Limited, done, left);
+                return Ended(RunEnd.Limited, left);
             }
 
             (mark, var result) = await SettleAsync(task, session, watched.Look, since, kill);
@@ -561,7 +564,7 @@ public sealed class Supervisor(
             missing.Add("the conversation of its session is not known");
 
         left = $"#{number} is paused: {why}. Its changes stay in the working tree, and the next run goes on with its session";
-        Say(RunMark.Paused, $"{left} · {done} done");
+        Say(RunMark.Paused, $"{left} · {Went()}");
         if (missing.Count > 0)
             Say(RunMark.Attention, $"The pause of #{number} is not whole: {string.Join(" · ", missing)} · set it right by hand before the next run");
         machine.Notify($"#{number} is paused by a usage limit");
@@ -640,6 +643,7 @@ public sealed class Supervisor(
             case OutcomeKind.Done:
                 await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Done, outcome.Report, session.Open), kill);
                 await CloseAsync(number, kill);
+                done++;
                 Say(RunMark.Done, $"#{number} {task.Title} — done in {took}");
                 Say(RunMark.Note, $"#{number} is closed, with the report of the session as its comment");
                 return (RunMark.Done, null);
@@ -654,6 +658,7 @@ public sealed class Supervisor(
                 var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, await tracker.ReadDescriptionAsync(number, kill)), labels, task.Milestone), kill);
                 await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open, made), kill);
                 await CloseAsync(number, kill);
+                partial++;
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");
                 Say(RunMark.Note, $"#{number} is closed; what is left is #{made} “{title}”, which waits for the owner with the {rules.Owner} label");
                 return (RunMark.Partial, null);
@@ -715,7 +720,6 @@ public sealed class Supervisor(
     async Task CloseAsync(int number, CancellationToken kill)
     {
         await tracker.CloseAsync(number, kill);
-        done++;
         try
         {
             await tracker.SetStatusAsync(number, BoardStatus.Done, kill);
@@ -831,10 +835,15 @@ public sealed class Supervisor(
 
     RunResult Stop(string problem)
     {
-        Say(RunMark.Failed, $"Stopped: {problem} · the next task did not start · {done} done");
+        Say(RunMark.Failed, $"Stopped: {problem} · the next task did not start · {Went()}");
         machine.Notify($"Stopped: {problem}");
-        return new RunResult(RunEnd.Problem, done, problem);
+        return Ended(RunEnd.Problem, problem);
     }
+
+    // How the tasks of the run went so far, as the tape of a run says it: `3 done`, `3 done · 1 done in part`.
+    string Went() => string.Create(CultureInfo.InvariantCulture, $"{done} done{(partial > 0 ? $" · {partial} done in part" : "")}");
+
+    RunResult Ended(RunEnd end, string? why = null) => new(end, done, why) { Partial = partial };
 
     void Say(RunMark mark, string text) => view.Say(new RunLine(mark, text));
 
