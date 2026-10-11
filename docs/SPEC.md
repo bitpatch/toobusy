@@ -26,7 +26,7 @@ Out of scope, each a later part of this specification:
 
 ### The project and its settings
 
-A project is a git repository. toobusy finds it by walking up from the current folder to the root of the working copy; the settings live in `.toobusy/settings.toml` at that root. Outside a git working copy every command but `--help` and `--version` fails with `toobusy: not inside a git repository` and exit code 2.
+A project is a git repository. toobusy finds it by walking up from the current folder to the root of the working copy; the settings live in `.toobusy/settings.toml` at that root. Outside a git working copy every command but `--help`, `--version` and `about` fails with `toobusy: not inside a git repository` and exit code 2.
 
 The settings are committed, so that everyone who clones the repository gets them. They hold nothing personal: no tokens, no paths of one machine.
 
@@ -113,7 +113,7 @@ Run `toobusy init` to set it up.
 
 The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
 
-In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. `--help` and `--version` work everywhere.
+In a terminal `toobusy` without a command does not stop there: it opens its page and sets the project up, as described below. `--help`, `--version` and `about` work everywhere.
 
 ### The screen
 
@@ -240,7 +240,7 @@ Every tab stands on the grey of the bar, its name a little quieter than a plain 
 
 Escape from these tabs comes back to those two choices when the project has a board, and goes back a step when it has none.
 
-**The report.** When the screen is closed, the terminal gets the name of the command and the folder, the answers as `✔ Blocking labels  manual, draft` lines, and one line that says how the setup ended.
+**The report.** When the screen is closed, the terminal gets the name of the command and the folder, the answers as `✔ Blocking labels  manual, draft` lines, and one line that says how the setup ended. After a setup that wrote the settings the last line names the command that tells how a run works: `` `toobusy about` tells how a run works, for you and for your assistant. ``
 
 The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
 
@@ -377,6 +377,16 @@ A project whose `origin` remote is not a GitHub repository has no tasks to take:
 
 In a terminal `run` shows the run on its tape, and leaves the tool when the run is over: no menu is opened, and no key is waited for. Without a terminal it prints the log of the run line by line, takes no commands, and stopping the tool kills the run.
 
+### `toobusy about`
+
+`about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions and the skills of the project to it. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
+
+It prints, as Markdown and in this order: which tasks a run takes and how it does them; that toobusy keeps the tracker, and what it does there before a session; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
+
+In a project that is set up the labels of its settings are named, `the needs-owner label`, and it is said whether the project has a board. Where there are no settings, or they do not validate, the labels are spoken of without their names, and the text says that no settings are read.
+
+`about` reads nothing but the settings: it needs no network, no terminal and no `gh`, works outside a git working copy, as `--help` does, and exits with code 0.
+
 ### `toobusy doctor`
 
 `doctor` checks everything a run needs and prints one line per check: passed, failed or skipped, and for a failed one what is wrong and the command that fixes it. It exits with 0 when nothing failed and with 1 otherwise. It changes nothing.
@@ -429,7 +439,7 @@ A command of a package manager is proposed only when that manager is on the path
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn. A tape is read as the rows the terminal's own screen has after it, sequence by sequence, so that a tape that has lost count of its lines fails. A key that a test holds back for something that never happens fails the test instead of letting the page go on for ever.
 - `doctor`: each check passed, failed and skipped, and the fix for each platform with and without its package manager.
-- The "not set up" message and the exit codes, through the command line.
+- The "not set up" message and the exit codes, through the command line; `about` outside a project, in one that is set up and in one whose settings do not validate.
 
 ### To be settled while building
 
@@ -443,7 +453,7 @@ A command of a package manager is proposed only when that manager is on the path
 
 - **The run keeps the tracker.** It moves a task before its session starts and after it ends, writes the report of the session into the task, puts and takes off labels, and makes new tasks. The assistant changes nothing in the tracker, and it is told so.
 - **The assistant does the work** as the project's own instructions say (`CLAUDE.md`, `AGENTS.md` and the like): it changes the working copy, checks the change, commits it and pushes it, and ends its last reply with one line that says how the task went.
-- **Nothing is taught to the assistant beforehand.** What a session has to know of the run it is told in its first message. No skills of Claude Code are needed, and another assistant is told the same.
+- **Nothing is taught to the assistant beforehand.** What a session has to know of the run it is told in its first message. No skills of Claude Code are needed, and another assistant is told the same. A project that wants its instructions to fit a run reads how a run works from `toobusy about`.
 
 ### The queue
 
@@ -469,7 +479,7 @@ The tasks that can be taken now are taken in this order: those with the label of
 1. **The working tree** must be clean: no changed file and none that git does not know. Otherwise the run stops with `the working tree is not clean: commit or stash the changes first`.
 2. **The queue** is read, and the first task that can be taken is the one.
 3. **The limits** of usage are looked at, as described below.
-4. **The task is moved to `In Progress`** on the board, and its description and its comments are read.
+4. **The task is moved to `In Progress`** on the board. Nothing of the task is read for the session, which reads it on its own.
 5. **A session is started** with the model and the effort of the user. A task that was interrupted loses its label then.
 6. **The session is watched** until its turn ends with a line for toobusy.
 7. **The outcome is checked** against the working copy, and the tracker is told.
@@ -478,15 +488,15 @@ A session of Claude Code is a background one, started with `claude --bg`: it goe
 
 ### What a session is told
 
-The first message of a session gives the task and the rules, in this order:
+The first message of a session names the task and gives the rules. It starts with `You are doing task #12 of this project without its owner.` and with what toobusy is, the same for every session but for the number, so that a session of a run can be told from any other. Then come, in this order:
 
-- the number, the title and the address of the task, its description, and its comments, the last thirty of them;
-- nobody will answer: no questions, no waiting for an approval, no plan mode. Where the instructions of the project say to ask the owner, the session does not: the owner started the run to have the task done;
-- the instructions of the project hold in everything else, committing and pushing among it;
+- the number, the title and the address of the task, and that the session reads the task and its comments before it starts: nothing of them is passed on, so nothing is cut and nothing is stale;
+- nobody will answer: no questions, no waiting for an approval, no plan mode. Where the instructions of the project, its skills among them, say to ask the owner, the session does not: the owner started the run to have the task done;
+- the instructions of the project hold in everything else, committing and pushing among it. Where they differ from the rules of the session, the rules of the session hold;
 - the tracker is kept by toobusy, which has already moved the task to `In Progress`: the status, the labels, closing and comments are not the session's;
 - the work is done in this working copy, which was clean and must be clean at the end: everything committed and pushed, or undone;
 - the session keeps a plan of the work in its task list: the steps are laid out before it starts, each is marked when it is begun and when it is done, and the list changes when the plan does. The page of a run shows it;
-- a task that was interrupted before has the report of that session among its comments;
+- a task that was interrupted before has the report of that session as its last comment that starts with `**Interrupted.**`;
 - what cannot be done without the owner, as described below;
 - the last reply is the report of the task, and its last line is one of:
 
@@ -611,7 +621,7 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 ### Tests
 
 - The queue: every reason a task is held for, the order, tasks that wait for others, and the interrupted task a run takes first.
-- The line for toobusy in a reply, and the messages a session gets.
+- The line for toobusy in a reply, the messages a session gets, and what `about` tells: the same messages word for word, the labels of the project, and the times and the counts of the policy.
 - The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it.
 - What is asked of `gh` and of `claude`, argument by argument, and what is made of their answers; a conversation of Claude Code read from a file of the test.
 - The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first.

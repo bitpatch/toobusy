@@ -66,18 +66,15 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         return tasks;
     }
 
-    public async Task<TaskText> ReadTextAsync(int number, CancellationToken cancellationToken)
+    public async Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken)
     {
         var answer = await AskAsync(
-            ["issue", "view", Text(number), "--repo", repository, "--json", "body,comments", "--jq", "([.body] | @tsv), (.comments[] | [.author.login, .body] | @tsv)"],
+            ["issue", "view", Text(number), "--repo", repository, "--json", "body", "--jq", "[.body] | @tsv"],
             $"#{number} cannot be read.",
             cancellationToken);
 
-        // The first line is the description, which may be empty; a line for each comment follows.
-        var lines = answer.Split('\n');
-        return new TaskText(
-            Unescaped(lines[0].TrimEnd('\r')),
-            [.. lines.Skip(1).Select(line => line.TrimEnd('\r').Split('\t', 2)).Where(fields => fields.Length == 2).Select(fields => new TaskComment(fields[0], Unescaped(fields[1])))]);
+        // The description is one line, as the queue gives its fields, and may be empty.
+        return Unescaped(answer.Split('\n')[0].TrimEnd('\r'));
     }
 
     public async Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)

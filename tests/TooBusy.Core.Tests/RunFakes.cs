@@ -38,7 +38,7 @@ sealed class FakeTracker : ITaskTracker
 {
     public List<QueueTask> Open { get; } = [];
 
-    public Dictionary<int, TaskText> Texts { get; } = [];
+    public Dictionary<int, string> Descriptions { get; } = [];
 
     // What was done, as `status 12 InProgress`, `label 12 +manual`, `comment 12`, `close 12`, `create 31`.
     public List<string> Did { get; } = [];
@@ -71,10 +71,10 @@ sealed class FakeTracker : ITaskTracker
         return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
     }
 
-    public Task<TaskText> ReadTextAsync(int number, CancellationToken cancellationToken)
+    public Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken)
     {
-        Do($"text {number}", remember: false);
-        return Task.FromResult(Texts.GetValueOrDefault(number) ?? new TaskText($"Do task {number}.", []));
+        Do($"description {number}", remember: false);
+        return Task.FromResult(Descriptions.GetValueOrDefault(number) ?? $"Do task {number}.");
     }
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)

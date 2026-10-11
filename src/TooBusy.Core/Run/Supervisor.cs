@@ -166,7 +166,6 @@ public sealed class Supervisor(
         var again = task.Has(plan.Rules.Interrupted);
         Show(new RunStatus(RunPhase.Preparing, $"Starting #{number}…") { Task = task, Since = since, Queued = queued });
 
-        TaskText? text = null;
         IAssistantSession session;
         string how;
         if (waits is not null)
@@ -184,10 +183,9 @@ public sealed class Supervisor(
         else
         {
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
-            text = await tracker.ReadTextAsync(number, kill);
             try
             {
-                session = await assistant.StartAsync(Start(task, Briefing.Task(task, text, again)), kill);
+                session = await assistant.StartAsync(Start(task, Briefing.Task(task, again)), kill);
             }
             catch (AssistantException)
             {
@@ -233,7 +231,7 @@ public sealed class Supervisor(
                 return new RunResult(RunEnd.Limited, done, left);
             }
 
-            (mark, var ended) = await SettleAsync(task, session, text, watched.Look, since, kill);
+            (mark, var ended) = await SettleAsync(task, session, watched.Look, since, kill);
             return ended;
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
@@ -494,7 +492,7 @@ public sealed class Supervisor(
 
     // Tells the tracker how the task went, after checking what the session says against the working copy. Gives the
     // mark of how it went, and how the run ends with it: null when the run goes on to the next task.
-    async Task<(RunMark Mark, RunResult? Ended)> SettleAsync(QueueTask task, IAssistantSession session, TaskText? text, SessionLook look, DateTimeOffset since, CancellationToken kill)
+    async Task<(RunMark Mark, RunResult? Ended)> SettleAsync(QueueTask task, IAssistantSession session, SessionLook look, DateTimeOffset since, CancellationToken kill)
     {
         var number = task.Number;
         var took = Spoken.Time(clock.Now - since);
@@ -534,11 +532,10 @@ public sealed class Supervisor(
             case OutcomeKind.Partial:
                 // What is left is a task of its own: what the session wrote of it, and the description of the task
                 // it comes from. It has the labels that make the task a task to take, and the one of the owner.
-                text ??= await tracker.ReadTextAsync(number, kill);
                 var rest = outcome.Rest ?? new RestTask("", outcome.Report);
                 var title = rest.Title.Length > 0 ? rest.Title : Briefing.RestTitle(task);
                 string[] labels = [rules.Owner, .. task.Labels.Where(label => rules.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(rules.Owner, StringComparison.OrdinalIgnoreCase))];
-                var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, text.Description), labels, plan.Milestone), kill);
+                var made = await tracker.CreateAsync(new NewTask(title, Briefing.Rest(rest, task, await tracker.ReadDescriptionAsync(number, kill)), labels, plan.Milestone), kill);
                 await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open, made), kill);
                 await CloseAsync(number, kill);
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");

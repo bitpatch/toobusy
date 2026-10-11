@@ -9,13 +9,9 @@ namespace TooBusy.Core.Run;
 // said by the instructions of the project itself, which the assistant reads on its own.
 public static class Briefing
 {
-    // As many of the last comments of a task are given to the session, and as much of each text.
-    const int Comments = 30;
-    const int Longest = 20_000;
-
     // The first message of a session: the task, the rules of a session without the owner, and how its last reply
-    // is to end.
-    public static string Task(QueueTask task, TaskText text, bool interrupted)
+    // is to end. The task is named and not passed on: the session reads it in the tracker, whole and as it is now.
+    public static string Task(QueueTask task, bool interrupted)
     {
         var message = new StringBuilder();
         message.Append(CultureInfo.InvariantCulture, $"""
@@ -25,25 +21,12 @@ public static class Briefing
 
             {task.Url}
 
-            {(text.Description.Trim().Length == 0 ? "(The task has no description.)" : Cut(text.Description.Trim()))}
-
-            """);
-
-        if (text.Comments.Count > 0)
-        {
-            message.Append("\n## Comments\n");
-            if (text.Comments.Count > Comments)
-                message.Append(CultureInfo.InvariantCulture, $"\n(The {text.Comments.Count - Comments} comments before these are left out.)\n");
-            foreach (var comment in text.Comments.TakeLast(Comments))
-                message.Append(CultureInfo.InvariantCulture, $"\n**{comment.Author}:**\n\n{Cut(comment.Text.Trim())}\n");
-        }
-
-        message.Append(CultureInfo.InvariantCulture, $"""
+            Read the task and its comments before you start: toobusy passes on nothing of them.
 
             # Rules of this session
 
-            - Nobody will answer. Ask no questions, wait for no approval and do not enter plan mode: decide yourself and go on. Where the instructions of the project (CLAUDE.md, AGENTS.md and the like) tell you to ask the owner or to wait for a confirmation, do not: the owner started this run to have the task done.
-            - Follow the instructions of the project in everything else: how the work is done, how it is checked, how it is committed and pushed. Commit and push the finished work as they say.
+            - Nobody will answer. Ask no questions, wait for no approval and do not enter plan mode: decide yourself and go on. Where the instructions of the project (CLAUDE.md, AGENTS.md, its skills and the like) tell you to ask the owner or to wait for a confirmation, do not: the owner started this run to have the task done.
+            - Follow the instructions of the project in everything else: how the work is done, how it is checked, how it is committed and pushed. Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.
             - The tracker is kept by toobusy. It has already moved the task to In Progress. Do not change the status or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
             - Work in this working copy: make no worktree and do not move to another one. It was clean when you started and it must be clean when you end: everything of yours is committed and pushed, or undone.
             - Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done, and change the list when the plan changes. toobusy shows the list to the owner as the progress of the task.
@@ -52,7 +35,7 @@ public static class Briefing
         if (interrupted)
         {
             message.Append("""
-                - This task was interrupted before. The report of that session is among the comments above: go on with what it says is left, and do again what it says was undone.
+                - This task was interrupted before. The report of that session is the last comment of the task that starts with **Interrupted.**: go on with what it says is left, and do again what it says was undone.
 
                 """);
         }
@@ -119,6 +102,4 @@ public static class Briefing
     public static string RestTitle(QueueTask from) => $"What is left of “{from.Title}”";
 
     static string Joined(params string[] parts) => string.Join("\n\n", parts.Where(part => part.Trim().Length > 0).Select(part => part.Trim()));
-
-    static string Cut(string text) => text.Length <= Longest ? text : text[..Longest] + "\n\n(The text is cut here: it is longer than toobusy passes on.)";
 }

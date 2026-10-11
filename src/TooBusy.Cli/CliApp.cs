@@ -24,6 +24,7 @@ public static class CliApp
         root.Subcommands.Add(CreateModelCommand(context, demo));
         root.Subcommands.Add(CreateEffortCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
+        root.Subcommands.Add(CreateAboutCommand(context));
 
         // Without a command the tool opens its page in a terminal: the setup when the project needs it, the choices
         // of the milestone, the model and the effort when the user has none, and then the menu. Without a terminal there is nobody to ask,
@@ -76,7 +77,9 @@ public static class CliApp
 
             // The screen is gone; what was answered and how it ended is left in the terminal.
             context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
-            return ReportSetup(context, session.Setup, bench.Demo) ? ExitCode.Failed : ExitCode.Done;
+            var failed = ReportSetup(context, session.Setup, bench.Demo);
+            NameAbout(context, session.Setup, bench.Demo);
+            return failed ? ExitCode.Failed : ExitCode.Done;
         });
         return command;
     }
@@ -315,6 +318,20 @@ public static class CliApp
         return command;
     }
 
+    // Tells how a run works, for the owner of a project and for the assistant that helps them. It reads nothing but
+    // the settings, so it works everywhere `--help` does; where there are none to read, the labels have no names.
+    static Command CreateAboutCommand(CliContext context)
+    {
+        var command = new Command("about", "Tells how a run works: what a session is told, and what toobusy does around it.");
+        command.SetAction(_ =>
+        {
+            var settings = ProjectLocator.FindRoot(context.Folder) is { } root ? new SettingsFile(root).Load()?.Settings : null;
+            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default));
+            return ExitCode.Done;
+        });
+        return command;
+    }
+
     // The page of toobusy, for the menu or for a run alone, and what is left in the terminal when it is closed. A
     // run has left its tape there already, with its bar, its tasks and how it went: only what else was done on the
     // page is reported under it.
@@ -339,6 +356,7 @@ public static class CliApp
             context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
             failed = session.Setup is not null && ReportSetup(context, session.Setup, bench.Demo);
             ReportChoices(context, session, bench.Demo);
+            NameAbout(context, session.Setup, bench.Demo);
         }
 
         if (bench.Demo && session.Runs.Count > 0)
@@ -372,6 +390,14 @@ public static class CliApp
             : demo ? palette.Muted(text)
             : $"{palette.Success("✔")} {text}");
         return failed;
+    }
+
+    // The last line after a setup that wrote the settings: where the owner and their assistant read how a run
+    // works, now that the project is ready for one.
+    static void NameAbout(CliContext context, SetupResult? setup, bool demo)
+    {
+        if (setup is { Outcome: SetupOutcome.Written, SettingsWritten: true } && !demo)
+            context.Output.WriteLine(context.OutputPalette.Muted("`toobusy about` tells how a run works, for you and for your assistant."));
     }
 
     // What was chosen on the page: the milestone, the model, the effort, the weekly limit; false when nothing was.

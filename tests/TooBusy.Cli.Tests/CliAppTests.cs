@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Processes;
+using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 
 namespace TooBusy.Cli.Tests;
@@ -62,6 +63,45 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains("--demo", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutTellsHowARunWorksOutsideAGitRepository()
+    {
+        var (exit, output, error) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.StartsWith("# How toobusy works\n", output, StringComparison.Ordinal);
+        Assert.Contains("No settings are read here, so its labels are not named below", output, StringComparison.Ordinal);
+        Assert.Contains(Briefing.Task(new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []), interrupted: false), output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutNamesTheLabelsOfAProjectThatIsSetUp()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+
+        var (exit, output, error) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("- A task with the label `manual` is not taken.\n- The project has no board", output, StringComparison.Ordinal);
+        Assert.Contains("takes the `interrupted` label off a task that had it", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("No settings are read here", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutSpeaksOfNoLabelsWhereTheSettingsAreNotValid()
+    {
+        GitRepository();
+        WriteSettings("version = 1\n");
+
+        var (exit, output, _) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("No settings are read here", output, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -285,7 +325,6 @@ public sealed class CliAppTests : IDisposable
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
             ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
-            ("gh", "issue") when arguments[1] == "view" => "Write it as CSV.\n",
             ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
             ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
             ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
@@ -314,7 +353,10 @@ public sealed class CliAppTests : IDisposable
 
         var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
         Assert.Equal(["--effort", "high", "-n", "#12 Export the data"], started.Skip(7).Take(4));
-        Assert.Contains("# Task #12: Export the data\n\nhttps://github.com/acme/rocket/issues/12\n\nWrite it as CSV.", started[^1], StringComparison.Ordinal);
+        Assert.Equal(Briefing.Task(new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []), interrupted: false), started[^1]);
+
+        // The session reads its task on its own: the run asks the tracker for nothing of it.
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments is ["issue", "view", ..]);
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(
             ["issue", "comment", "12", "--repo", "acme/rocket", "--body", "**Done.**\n\nThe export is written.\n\n_Session: `claude attach abc12345`_"]));
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["issue", "close", "12", "--repo", "acme/rocket"]));
@@ -753,6 +795,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Milestone        v0.2.0",
                 "✔ Model            fable",
                 "✔ Effort           high",
+                "`toobusy about` tells how a run works, for you and for your assistant.",
                 "",
             ],
             Report(output).Split(Environment.NewLine));
@@ -1011,7 +1054,11 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init");
 
         Assert.Equal(0, exit);
-        Assert.EndsWith("✔ The settings are written to .toobusy/settings.toml. Commit the file." + Environment.NewLine, Report(output), StringComparison.Ordinal);
+        Assert.EndsWith(
+            "✔ The settings are written to .toobusy/settings.toml. Commit the file." + Environment.NewLine
+            + "`toobusy about` tells how a run works, for you and for your assistant." + Environment.NewLine,
+            Report(output),
+            StringComparison.Ordinal);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("blocking = [\"manual\"]", written, StringComparison.Ordinal);
         Assert.Contains("owner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);

@@ -125,28 +125,22 @@ public class GitHubTasksTests
     }
 
     [Fact]
-    public async Task TheTextOfATaskIsItsDescriptionAndItsComments()
+    public async Task TheDescriptionOfATaskIsReadWithItsLines()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("Do it.\\n\\n- one\\n- two\nann\tWhich one?\\nA or B.\nbob\tA.\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered("Do it.\\n\\n- one\\n- two\n"));
 
-        var text = await Tasks().ReadTextAsync(12, TestContext.Current.CancellationToken);
+        var description = await Tasks().ReadDescriptionAsync(12, TestContext.Current.CancellationToken);
 
-        Assert.Equal("Do it.\n\n- one\n- two", text.Description);
-        Assert.Equal([new TaskComment("ann", "Which one?\nA or B."), new TaskComment("bob", "A.")], text.Comments);
-        Assert.Equal(
-            ["issue", "view", "12", "--repo", "acme/rocket", "--json", "body,comments", "--jq", "([.body] | @tsv), (.comments[] | [.author.login, .body] | @tsv)"],
-            Assert.Single(processes.Asked).Arguments);
+        Assert.Equal("Do it.\n\n- one\n- two", description);
+        Assert.Equal(["issue", "view", "12", "--repo", "acme/rocket", "--json", "body", "--jq", "[.body] | @tsv"], Assert.Single(processes.Asked).Arguments);
     }
 
     [Fact]
     public async Task ATaskWithoutADescriptionHasAnEmptyOne()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("\nann\tHello\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered("\n"));
 
-        var text = await Tasks().ReadTextAsync(12, TestContext.Current.CancellationToken);
-
-        Assert.Equal("", text.Description);
-        Assert.Equal([new TaskComment("ann", "Hello")], text.Comments);
+        Assert.Equal("", await Tasks().ReadDescriptionAsync(12, TestContext.Current.CancellationToken));
     }
 
     [Fact]

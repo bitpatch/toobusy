@@ -8,7 +8,9 @@ public interface ITaskTracker
     // The open tasks of the milestone, or of the whole project when the milestone is null.
     Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken);
 
-    Task<TaskText> ReadTextAsync(int number, CancellationToken cancellationToken);
+    // The description of a task, which may be empty. A session reads its task on its own: a run needs the
+    // description only for the task it makes of what is left of another.
+    Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken);
 
     // Moves the task on the board, putting it there when it is not; does nothing in a project without a board.
     Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken);
@@ -49,9 +51,5 @@ public enum BoardStatus
     Done,
     Other,
 }
-
-public sealed record TaskText(string Description, IReadOnlyList<TaskComment> Comments);
-
-public sealed record TaskComment(string Author, string Text);
 
 public sealed record NewTask(string Title, string Description, IReadOnlyList<string> Labels, string? Milestone);

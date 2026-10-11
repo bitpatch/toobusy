@@ -37,7 +37,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal((3, "**Done.**\n\nDid it.\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
         var start = Assert.Single(assistant.Started);
         Assert.Equal((3, "#3 Task 3", ModelChoice.AssistantsOwn, "high"), (start.Task, start.Name, start.Model, start.Effort));
-        Assert.Contains("# Task #3: Task 3\n\nhttps://example.com/3\n\nDo task 3.", start.Message, StringComparison.Ordinal);
+        Assert.Contains("# Task #3: Task 3\n\nhttps://example.com/3\n\nRead the task and its comments before you start", start.Message, StringComparison.Ordinal);
         Assert.Contains("It has already moved the task to In Progress.", start.Message, StringComparison.Ordinal);
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Equal(
@@ -175,7 +175,7 @@ public sealed class SupervisorTests : IDisposable
     public async Task WhatIsLeftOfATaskDoneInPartBecomesANewTaskForTheOwner()
     {
         tracker.Add(3, labels: ["Feature", "urgent"]);
-        tracker.Texts[3] = new TaskText("Export the data.", []);
+        tracker.Descriptions[3] = "Export the data.";
         assistant.Session(3).Works().Ends("Did the half.\nTOOBUSY-REST: Choose the format\nThe dates are left.\n- [ ] ISO?\nTOOBUSY: partial");
 
         var result = await RunAsync();
@@ -260,6 +260,15 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Add(3);
         assistant.Session(3).Works().Lost(Done);
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), await RunAsync());
+    }
+
+    [Fact]
+    public async Task TheDescriptionOfATaskIsNotReadForATaskThatIsDone()
+    {
+        tracker.Add(3);
+        tracker.Refused.Add("description");
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), await RunAsync());
     }

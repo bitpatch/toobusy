@@ -95,8 +95,8 @@ public sealed class ImitatedTasks : ITaskTracker
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);
 
-    public Task<TaskText> ReadTextAsync(int number, CancellationToken cancellationToken) =>
-        Task.FromResult(new TaskText(descriptions.GetValueOrDefault(number, ""), []));
+    public Task<string> ReadDescriptionAsync(int number, CancellationToken cancellationToken) =>
+        Task.FromResult(descriptions.GetValueOrDefault(number, ""));
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {

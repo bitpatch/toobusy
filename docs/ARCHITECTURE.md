@@ -36,7 +36,7 @@ A test project is added together with the first code of the project it tests.
 
 | Port | What it hides | Implementations |
 |---|---|---|
-| `ITaskTracker` | reading the open tasks, and changing one: its status on the board, its labels, a comment, closing, making a new task | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
+| `ITaskTracker` | reading the open tasks and the description of one, and changing one: its status on the board, its labels, a comment, closing, making a new task | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
 | `IAssistant`, `IAssistantSession` | starting a session with a message, looking at it, telling it something more, asking it something without cutting its turn, stopping it; going on with a session of an earlier run; the limits of usage | `ClaudeCode` in `TooBusy.Assistants.ClaudeCode`; `ImitatedAssistant` in a demo |
 | `IWorkspace` | the working copy: how many files differ from what is committed, how many commits are not pushed | `GitWorkspace` in `TooBusy.Infrastructure` |
 | `IProcessRunner` | running a command with a timeout and cancellation, in a folder | `ProcessRunner` in `TooBusy.Infrastructure` |
@@ -58,6 +58,7 @@ Sessions are identified by the task they belong to, and nothing in the ports ass
 - `Supervisor` is the run itself, behind `IQueueRun`: the loop over the tasks, the watching of a session, the limits, the pause, and telling the tracker how a task went. It is one flow of control. Commands reach it through `Send`, which only puts them in a line that the run looks at in one place, so nothing in it is shared between threads; a kill is the cancellation of the run. Everything it knows of time comes from `IClock`, so the tests run it start to finish in no time, with a clock that moves only when it is waited on.
 - `Outcome` is the line for toobusy at the end of a reply: the contract with the assistant, read here and written nowhere else.
 - `Briefing` is every text toobusy sends to a session, and what it writes into the tracker from what the session answers. The texts are those of the tool and know nothing of a project.
+- `About` is what `toobusy about` prints: how a run works, put together from the messages of `Briefing`, the lines of `Outcome`, the policy and, where there are settings, the rules of the queue, so that it tells what a run does and nothing else.
 - `RunPolicy` is the times and the counts of a run; a demo has its own. `RunPlan` is what the user and the settings give it: the milestone, the rules of the queue, the model, the effort and the share of the weekly limit, `UsageShare`.
 - `RunLine`, `TaskEnd` and `RunStatus` are what a run tells: a line of its log with the mark of what it tells; a task that is over, told once however it ended, with its mark and the time it took; and what the run is doing now, with the commands that mean something at the moment and, while a session waits for the owner, what the session said. `RunResult` says how the run ended and, when it did not simply run out of tasks, why.
 

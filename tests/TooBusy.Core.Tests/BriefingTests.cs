@@ -8,13 +8,19 @@ public class BriefingTests
     static readonly QueueTask Export = new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []);
 
     [Fact]
-    public void TheFirstMessageGivesTheTaskTheRulesAndTheLastLine()
+    public void TheFirstMessageNamesTheTaskAndGivesTheRulesAndTheLastLine()
     {
-        var message = Briefing.Task(Export, new TaskText("Write it as CSV.", []), interrupted: false);
+        var message = Briefing.Task(Export, interrupted: false);
 
-        Assert.StartsWith("You are doing task #12 of this project without its owner.", message, StringComparison.Ordinal);
-        Assert.Contains("# Task #12: Export the data\n\nhttps://github.com/acme/rocket/issues/12\n\nWrite it as CSV.\n", message, StringComparison.Ordinal);
-        Assert.Contains("- Nobody will answer.", message, StringComparison.Ordinal);
+        Assert.StartsWith(
+            "You are doing task #12 of this project without its owner. toobusy, the tool that takes the tasks of the project one after another, started this session and reads how it ends.\n\n"
+            + "# Task #12: Export the data\n\nhttps://github.com/acme/rocket/issues/12\n\n"
+            + "Read the task and its comments before you start: toobusy passes on nothing of them.\n\n"
+            + "# Rules of this session\n\n- Nobody will answer.",
+            message,
+            StringComparison.Ordinal);
+        Assert.Contains("Where the instructions of the project (CLAUDE.md, AGENTS.md, its skills and the like) tell you to ask the owner", message, StringComparison.Ordinal);
+        Assert.Contains("Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.\n", message, StringComparison.Ordinal);
         Assert.Contains("The tracker is kept by toobusy. It has already moved the task to In Progress. Do not change the status or the labels of the task, do not close it and do not comment on it", message, StringComparison.Ordinal);
         Assert.Contains("make no worktree", message, StringComparison.Ordinal);
         Assert.Contains("- Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done", message, StringComparison.Ordinal);
@@ -22,37 +28,18 @@ public class BriefingTests
         Assert.Contains("put the line `TOOBUSY-REST: <the title of the new task>`", message, StringComparison.Ordinal);
         Assert.Contains("- `TOOBUSY: owner`", message, StringComparison.Ordinal);
         Assert.EndsWith("Leave the working copy as it is.", message, StringComparison.Ordinal);
-        Assert.DoesNotContain("## Comments", message, StringComparison.Ordinal);
         Assert.DoesNotContain("interrupted before", message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheCommentsOfTheTaskFollowItsDescription()
+    public void ATaskThatWasInterruptedIsToldWhereTheReportOfItsSessionIs()
     {
-        var message = Briefing.Task(Export, new TaskText("", [new TaskComment("ann", "CSV or JSON?"), new TaskComment("bob", "CSV.")]), interrupted: false);
+        var message = Briefing.Task(Export, interrupted: true);
 
-        Assert.Contains("(The task has no description.)\n\n## Comments\n\n**ann:**\n\nCSV or JSON?\n\n**bob:**\n\nCSV.\n\n# Rules of this session", message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void OnlyTheLastCommentsArePassedOnAndALongTextIsCut()
-    {
-        var comments = Enumerable.Range(1, 32).Select(number => new TaskComment("ann", $"Comment {number}.")).ToList();
-
-        var message = Briefing.Task(Export, new TaskText(new string('x', 20_001), comments), interrupted: false);
-
-        Assert.Contains("(The 2 comments before these are left out.)", message, StringComparison.Ordinal);
-        Assert.DoesNotContain("Comment 2.", message, StringComparison.Ordinal);
-        Assert.Contains("Comment 3.", message, StringComparison.Ordinal);
-        Assert.Contains(new string('x', 20_000) + "\n\n(The text is cut here", message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ATaskThatWasInterruptedIsToldToGoOnFromItsReport()
-    {
-        var message = Briefing.Task(Export, new TaskText("Write it.", []), interrupted: true);
-
-        Assert.Contains("- This task was interrupted before. The report of that session is among the comments above", message, StringComparison.Ordinal);
+        Assert.Contains(
+            "- This task was interrupted before. The report of that session is the last comment of the task that starts with **Interrupted.**: go on with what it says is left, and do again what it says was undone.\n\n# What cannot be done without the owner",
+            message,
+            StringComparison.Ordinal);
     }
 
     [Fact]
