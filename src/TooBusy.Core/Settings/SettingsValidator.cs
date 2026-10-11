@@ -17,12 +17,20 @@ public static partial class SettingsValidator
 
     public static bool IsBoard(string value) => BoardPattern().IsMatch(value);
 
+    // Null when the text is the name of a skill, as a session is started with it; otherwise why it is not.
+    public static string? RefuseSkill(string value) => SkillPattern().IsMatch(value)
+        ? null
+        : "must be the name of a skill, as `task-auto`: letters, digits, `-`, `_`, `.` and `:`, without the `/` before it";
+
     [GeneratedRegex(@"^https://github\.com/(orgs|users)/[A-Za-z0-9-]+/projects/[0-9]+$")]
     private static partial Regex BoardPattern();
 
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+    private static partial Regex SkillPattern();
+
     sealed class Run(SettingsDocument document)
     {
-        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant"];
+        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant", "session"];
 
         readonly Dictionary<string, SettingsEntry> entries = [];
 
@@ -43,11 +51,17 @@ public static partial class SettingsValidator
 
             var labels = ReadLabels();
             var assistantType = OneOf(SettingsKeys.AssistantType, [SettingsKeys.ClaudeCodeAssistant]);
+            var skill = String(SettingsKeys.SessionSkill, required: false);
+            if (skill is not null && RefuseSkill(skill.Value.Text) is { } reason)
+                Refuse(skill.Value.Entry, reason);
 
             return new ProjectSettings(
                 new TrackerSettings(trackerType ?? "", board?.Text),
                 new QueueSettings(labels),
-                new AssistantSettings(assistantType ?? ""));
+                new AssistantSettings(assistantType ?? ""))
+            {
+                Skill = skill?.Text,
+            };
         }
 
         // Everything the file has and the settings do not know is refused here, so that the rules below

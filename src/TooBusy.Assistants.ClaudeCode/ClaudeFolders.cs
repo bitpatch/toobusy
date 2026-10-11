@@ -11,12 +11,16 @@ public sealed record ClaudeFolders(string Local, string Transcripts)
     // of the project with everything but letters and digits turned into dashes.
     public static ClaudeFolders Of(string root, string local, string home, Func<string, string?> variable)
     {
-        var configuration = variable("CLAUDE_CONFIG_DIR") is { Length: > 0 } set ? set : Path.Combine(home, ".claude");
+        var configuration = Configuration(home, variable);
         var name = new StringBuilder(root.Length);
         foreach (var character in root)
             name.Append(char.IsAsciiLetterOrDigit(character) ? character : '-');
         return new ClaudeFolders(local, Path.Combine(configuration, "projects", name.ToString()));
     }
+
+    // Claude Code's own folder of the user, where it keeps the conversations and the skills of the user.
+    public static string Configuration(string home, Func<string, string?> variable) =>
+        variable("CLAUDE_CONFIG_DIR") is { Length: > 0 } set ? set : Path.Combine(home, ".claude");
 
     // The request a session reads after its next step: a hook of the session prints this file.
     public string Request => Path.Combine(Local, "wrap-up.json");

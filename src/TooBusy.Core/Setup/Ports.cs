@@ -1,3 +1,5 @@
+using TooBusy.Core.Assistant;
+
 namespace TooBusy.Core.Setup;
 
 // How the setup asks its questions. The terminal implements it as a screen of its own; tests answer from a script.
@@ -85,13 +87,15 @@ public abstract record BoardAnswer
 }
 
 // What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
-// leaves a question with what it proposes by itself. An empty list of labels is an answer: no label.
+// leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an
+// empty name of the skill: no skill.
 public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
     IReadOnlyList<string>? Take = null,
     string? Owner = null,
-    string? Interrupted = null)
+    string? Interrupted = null,
+    string? Skill = null)
 {
     public static SetupProposals None { get; } = new();
 }
@@ -111,6 +115,9 @@ public abstract record BoardProposal
 public interface ISetupEnvironment
 {
     Task<SetupEnvironment> InspectAsync(CancellationToken cancellationToken);
+
+    // Whether the assistant has the skill of this name to start a session with, and where it is or is to be written.
+    SkillLook FindSkill(string name);
 }
 
 // TrackerReachable is false when the tracker's command-line tool is missing or not logged in;

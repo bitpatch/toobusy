@@ -18,6 +18,7 @@ public static class SettingsToml
             + "A run puts `owner` on a task that waits for the owner, which is not taken while it has it,\n"
             + "and `interrupted` on a task it had to stop, which is taken first."),
         ("assistant", "Who does the tasks."),
+        ("session", "What a session starts with: the skill of the project that says how a task is done here without its owner."),
     ];
 
     public static SettingsValidation Read(string text)
@@ -88,6 +89,7 @@ public static class SettingsToml
         (SettingsKeys.OwnerLabel, settings.Queue.Labels.Owner),
         (SettingsKeys.InterruptedLabel, settings.Queue.Labels.Interrupted),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
+        (SettingsKeys.SessionSkill, settings.Skill),
     ];
 
     static void Add(Dictionary<string, StringBuilder> additions, string key, object value)

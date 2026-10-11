@@ -54,6 +54,28 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task InAProjectWithASkillASessionStartsWithItsCommand()
+    {
+        plan = plan with { Skill = "task-auto" };
+        tracker.Add(3);
+
+        await RunAsync();
+
+        Assert.StartsWith("/task-auto #3 Task 3\n\nYou are doing task #3 of this project without its owner.", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
+        Assert.Contains("→ #3 Task 3 — started · a new session with the skill task-auto · fake attach 3", log.Lines);
+    }
+
+    [Fact]
+    public async Task WithoutASkillTheFirstMessageBeginsWithTheWordsOfToobusy()
+    {
+        tracker.Add(3);
+
+        await RunAsync();
+
+        Assert.StartsWith("You are doing task #3 of this project without its owner.", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WithoutABoardATaskThatIsTakenIsAssignedAllTheSame()
     {
         plan = plan with { Rules = Rules with { Board = false } };

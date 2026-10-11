@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
 using TooBusy.Core.Settings;
 
@@ -27,12 +28,13 @@ public class CheckupTests
                 new CheckResult("repository", CheckState.Passed, "acme/rocket"),
                 new CheckResult("board", CheckState.Passed, Rocket),
                 new CheckResult("labels", CheckState.Passed),
+                new CheckResult("skill", CheckState.Skipped, "the project names no skill"),
             ],
             checks.Select(check => check with { Details = [] }));
         Assert.All(checks, check => Assert.Empty(check.Details));
 
         // Every check starts before it ends, and they come one after another.
-        Assert.Equal(checks.SelectMany(check => (string[])[$"start {check.Name}", $"done {check.Name}"]), view.Told);
+        Assert.Equal(checks.SelectMany(check => check.State == CheckState.Skipped ? (string[])[$"done {check.Name}"] : [$"start {check.Name}", $"done {check.Name}"]), view.Told);
     }
 
     [Theory]
@@ -231,6 +233,40 @@ public class CheckupTests
         Assert.Equal(0, machine.ManagerAsked);
     }
 
+    [Fact]
+    public async Task TheSkillOfTheSettingsMustBeThere()
+    {
+        store.Current = Project(Rocket) with { Skill = "task-auto" };
+        Assert.Equal(
+            new CheckResult(
+                "skill",
+                CheckState.Failed,
+                "There is no skill “task-auto”: a session that starts with it would do nothing.",
+                "write .claude/skills/task-auto/SKILL.md, as `toobusy about` tells, or name no skill: toobusy init --no-skill"),
+            Of(await RunAsync(), "skill"));
+
+        machine.Skills!.Add("task-auto");
+        Assert.Equal(new CheckResult("skill", CheckState.Passed, ".claude/skills/task-auto/SKILL.md"), Of(await RunAsync(), "skill"));
+        Assert.Contains("start skill", view.Told);
+    }
+
+    [Fact]
+    public async Task ASkillThatCannotBeLookedForPassesAndSaysSo()
+    {
+        store.Current = Project(Rocket) with { Skill = "toolbox:task-auto" };
+        machine.Skills = null;
+
+        Assert.Equal(new CheckResult("skill", CheckState.Passed, "toolbox:task-auto, a skill of a plugin: it is not looked for"), Of(await RunAsync(), "skill"));
+    }
+
+    [Fact]
+    public async Task WithoutSettingsTheSkillWaitsForThem()
+    {
+        store.Current = null;
+
+        Assert.Equal(new CheckResult("skill", CheckState.Skipped, "waits for the settings"), Of(await RunAsync(), "skill"));
+    }
+
     Task<IReadOnlyList<CheckResult>> RunAsync(string? origin = "acme/rocket") =>
         new Checkup(machine, store, origin).RunAsync(view, TestContext.Current.CancellationToken);
 
@@ -289,6 +325,11 @@ public class CheckupTests
         }
 
         public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) => Task.FromResult(Labels);
+
+        // The skills that are written; null is a skill that cannot be looked for.
+        public HashSet<string>? Skills { get; set; } = [];
+
+        public SkillLook FindSkill(string name) => new(Skills?.Contains(name), $".claude/skills/{name}/SKILL.md");
     }
 
     sealed class Store : ISettingsStore

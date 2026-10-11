@@ -13,8 +13,9 @@ public static class About
     static readonly QueueTask Sample = new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []);
 
     // `rules` are those of the project the text is asked in; null where no settings are read, and then the labels
-    // are spoken of without their names.
-    public static string Text(QueueRules? rules, RunPolicy policy)
+    // are spoken of without their names. `skill` is the skill the settings name for a session to start with; null
+    // where they name none, and where none are read.
+    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null)
     {
         var owner = rules is null ? "the label of the owner" : $"the `{rules.Owner}` label";
 
@@ -26,11 +27,18 @@ public static class About
         var again = Briefing.Task(Sample, ground, interrupted: true).Split('\n').First(line => line.StartsWith("- This task was interrupted before.", StringComparison.Ordinal));
         var lost = Briefing.Task(Sample, ground, interrupted: false, lost: true).Split('\n').First(line => line.StartsWith("- A session worked on this task before", StringComparison.Ordinal));
 
+        // What is said of the skill of this project, and how its first message begins.
+        var named = rules is null ? "No settings are read here, so it is not said whether this project names one: the first message is shown below as it is without a skill."
+            : skill is null ? "This project names none: its first message begins with the words of toobusy, as shown below. `toobusy init` names one."
+            : $"This project names the skill `{skill}`, so its first message begins with `{Briefing.Command(skill, Sample)}`, as shown below.";
+        var head = skill is null ? "It begins with the same line in every session, but for the number, so a session of a run can be told by it from any other."
+            : "After the line of the skill it begins with the same words in every session, but for the number, so a session of a run can be told by them from any other.";
+
         var text = new StringBuilder();
         text.Append("""
             # How toobusy works
 
-            toobusy takes the tasks of a project's tracker one after another and has an AI coding assistant do each of them, in a session of its own and with nobody at the keyboard. This is what such a session meets: what it is told, what is done around it, and what is made of its answer. It is written for the owner of a project and for the assistant that helps them, to fit the instructions of the project to a run. Nothing here has to be done for a run to work: a session is told all it needs in its first message.
+            toobusy takes the tasks of a project's tracker one after another and has an AI coding assistant do each of them, in a session of its own and with nobody at the keyboard. This is what such a session meets: what it is told, what is done around it, and what is made of its answer. It is written for the owner of a project and for the assistant that helps them, to fit the instructions of the project to a run and to write the skill a session starts with. Nothing here has to be done for a run to work: a session is told all it needs in its first message.
 
             ## A run
 
@@ -73,14 +81,35 @@ public static class About
 
             Which other tasks a session makes and when, such as the findings of an audit or a proposal, and their labels, their wording and their relations, is the project's to say in its instructions. toobusy looks at none of them.
 
+            ## A session starts with the skill of the project
+
+            A project may name a skill in its settings, as `session.skill`, and then a session starts with it: the first message begins with the command of the skill, the number and the title of the task, and goes on as it does in any project. The assistant loads the skill by that line itself, so nothing is left to the session, and the rest of the message reaches it with the skill. {named}
+
+            The skill is loaded once, at the start. The messages for a session that goes on do not name it, and a new session for a task whose conversation is gone starts with it again. Claude Code reads a skill of a project from `.claude/skills/<name>/SKILL.md`. `toobusy doctor` checks that the skill is there, and no run starts while it is not: a session that starts with a skill the assistant does not have does nothing at all.
+
+            The skill says only what belongs to the project; how a run works is said by the first message. What that message says already, the skill does not say again, and does not say against:
+
+            - that nobody answers, and that the session decides and goes on where the instructions of the project say to ask;
+            - that the task is read in the tracker, and that it is kept by toobusy: its status, its assignee, its labels, its comments and closing it;
+            - that the work is done in this working copy, which is clean at the end, and that a plan of it is kept in the task list;
+            - what becomes of what cannot be done without the owner, and what the task of it needs;
+            - how the last reply ends: the lines for toobusy.
+
+            What is the skill's to say:
+
+            - how the work of this project is done and checked without its owner: which checks a session runs by itself, and what it does where the owner would have looked;
+            - what is done before the work and after it, such as what is brought up to date first and what is stopped or cleaned up at the end;
+            - the language of the report;
+            - which tasks a session makes besides the one of what is left, with their labels, their wording and their relations.
+
             ## What a session is told
 
             ### The first message
 
-            Every session starts with this message, here for a task #{Sample.Number}. Its first line is always the same but for the number, so a session of a run can be told by it from any other.
+            Every session starts with this message, here for a task #{Sample.Number}. {head}
 
             ```text
-            {Briefing.Task(Sample, ground, interrupted: false)}
+            {Briefing.Task(Sample, ground, interrupted: false, skill: skill)}
             ```
 
             The task is named and not passed on: the session reads its description and its comments in the tracker. The milestone is the one the user works on; for a user who works without a milestone it is the one of the task, or none. The board is named only in a project that has one. A task with a label that a task needs to be taken is told to put that label on the new task too, so that a run takes it once the owner has answered. A task that was interrupted before, by `/abort` or by a usage limit in another working copy, has one rule more, after the others:
@@ -170,7 +199,7 @@ public static class About
             - An instruction to ask the owner before a new task is made, as for its milestone, is not followed: the task of what is left goes where the first message says.
             - An instruction to work in a worktree or in another copy is not followed: the work is done in the working copy the session is started in.
 
-            What a session without its owner should do in another way than one with the owner, such as the checks it runs by itself, is the project's to say in its instructions, and so is which tasks it makes besides the one for the owner.
+            What a session without its owner should do in another way than one with the owner, such as the checks it runs by itself, is the project's to say, and so is which tasks it makes besides the one for the owner: in the skill a session starts with, as told under “A session starts with the skill of the project”, or in its instructions.
 
             """);
         return text.ToString();

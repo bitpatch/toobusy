@@ -89,6 +89,19 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal("Claude Code is not installed: `claude` is not on the path.", refused.Message);
     }
 
+    // Claude Code loads a skill by its command at the head of the message: the message is its last argument, whole.
+    [Fact]
+    public async Task AMessageThatBeginsWithTheCommandOfASkillIsPassedAsItIs()
+    {
+        var message = "/task-auto #12 Export the data\n\nYou are doing task #12 of this project without its owner.";
+
+        await Assistant().StartAsync(Start with { Message = message }, TestContext.Current.CancellationToken);
+
+        var arguments = Assert.Single(claude.Asked);
+        Assert.Equal("--bg", arguments[0]);
+        Assert.Equal(["-n", "#12 Export the data", message], arguments.TakeLast(3));
+    }
+
     [Fact]
     public async Task AFolderThatIsNotTrustedYetSaysWhatToDo()
     {

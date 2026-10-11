@@ -6,6 +6,9 @@ public sealed record ProjectSettings(TrackerSettings Tracker, QueueSettings Queu
 {
     // The version of the settings schema that this build reads and writes.
     public const int SchemaVersion = 1;
+
+    // The skill of the project a session starts with, by its name; null when the project names none.
+    public string? Skill { get; init; }
 }
 
 public sealed record TrackerSettings(string Type, string? Board);

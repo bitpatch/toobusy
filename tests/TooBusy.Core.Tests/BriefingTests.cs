@@ -35,6 +35,25 @@ public class BriefingTests
     }
 
     [Fact]
+    public void InAProjectWithASkillTheFirstMessageBeginsWithItsCommandAndGoesOnAsItDoes()
+    {
+        var plain = Briefing.Task(Export, Ground, interrupted: true, lost: true);
+
+        var message = Briefing.Task(Export, Ground, interrupted: true, lost: true, skill: "task-auto");
+
+        Assert.Equal("/task-auto #12 Export the data\n\n" + plain, message);
+        Assert.StartsWith("You are doing task #12 of this project without its owner.", plain, StringComparison.Ordinal);
+        Assert.Equal("/task-auto #12 Export the data", Briefing.Command("task-auto", Export));
+    }
+
+    [Fact]
+    public void TheMessagesForASessionThatGoesOnNameNoSkill()
+    {
+        foreach (var message in new[] { Briefing.Alone(12, "needs-owner"), Briefing.AfterLimit(12), Briefing.AfterStop(12), Briefing.AfterAbort(12), Briefing.WrapUp(12) })
+            Assert.False(message.StartsWith('/'));
+    }
+
+    [Fact]
     public void TheFirstMessageSaysThatASessionMakesNewTasksAndWhatTheOneForTheOwnerNeeds()
     {
         var message = Briefing.Task(Export, Ground, interrupted: false);

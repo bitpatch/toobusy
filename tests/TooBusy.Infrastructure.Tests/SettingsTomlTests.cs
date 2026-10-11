@@ -254,6 +254,64 @@ public class SettingsTomlTests
     }
 
     [Fact]
+    public void TheSkillIsReadFromItsSection()
+    {
+        var result = SettingsToml.Read(Example + "\n[session]\nskill = \"task-auto\"\n");
+
+        Assert.Empty(result.Errors);
+        AssertSame(Settings with { Skill = "task-auto" }, result.Settings!);
+        Assert.Null(SettingsToml.Read(Example).Settings!.Skill);
+    }
+
+    [Fact]
+    public void ASkillThatIsNotANameIsRefusedWithItsLine()
+    {
+        var result = SettingsToml.Read(Example + "\n[session]\nskill = \"/task-auto\"\n");
+
+        Assert.Null(result.Settings);
+        Assert.Equal(("session.skill", 17), (Assert.Single(result.Errors).Key, result.Errors[0].Line));
+    }
+
+    [Fact]
+    public void ANewFileOfAProjectWithASkillHasItsSectionLast()
+    {
+        var text = SettingsToml.Write(Settings with { Skill = "task-auto" });
+
+        Assert.EndsWith(
+            """
+            # Who does the tasks.
+            [assistant]
+            type = "claude-code"
+
+            # What a session starts with: the skill of the project that says how a task is done here without its owner.
+            [session]
+            skill = "task-auto"
+
+            """.ReplaceLineEndings("\n"),
+            text,
+            StringComparison.Ordinal);
+        AssertSame(Settings with { Skill = "task-auto" }, SettingsToml.Read(text).Settings!);
+        Assert.DoesNotContain("[session]", SettingsToml.Write(Settings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARewriteAddsChangesAndRemovesTheSkill()
+    {
+        var added = SettingsToml.Write(Settings with { Skill = "task-auto" }, Example);
+        Assert.Equal(
+            Example + "\n# What a session starts with: the skill of the project that says how a task is done here without its owner.\n[session]\nskill = \"task-auto\"\n",
+            added);
+
+        var changed = SettingsToml.Write(Settings with { Skill = "night-shift" }, added);
+        Assert.Equal(added.Replace("\"task-auto\"", "\"night-shift\"", StringComparison.Ordinal), changed);
+
+        // A project that gives its skill up loses the line; the section stays, empty.
+        var removed = SettingsToml.Write(Settings, changed);
+        Assert.Equal(changed.Replace("skill = \"night-shift\"\n", "", StringComparison.Ordinal), removed);
+        Assert.Null(SettingsToml.Read(removed).Settings!.Skill);
+    }
+
+    [Fact]
     public void ARewriteKeepsKeysItDoesNotKnow()
     {
         var existing = Example + "\n# Ours.\n[prompts]\ntask = \"Do it.\"  # short\n";
@@ -307,5 +365,6 @@ public class SettingsTomlTests
         Assert.Equal(expected.Queue.Labels.Owner, actual.Queue.Labels.Owner);
         Assert.Equal(expected.Queue.Labels.Interrupted, actual.Queue.Labels.Interrupted);
         Assert.Equal(expected.Assistant, actual.Assistant);
+        Assert.Equal(expected.Skill, actual.Skill);
     }
 }

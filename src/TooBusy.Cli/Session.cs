@@ -285,6 +285,7 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Labels to take", settings.Queue.Labels.Take.Count == 0 ? "any task" : string.Join(", ", settings.Queue.Labels.Take)));
             body.Add(Picker.Answer("Owner's label", settings.Queue.Labels.Owner));
             body.Add(Picker.Answer("Interrupt label", settings.Queue.Labels.Interrupted));
+            body.Add(Picker.Answer("Skill", settings.Skill ?? "none"));
         }
 
         if (standing.Ready)

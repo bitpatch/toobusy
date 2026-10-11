@@ -8,12 +8,18 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli.Imitation;
 
 // What `init --demo` puts in place of the machine and the tracker: everything is installed and logged in,
-// every board can be read, the repository has made-up labels, and nothing is made or linked.
+// every board can be read, the repository has made-up labels, the project has whatever skill it names, and nothing
+// is made or linked.
 // The repository itself is the one it is given: the real `origin` of the project when it is known.
 public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTracker
 {
     public Task<SetupEnvironment> InspectAsync(CancellationToken cancellationToken) =>
         Task.FromResult(new SetupEnvironment([], TrackerReachable: true, origin));
+
+    public SkillLook FindSkill(string name) => Skill(name);
+
+    // The skill of a demo is there whatever its name is, where a project keeps its skills for Claude Code.
+    public static SkillLook Skill(string name) => new(true, $".claude/skills/{name}/SKILL.md");
 
     public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 
@@ -115,6 +121,9 @@ public sealed class UnwrittenSettings(ISettingsStore file, bool madeUp = false) 
             new TrackerSettings(SettingsKeys.GitHubTracker, "https://github.com/users/example/projects/1"),
             new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"], "needs-owner", "interrupted")),
             new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
+        {
+            Skill = "task-auto",
+        }
         : null;
 
     public string DisplayPath => file.DisplayPath;

@@ -26,7 +26,7 @@ public class AboutTests
         Assert.Contains($"```text\n{Briefing.AfterStop(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterAbort(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains("```text\n- A session worked on this task before, and its conversation is gone: it left no report.", text, StringComparison.Ordinal);
-        Assert.EndsWith("is the project's to say in its instructions, and so is which tasks it makes besides the one for the owner.\n", text, StringComparison.Ordinal);
+        Assert.EndsWith("is the project's to say, and so is which tasks it makes besides the one for the owner: in the skill a session starts with, as told under “A session starts with the skill of the project”, or in its instructions.\n", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -85,6 +85,47 @@ public class AboutTests
         Assert.Contains("## A session makes new tasks itself\n\nA session may make new tasks in the tracker, and toobusy makes none. toobusy asks for one of them: what cannot be done without the owner becomes a new task with the `needs-owner` label", text, StringComparison.Ordinal);
         Assert.Contains("Which other tasks a session makes and when, such as the findings of an audit or a proposal, and their labels, their wording and their relations, is the project's to say in its instructions.", text, StringComparison.Ordinal);
         Assert.Contains("An instruction to make other tasks is followed.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheSkillOfTheProjectIsNamedAndItsFirstMessageBeginsWithItsCommand()
+    {
+        var text = About.Text(Rules, RunPolicy.Default, "task-auto");
+
+        Assert.Contains("## A session starts with the skill of the project\n\nA project may name a skill in its settings, as `session.skill`, and then a session starts with it:", text, StringComparison.Ordinal);
+        Assert.Contains("This project names the skill `task-auto`, so its first message begins with `/task-auto #12 <the title of the task>`, as shown below.", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.Task(Sample, Ground, interrupted: false, skill: "task-auto")}\n```", text, StringComparison.Ordinal);
+        Assert.Contains("```text\n/task-auto #12 <the title of the task>\n\nYou are doing task #12 of this project without its owner.", text, StringComparison.Ordinal);
+        Assert.Contains("After the line of the skill it begins with the same words in every session", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AProjectThatNamesNoSkillIsToldSoAndItsFirstMessageBeginsAsItDid()
+    {
+        var text = About.Text(Rules, RunPolicy.Default);
+
+        Assert.Contains("This project names none: its first message begins with the words of toobusy, as shown below. `toobusy init` names one.", text, StringComparison.Ordinal);
+        Assert.Contains("```text\nYou are doing task #12 of this project without its owner.", text, StringComparison.Ordinal);
+        Assert.Contains("It begins with the same line in every session, but for the number", text, StringComparison.Ordinal);
+
+        var unread = About.Text(null, RunPolicy.Default);
+        Assert.Contains("No settings are read here, so it is not said whether this project names one: the first message is shown below as it is without a skill.", unread, StringComparison.Ordinal);
+        Assert.Contains("```text\nYou are doing task #12 of this project without its owner.", unread, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ItSaysWhatTheFirstMessageSaysAlreadyAndWhatIsTheSkillsToSay()
+    {
+        var text = About.Text(null, RunPolicy.Default);
+
+        Assert.Contains("The skill is loaded once, at the start. The messages for a session that goes on do not name it, and a new session for a task whose conversation is gone starts with it again.", text, StringComparison.Ordinal);
+        Assert.Contains("`toobusy doctor` checks that the skill is there, and no run starts while it is not", text, StringComparison.Ordinal);
+        Assert.Contains("What that message says already, the skill does not say again, and does not say against:\n\n- that nobody answers,", text, StringComparison.Ordinal);
+        Assert.Contains("- how the last reply ends: the lines for toobusy.\n\nWhat is the skill's to say:\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("- how the work of this project is done and checked without its owner:", text, StringComparison.Ordinal);
+        Assert.Contains("- what is done before the work and after it,", text, StringComparison.Ordinal);
+        Assert.Contains("- the language of the report;\n", text, StringComparison.Ordinal);
+        Assert.Contains("- which tasks a session makes besides the one of what is left, with their labels, their wording and their relations.\n", text, StringComparison.Ordinal);
     }
 
     [Fact]

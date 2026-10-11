@@ -11,6 +11,7 @@ public static class SettingsKeys
     public const string OwnerLabel = "queue.labels.owner";
     public const string InterruptedLabel = "queue.labels.interrupted";
     public const string AssistantType = "assistant.type";
+    public const string SessionSkill = "session.skill";
 
     public const string GitHubTracker = "github";
     public const string ClaudeCodeAssistant = "claude-code";
@@ -18,6 +19,6 @@ public static class SettingsKeys
     public static IReadOnlyList<string> All { get; } =
     [
         Version, TrackerType, TrackerBoard, BlockingLabels, TakeLabels, OwnerLabel, InterruptedLabel,
-        AssistantType,
+        AssistantType, SessionSkill,
     ];
 }

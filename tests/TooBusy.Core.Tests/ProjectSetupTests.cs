@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
@@ -38,7 +39,8 @@ public class ProjectSetupTests
         Assert.Equal(new AssistantSettings("claude-code"), store.Saved.Assistant);
 
         // The label of the owner is not one of the repository yet, so its name is asked for after the list.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, OwnerLabel, InterruptLabel, "Write the settings?"], dialog.Asked);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        Assert.Equal("task-auto", store.Saved.Skill);
     }
 
     [Fact]
@@ -52,7 +54,7 @@ public class ProjectSetupTests
                 new SetupNote(SetupTone.Plain, "The label “needs-owner” will be made in acme/rocket."),
             ],
             dialog.Shown.Notes);
-        Assert.Equal(7, dialog.Shown.Answers.Count);
+        Assert.Equal(8, dialog.Shown.Answers.Count);
     }
 
     [Fact]
@@ -79,6 +81,7 @@ public class ProjectSetupTests
                 new SetupAnswer("Labels to take", "bug"),
                 new SetupAnswer(OwnerLabel, "manual"),
                 new SetupAnswer(InterruptLabel, "interrupted"),
+                new SetupAnswer("Skill", "task-auto"),
                 new SetupAnswer("Assistant", "Claude Code"),
             ],
             result.Answers);
@@ -90,8 +93,8 @@ public class ProjectSetupTests
         await RunAsync();
 
         // At the confirmation every step is done.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel], dialog.Shown.Steps);
-        Assert.Equal([0, 1, 2, 3, 4, 5], dialog.Places.Distinct());
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel, "Skill"], dialog.Shown.Steps);
+        Assert.Equal([0, 1, 2, 3, 4, 5, 6], dialog.Places.Distinct());
         Assert.Equal(dialog.Shown.Steps.Count, dialog.Shown.Step);
     }
 
@@ -317,7 +320,7 @@ public class ProjectSetupTests
         var result = await RunAsync();
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal([InterruptLabel, "Write the settings?", InterruptLabel, "Write the settings?"], dialog.Asked.Skip(5));
+        Assert.Equal(["Skill", "Write the settings?", "Skill", "Write the settings?"], dialog.Asked.Skip(6));
     }
 
     [Fact]
@@ -688,7 +691,7 @@ public class ProjectSetupTests
         Assert.Empty(store.Saved.Queue.Labels.Take);
         Assert.Equal("needs-owner", store.Saved.Queue.Labels.Owner);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
-        Assert.Equal(7, result.Answers.Count);
+        Assert.Equal(8, result.Answers.Count);
         Assert.Equal(["The label “needs-owner” was made in acme/rocket."], result.Done);
         Assert.Empty(result.Notes);
     }
@@ -897,6 +900,145 @@ public class ProjectSetupTests
         Assert.Null(store.Saved);
     }
 
+    [Fact]
+    public async Task TheSkillIsTakenWithTheSlashOfItsCommandOrWithoutIt()
+    {
+        dialog.Answer("Skill", " /night-shift ");
+
+        var result = await RunAsync();
+
+        Assert.Equal("night-shift", store.Saved!.Skill);
+        Assert.Contains(new SetupAnswer("Skill", "night-shift"), result.Answers);
+    }
+
+    [Fact]
+    public async Task AnEmptyAnswerIsAProjectWithoutASkill()
+    {
+        dialog.Answer("Skill", "  ");
+
+        var result = await RunAsync();
+
+        Assert.Null(store.Saved!.Skill);
+        Assert.Contains(new SetupAnswer("Skill", "none"), result.Answers);
+        Assert.Empty(dialog.Refused);
+    }
+
+    [Fact]
+    public async Task ATextThatIsNotTheNameOfASkillIsAskedForAgain()
+    {
+        dialog.Answer("Skill", "task auto");
+        dialog.Answer("Skill", "task-auto");
+
+        await RunAsync();
+
+        Assert.Equal(["task auto"], dialog.Refused);
+        Assert.Equal("task-auto", store.Saved!.Skill);
+    }
+
+    [Fact]
+    public async Task SettingsThatNameNoSkillProposeNoneAndThoseThatNameOneProposeIt()
+    {
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing;
+        var without = await RunAsync();
+        Assert.Equal(SetupOutcome.NothingToChange, without.Outcome);
+        Assert.Contains(new SetupAnswer("Skill", "none"), without.Answers);
+
+        store.Current = Existing with { Skill = "night-shift" };
+        machine.Skills = ["night-shift"];
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Contains(new SetupAnswer("Skill", "night-shift"), result.Answers);
+    }
+
+    [Fact]
+    public async Task AChangeOfTheSkillIsSaidAsItWasAndAsItWillBe()
+    {
+        store.Current = Existing;
+        dialog.Answer("Skill", "task-auto");
+
+        await RunAsync();
+
+        Assert.Contains(new SetupNote(SetupTone.Change, "Skill: none → task-auto"), dialog.Shown.Notes);
+        Assert.Equal("task-auto", store.Saved!.Skill);
+    }
+
+    [Fact]
+    public async Task ASkillThatIsNotWrittenYetIsSaidOnTheLastPageAndInTheResult()
+    {
+        machine.Skills = [];
+
+        var result = await RunAsync();
+
+        SetupNote[] said =
+        [
+            new(SetupTone.Warning, "There is no skill “task-auto” yet: write .claude/skills/task-auto/SKILL.md before a run."),
+            new(SetupTone.Muted, "`toobusy about` tells what the skill is to say."),
+        ];
+        Assert.Equal(said, dialog.Shown.Notes.TakeLast(2));
+        Assert.Equal(said, result.Notes);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("task-auto", store.Saved!.Skill);
+    }
+
+    [Fact]
+    public async Task ASkillThatCannotBeLookedForIsNotSpokenOf()
+    {
+        machine.Skills = null;
+
+        Assert.Empty((await RunAsync()).Notes);
+    }
+
+    [Fact]
+    public async Task GoingBackFromTheSkillAsksTheInterruptLabelAgain()
+    {
+        dialog.Back("Skill");
+
+        await RunAsync();
+
+        Assert.Equal([InterruptLabel, "Skill", InterruptLabel, "Skill", "Write the settings?"], dialog.Asked.Skip(5));
+    }
+
+    [Fact]
+    public async Task TheOptionsOfTheSkillAreProposedBeforeWhatTheSettingsSay()
+    {
+        store.Current = Existing with { Skill = "night-shift" };
+        machine.Skills = ["night-shift", "task-auto"];
+
+        await RunAsync(new SetupProposals(Skill: "/task-auto"));
+        Assert.Equal("task-auto", store.Saved!.Skill);
+
+        await RunAsync(new SetupProposals(Skill: ""));
+        Assert.Null(store.Saved!.Skill);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Skill: night-shift → none"), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsTheSkillIsTheOptionOrWhatIsProposed()
+    {
+        var first = await RunUnaskedAsync(SetupProposals.None);
+        Assert.Equal("task-auto", store.Saved!.Skill);
+        Assert.Contains(new SetupAnswer("Skill", "task-auto"), first.Answers);
+
+        await RunUnaskedAsync(new SetupProposals(Skill: ""));
+        Assert.Null(store.Saved!.Skill);
+
+        await RunUnaskedAsync(new SetupProposals(Skill: "night-shift"));
+        Assert.Equal("night-shift", store.Saved!.Skill);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsASkillThatIsNotANameFailsBeforeAnythingIsChanged()
+    {
+        var result = await RunUnaskedAsync(new SetupProposals(Skill: "task auto"));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Skill: task auto is not the name of a skill: it is letters, digits and dashes, as task-auto.", result.Failure);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Labelled);
+    }
+
     Task<SetupResult> RunAsync(SetupProposals? proposals = null) => new ProjectSetup(dialog, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
 
     // A setup that asks nothing: it has no dialog.
@@ -1030,8 +1172,13 @@ public class ProjectSetupTests
 
         public string? Origin { get; set; } = "acme/rocket";
 
+        // The skills that are written; null is a machine where skills cannot be looked for.
+        public HashSet<string>? Skills { get; set; } = ["task-auto"];
+
         public Task<SetupEnvironment> InspectAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new SetupEnvironment(Problems, TrackerReachable, Origin));
+
+        public SkillLook FindSkill(string name) => new(Skills?.Contains(name), $".claude/skills/{name}/SKILL.md");
     }
 
     sealed class FakeBoards : ISetupBoards
@@ -1129,6 +1276,7 @@ public class ProjectSetupTests
             $"blocking = {string.Join(", ", settings.Queue.Labels.Blocking)}",
             $"take = {string.Join(", ", settings.Queue.Labels.Take)}",
             $"owner = {settings.Queue.Labels.Owner}",
-            $"interrupted = {settings.Queue.Labels.Interrupted}") + "\n";
+            $"interrupted = {settings.Queue.Labels.Interrupted}",
+            $"skill = {settings.Skill}") + "\n";
     }
 }

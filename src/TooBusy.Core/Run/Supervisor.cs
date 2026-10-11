@@ -218,7 +218,7 @@ public sealed class Supervisor(
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
             try
             {
-                session = await assistant.StartAsync(Start(task, Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp })), kill);
+                session = await assistant.StartAsync(Start(task, Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp }, skill: plan.Skill)), kill);
             }
             catch (AssistantException)
             {
@@ -227,9 +227,10 @@ public sealed class Supervisor(
                 throw;
             }
 
-            how = gone ? "a new session: the conversation of the one before is gone"
-                : again ? "a new session; the task was interrupted before"
-                : "a new session";
+            var fresh = plan.Skill is null ? "a new session" : $"a new session with the skill {plan.Skill}";
+            how = gone ? $"{fresh}: the conversation of the one before is gone"
+                : again ? $"{fresh}; the task was interrupted before"
+                : fresh;
         }
 
         // The session works from here on, so it is written down before the tracker is told anything more: a

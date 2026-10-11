@@ -9,6 +9,9 @@ public static class Fixes
     public const string AssistantLogin = "claude, then /login";
     public const string Setup = "toobusy init";
 
+    // A skill that the settings name and nobody has written: it is written, or the settings name none.
+    public static string Skill(string place) => $"write {place}, as `toobusy about` tells, or name no skill: toobusy init --no-skill";
+
     public static string Install(Tool tool, Platform platform, bool manager) => (tool, platform) switch
     {
         (Tool.Git, Platform.MacOS) => "xcode-select --install",

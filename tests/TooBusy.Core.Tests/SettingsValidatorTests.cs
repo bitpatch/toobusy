@@ -194,6 +194,49 @@ public class SettingsValidatorTests
     }
 
     [Fact]
+    public void TheSkillIsOptional()
+    {
+        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Skill);
+
+        var named = SettingsValidator.Validate(Document(("session", ""), (SettingsKeys.SessionSkill, "task-auto")));
+
+        Assert.Empty(named.Errors);
+        Assert.Equal("task-auto", named.Settings!.Skill);
+    }
+
+    [Theory]
+    [InlineData("task-auto")]
+    [InlineData("Task_auto2")]
+    [InlineData("toolbox:task-auto")]
+    public void ASkillIsNamedAsItsCommandIsWithoutTheSlash(string skill)
+    {
+        Assert.Empty(SettingsValidator.Validate(Document(("session", ""), (SettingsKeys.SessionSkill, skill))).Errors);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/task-auto")]
+    [InlineData("task auto")]
+    [InlineData("-task")]
+    [InlineData("task\nauto")]
+    public void AnythingElseIsNotTheNameOfASkill(string skill)
+    {
+        var error = OnlyError(Document(("session", ""), (SettingsKeys.SessionSkill, skill)));
+
+        Assert.Equal(
+            new SettingsError(SettingsKeys.SessionSkill, LineOf(SettingsKeys.SessionSkill), "must be the name of a skill, as `task-auto`: letters, digits, `-`, `_`, `.` and `:`, without the `/` before it"),
+            error);
+    }
+
+    [Fact]
+    public void ASkillThatIsNotATextIsRefused()
+    {
+        var error = OnlyError(Document(("session", ""), (SettingsKeys.SessionSkill, true)));
+
+        Assert.Equal(new SettingsError(SettingsKeys.SessionSkill, LineOf(SettingsKeys.SessionSkill), "must be a string"), error);
+    }
+
+    [Fact]
     public void ALabelMustNotBothBlockAndTake()
     {
         var error = OnlyError(Document(
@@ -282,7 +325,7 @@ public class SettingsValidatorTests
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "session", SettingsKeys.SessionSkill];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

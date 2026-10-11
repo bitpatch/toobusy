@@ -65,10 +65,12 @@ public static class CliApp
         var noTake = new Option<bool>("--no-take-labels") { Description = "Any task is taken, whatever its labels." };
         var owner = new Option<string?>("--owner-label") { Description = "The label of a task that waits for the owner; it is made when the repository does not have it.", HelpName = "name" };
         var interrupt = new Option<string?>("--interrupt-label") { Description = "The label of a task that a run had to stop; it is made when the repository does not have it.", HelpName = "name" };
+        var skill = new Option<string?>("--skill") { Description = "The skill of the project a session starts with, by its name; it says how a task is done here without you.", HelpName = "name" };
+        var noSkill = new Option<bool>("--no-skill") { Description = "No skill: a session starts with the message of toobusy alone." };
         var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
         var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.")
         {
-            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, yes,
+            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, yes,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -80,6 +82,7 @@ public static class CliApp
                 (result.GetValue(boardOwner) is not null && result.GetValue(newBoard) is null, "toobusy: `--board-owner` goes with `--new-board`"),
                 (result.GetValue(blocking) is { Length: > 0 } && result.GetValue(noBlocking), "toobusy: give `--blocking-label` or `--no-blocking-labels`, not both"),
                 (result.GetValue(take) is { Length: > 0 } && result.GetValue(noTake), "toobusy: give `--take-label` or `--no-take-labels`, not both"),
+                (result.GetValue(skill) is not null && result.GetValue(noSkill), "toobusy: give `--skill` or `--no-skill`, not both"),
             ];
             if (clashes.FirstOrDefault(clash => clash.Wrong) is { Wrong: true } clash)
             {
@@ -95,7 +98,8 @@ public static class CliApp
                 result.GetValue(noBlocking) ? [] : result.GetValue(blocking) is { Length: > 0 } blocks ? blocks : null,
                 result.GetValue(noTake) ? [] : result.GetValue(take) is { Length: > 0 } takes ? takes : null,
                 result.GetValue(owner),
-                result.GetValue(interrupt));
+                result.GetValue(interrupt),
+                result.GetValue(noSkill) ? "" : result.GetValue(skill));
 
             if (FindProject(context) is not { } root)
                 return ExitCode.NotReady;
@@ -430,7 +434,7 @@ public static class CliApp
         command.SetAction(_ =>
         {
             var settings = ProjectLocator.FindRoot(context.Folder) is { } root ? new SettingsFile(root).Load()?.Settings : null;
-            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default));
+            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill));
             return ExitCode.Done;
         });
         return command;

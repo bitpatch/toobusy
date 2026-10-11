@@ -76,7 +76,7 @@ public sealed record Workbench(
 
         processes ??= new NoProcesses();
         var origin = await new GitOrigin(processes).ReadAsync(root, cancellationToken);
-        var machine = new MachineCheckup(processes, MachineCheckup.Here);
+        var machine = new MachineCheckup(processes, MachineCheckup.Here, root, ClaudeFolders.Configuration(home, System.Environment.GetEnvironmentVariable));
         return new Workbench(
             root,
             demo,
@@ -103,7 +103,7 @@ public sealed record Workbench(
     // GitHub repository.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board };
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill };
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules), remembered);
         if (Repository is null)

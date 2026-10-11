@@ -15,6 +15,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
     public const string Repository = "repository";
     public const string Board = "board";
     public const string Labels = "labels";
+    public const string Skill = "skill";
 
     // Every check; the results are in the order of the checks.
     public async Task<IReadOnlyList<CheckResult>> RunAsync(ICheckupView view, CancellationToken cancellationToken)
@@ -74,6 +75,22 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
         {
             view.Start(Labels);
             Tell(await LabelsAsync(read.Queue.Labels, origin!, cancellationToken));
+        }
+
+        // A session that starts with a skill the assistant does not have never begins its work: it is not asked.
+        if (loaded?.Settings is not { } named)
+            Tell(Waits(Skill, "the settings"));
+        else if (named.Skill is not { } skill)
+            Tell(new CheckResult(Skill, CheckState.Skipped, "the project names no skill"));
+        else
+        {
+            view.Start(Skill);
+            Tell(machine.FindSkill(skill) switch
+            {
+                { Found: true } found => new CheckResult(Skill, CheckState.Passed, found.Place),
+                { Found: null } => new CheckResult(Skill, CheckState.Passed, $"{skill}, a skill of a plugin: it is not looked for"),
+                var missing => new CheckResult(Skill, CheckState.Failed, $"There is no skill “{skill}”: a session that starts with it would do nothing.", Fixes.Skill(missing.Place)),
+            });
         }
 
         return results;

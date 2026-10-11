@@ -46,6 +46,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string TakeHint = "Only tasks with one of these labels are taken. Choose none to take any task.";
     const string OwnerLabel = "Owner's label";
     const string InterruptLabel = "Interrupt label";
+    const string SkillLabel = "Skill";
+    const string SkillHint = "A session starts with this skill of the project. Leave empty to start without one.";
 
     // The last choice of a label: one that the repository does not have yet.
     const string NewLabel = "New label…";
@@ -54,7 +56,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string ProposedOwner = "needs-owner";
     const string ProposedInterrupted = "interrupted";
 
-    static readonly string[] Steps = [ProjectLabel, BlockingLabel, TakeLabel, OwnerLabel, InterruptLabel];
+    // What a first setup proposes to call the skill a session starts with.
+    const string ProposedSkill = "task-auto";
+
+    static readonly string[] Steps = [ProjectLabel, BlockingLabel, TakeLabel, OwnerLabel, InterruptLabel, SkillLabel];
 
     readonly ISetupDialog dialog = dialog ?? new Unasked();
     readonly bool unasked = dialog is null;
@@ -80,6 +85,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     List<string>? take;
     string? owner;
     string? interrupted;
+
+    // The name of the skill; empty for a project that names none.
+    string? skill;
+
+    // What is said of a skill that the settings will name and nobody has written yet; empty when nothing is.
+    IReadOnlyList<SetupNote> unwritten = [];
 
     string? failure;
     bool written;
@@ -151,9 +162,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                     case 4:
                         answered = await AskInterruptedAsync(cancellationToken);
                         break;
+                    case 5:
+                        answered = AskSkill();
+                        break;
                     default:
                         if (await ConcludeAsync(cancellationToken) is { } outcome)
-                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = notes, Done = done };
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. unwritten], Done = done };
                         answered = false;
                         break;
                 }
@@ -356,6 +370,22 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         answer => interrupted = answer,
         cancellationToken);
 
+    // The skill of the project a session starts with, by its name, or none: an empty answer. A first setup proposes
+    // a name; settings that exist propose what they say, and none when they name none. The name is taken with the
+    // slash of its command or without it.
+    bool AskSkill()
+    {
+        static string Named(string text) => text.Trim().TrimStart('/');
+
+        Show(5);
+        var proposed = skill ?? proposals.Skill ?? (current is null ? ProposedSkill : current.Skill ?? "");
+        var typed = dialog.Ask(SkillLabel, SkillHint, Named(proposed), text =>
+            Named(text) is { Length: > 0 } name && SettingsValidator.RefuseSkill(name) is not null ? $"{name} is not the name of a skill: it is letters, digits and dashes, as {ProposedSkill}." : null);
+        if (typed is not null)
+            skill = Named(typed);
+        return typed is not null;
+    }
+
     // One label that a run puts on a task: one of the labels of the repository that nothing speaks against, or a new
     // one, which is named here and made when the setup is confirmed. The proposed one is the label that was
     // answered, the one of the settings, or the name a first setup proposes.
@@ -428,6 +458,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             ? [.. new[] { owner!, interrupted! }.Where(name => !Has(labels!, name)).Distinct(StringComparer.OrdinalIgnoreCase)]
             : [];
 
+        // A skill that is named and not written yet is to be written before a run: a session that starts with a
+        // skill the assistant does not have does nothing.
+        unwritten = skill is { Length: > 0 } && environment.FindSkill(skill) is { Found: false } look
+            ? [new SetupNote(SetupTone.Warning, $"There is no skill “{skill}” yet: write {look.Place} before a run."), new SetupNote(SetupTone.Muted, "`toobusy about` tells what the skill is to say.")]
+            : [];
+
         var preview = store.Preview(Settings(address));
         var writing = preview.Before != preview.After;
         if (!writing && !linking && missing.Count == 0)
@@ -452,6 +488,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (linking)
             coming.Add(new SetupNote(SetupTone.Plain, $"The project will be linked to {repository}."));
         coming.AddRange(missing.Select(name => new SetupNote(SetupTone.Plain, $"The label “{name}” will be made in {repository}.")));
+        coming.AddRange(unwritten);
 
         Show(Steps.Length, coming);
         var question = writing ? "Write the settings?"
@@ -508,6 +545,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             ("Labels to take", Labels(before.Queue.Labels.Take, "any task"), Labels(take!, "any task")),
             (OwnerLabel, before.Queue.Labels.Owner, owner!),
             (InterruptLabel, before.Queue.Labels.Interrupted, interrupted!),
+            (SkillLabel, before.Skill ?? "none", skill is { Length: > 0 } ? skill : "none"),
         ];
         return [.. settings.Where(setting => setting.Before != setting.After).Select(setting => $"{setting.Name}: {setting.Before} → {setting.After}")];
     }
@@ -519,7 +557,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     ProjectSettings Settings(string? address) => new(
         new TrackerSettings(SettingsKeys.GitHubTracker, address),
         new QueueSettings(new LabelSettings(blocking!, take!, owner!, interrupted!)),
-        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant));
+        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
+    {
+        Skill = skill is { Length: > 0 } ? skill : null,
+    };
 
     void Show(int step, IReadOnlyList<SetupNote>? more = null) =>
         dialog.Show(new SetupProgress([.. notes, .. more ?? []], Answers(step), Steps, step));
@@ -545,8 +586,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (step > 3)
             answers.Add(new SetupAnswer(OwnerLabel, owner!));
         if (step > 4)
-        {
             answers.Add(new SetupAnswer(InterruptLabel, interrupted!));
+        if (step > 5)
+        {
+            answers.Add(new SetupAnswer(SkillLabel, skill is { Length: > 0 } ? skill : "none"));
             answers.Add(new SetupAnswer("Assistant", "Claude Code"));
         }
 

@@ -15,7 +15,9 @@ public static class Briefing
     // report, or paused by a usage limit elsewhere, with none. Its last comment says which.
     // `lost` is a task that a session worked on before whose conversation is gone, with no report of it.
     // `ground` is what the session needs to make a new task: its own task stays the run's, and new ones are its.
-    public static string Task(QueueTask task, NewTasks ground, bool interrupted, bool lost = false)
+    // `skill` is the skill of the project the session starts with: the message begins with its command, which the
+    // assistant loads the skill by, and goes on as it does in a project that names none.
+    public static string Task(QueueTask task, NewTasks ground, bool interrupted, bool lost = false, string? skill = null)
     {
         // A task that waits for the owner must be one a run takes once the owner has answered: it gets the labels
         // of this task that let a task in.
@@ -27,6 +29,8 @@ public static class Briefing
             : $"Put it into no milestone, as task #{task.Number} is in none.";
         var board = ground.Board is null ? "" : $"\n- Put it on the board {ground.Board} with the status `Todo`.";
         var message = new StringBuilder();
+        if (skill is not null)
+            message.Append(CultureInfo.InvariantCulture, $"{Command(skill, task)}\n\n");
         message.Append(CultureInfo.InvariantCulture, $"""
             You are doing task #{task.Number} of this project without its owner. toobusy, the tool that takes the tasks of the project one after another, started this session and reads how it ends.
 
@@ -86,6 +90,10 @@ public static class Briefing
             """);
         return message.ToString();
     }
+
+    // The line a first message begins with in a project that names a skill: the command of the skill, and the task
+    // by its number and its title.
+    public static string Command(string skill, QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"/{skill} #{task.Number} {task.Title}");
 
     // What a session that waits for the owner is told.
     // It says in full what becomes of what the owner must decide, and names the label of the owner: `owner`.

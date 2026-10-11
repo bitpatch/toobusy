@@ -1,3 +1,5 @@
+using TooBusy.Core.Assistant;
+
 namespace TooBusy.Core.Doctor;
 
 public enum Platform
@@ -51,6 +53,9 @@ public interface ICheckupMachine
 
     // The labels of the repository; null when they cannot be read.
     Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken);
+
+    // Whether the assistant has the skill of this name to start a session with, in this project or of the user.
+    SkillLook FindSkill(string name);
 }
 
 // Where the checks tell how they go: a check that starts, and every check as it ends. A check that is skipped

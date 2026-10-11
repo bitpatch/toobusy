@@ -24,6 +24,9 @@ public sealed class CliAppTests : IDisposable
         type = "claude-code"
         """;
 
+    // What the settings of a project that names a skill end with.
+    const string SkillOfTheProject = "\n\n[session]\nskill = \"task-auto\"\n";
+
     // The labels the settings name, as `gh` lists those of a repository.
     const string Labels = "manual\ninterrupted\n";
 
@@ -93,6 +96,22 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("- A task with the label `manual` is not taken.\n- The project has no board", output, StringComparison.Ordinal);
         Assert.Contains("takes the `interrupted` label off a task that had it", output, StringComparison.Ordinal);
         Assert.DoesNotContain("No settings are read here", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutNamesTheSkillOfAProjectThatHasOne()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+
+        var (exit, output, _) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("This project names the skill `task-auto`, so its first message begins with `/task-auto #12 <the title of the task>`, as shown below.", output, StringComparison.Ordinal);
+        Assert.Contains("```text\n/task-auto #12 <the title of the task>\n\nYou are doing task #12 of this project without its owner.", output, StringComparison.Ordinal);
+
+        WriteSettings(Settings);
+        Assert.Contains("This project names none: its first message begins with the words of toobusy", (await RunAsync("about")).Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -399,11 +418,91 @@ public sealed class CliAppTests : IDisposable
             ✔ repository         acme/rocket
             ✔ board              https://github.com/orgs/acme/projects/1
             ✔ labels
+            ○ skill              the project names no skill
 
             """.ReplaceLineEndings(),
             output);
         Assert.Contains(processes.Asked, asked => asked.Command == "claude" && asked.Arguments.SequenceEqual(["auth", "status"]));
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["api", "repos/acme/rocket", "--jq", ".full_name"]));
+    }
+
+    [Fact]
+    public async Task DoctorLooksForTheSkillOfTheSettingsAmongTheSkillsOfTheProject()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+        var processes = GitHub(milestones: "", Labels);
+        var place = Path.Combine(".claude", "skills", "task-auto", "SKILL.md");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["doctor"]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith(
+            "✘ skill              There is no skill “task-auto”: a session that starts with it would do nothing." + Environment.NewLine
+            + $"  fix: write {place}, as `toobusy about` tells, or name no skill: toobusy init --no-skill" + Environment.NewLine,
+            output,
+            StringComparison.Ordinal);
+
+        WriteSkill("task-auto");
+        (exit, output, _) = await RunAsync(Context(processes), ["doctor"]);
+
+        Assert.Equal(0, exit);
+        Assert.EndsWith($"✔ skill              {place}" + Environment.NewLine, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartWhileTheSkillOfTheSettingsIsNotWritten()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+        await ChooseAllAsync();
+        var processes = GitHub(milestones: "", Labels);
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.StartsWith("✘ skill              There is no skill “task-auto”: a session that starts with it would do nothing.", error, StringComparison.Ordinal);
+        Assert.EndsWith("toobusy: the run did not start. `toobusy doctor` checks all of it again." + Environment.NewLine, error, StringComparison.Ordinal);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+    }
+
+    [Fact]
+    public async Task InAProjectWithASkillClaudeCodeIsStartedWithItsCommandAtTheHeadOfTheMessage()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+        WriteSkill("task-auto");
+        await ChooseAllAsync();
+
+        // The files of the skill are not committed in this test; `git` says that the working tree is clean.
+        var closed = false;
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        {
+            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
+            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
+            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
+            _ => "",
+        }, ""));
+        var context = Context(processes) with { Home = personal.FullName };
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Contains("→ #12 Export the data — started · a new session with the skill task-auto · claude attach abc12345", output, StringComparison.Ordinal);
+        var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
+        Assert.Equal(
+            "/task-auto #12 Export the data\n\n"
+            + Briefing.Task(new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []), new NewTasks("manual", [], null, null), interrupted: false),
+            started[^1]);
     }
 
     [Fact]
@@ -429,6 +528,7 @@ public sealed class CliAppTests : IDisposable
                 "○ repository         waits for git",
                 "○ board              waits for the settings",
                 "○ labels             waits for the settings",
+                "○ skill              waits for the settings",
                 "",
             ],
             lines[8..]);
@@ -472,7 +572,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("\r⣾ GitHub login\r\u001b[K✔ GitHub login" + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.Equal(
-            ["✔ git", "✔ GitHub CLI", "✔ GitHub login", "✔ Claude Code", "✔ Claude Code login", "✔ settings           .toobusy/settings.toml", "✔ repository         acme/rocket", "○ board              the project has no board", "✔ labels"],
+            ["✔ git", "✔ GitHub CLI", "✔ GitHub login", "✔ Claude Code", "✔ Claude Code login", "✔ settings           .toobusy/settings.toml", "✔ repository         acme/rocket", "○ board              the project has no board", "✔ labels", "○ skill              the project names no skill"],
             Scroll.Read(output).Rows.Where(row => row.Length > 0));
     }
 
@@ -485,7 +585,7 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("✘", output, StringComparison.Ordinal);
-        Assert.Contains("✔ labels" + Environment.NewLine + "Demo: the checks were made up." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains("✔ labels" + Environment.NewLine + "✔ skill              .claude/skills/task-auto/SKILL.md" + Environment.NewLine + "Demo: the checks were made up." + Environment.NewLine, output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -917,11 +1017,11 @@ public sealed class CliAppTests : IDisposable
         var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\nmanual\n");
 
         // No project, no blocking labels, any label; a new label for the owner and one for interrupted tasks, each
-        // by the name that is proposed; yes; the first milestone; the model after the assistant's own; the proposed
-        // effort; the last of the menu.
+        // by the name that is proposed; the skill that is proposed; yes; the first milestone; the model after the
+        // assistant's own; the proposed effort; the last of the menu.
         var keys = new Keys().Press(
             Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter,
-            Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter,
+            Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter,
             Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, processes, []);
@@ -940,6 +1040,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Labels to take   any task",
                 "✔ Owner's label    needs-owner",
                 "✔ Interrupt label  interrupted",
+                "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
                 "✔ The settings are written to .toobusy/settings.toml. Commit the file.",
                 "✔ Milestone        v0.2.0",
@@ -951,6 +1052,9 @@ public sealed class CliAppTests : IDisposable
             Report(output).Split(Environment.NewLine));
         Assert.Contains("type = \"github\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
         Assert.Contains("The label “needs-owner” will be made in acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Contains("There is no skill “task-auto” yet: write .claude/skills/task-auto/SKILL.md before a run.", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Skill            task-auto", output, StringComparison.Ordinal);
+        Assert.Contains("[session]\nskill = \"task-auto\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "create", "needs-owner", "--repo", "acme/rocket"]));
         Assert.Equal("Milestone: v0.2.0", (await ShownAsync(processes)).Output.Trim());
         Assert.Equal("Model: fable", (await RunAsync("model")).Output.Trim());
@@ -1233,11 +1337,11 @@ public sealed class CliAppTests : IDisposable
               #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #100 Rename the settings page — done in 6 s
               #100 is closed, with the report of the session as its comment
-            → #101 Show the total of an order in its header — started · a new session · claude attach 4f2a101 (made up)
+            → #101 Show the total of an order in its header — started · a new session with the skill task-auto · claude attach 4f2a101 (made up)
               #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #101 Show the total of an order in its header — done in 9 s
               #101 is closed, with the report of the session as its comment
-            → #102 Export the orders as a file — started · a new session · claude attach 4f2a102 (made up)
+            → #102 Export the orders as a file — started · a new session with the skill task-auto · claude attach 4f2a102 (made up)
               #102 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
               │ The task does not say what kind of file the export is. Should it be CSV or JSON?
@@ -1245,18 +1349,18 @@ public sealed class CliAppTests : IDisposable
               “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `needs-owner` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.”
             ✔ #102 Export the orders as a file — done in 21 s
               #102 is closed, with the report of the session as its comment
-            → #103 Fix the rounding of a discount — started · a new session · claude attach 4f2a103 (made up)
+            → #103 Fix the rounding of a discount — started · a new session with the skill task-auto · claude attach 4f2a103 (made up)
               #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ◐ #103 Fix the rounding of a discount — done in part in 10 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
-            → #104 Update the dependencies — started · a new session · claude attach 4f2a104 (made up)
+            → #104 Update the dependencies — started · a new session with the skill task-auto · claude attach 4f2a104 (made up)
               #104 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ‖ #104 ran into a usage limit: You have hit your usage limit.
             ‖ #104 waits 7 s for the 5-hour limit to reset, then goes on · /stop pauses it for the next run
             ▶ #104 goes on after the reset of the limit · claude attach 4f2a104 (made up)
             ✔ #104 Update the dependencies — done in 16 s
               #104 is closed, with the report of the session as its comment
-            → #105 Describe the export in the manual — started · a new session · claude attach 4f2a105 (made up)
+            → #105 Describe the export in the manual — started · a new session with the skill task-auto · claude attach 4f2a105 (made up)
               #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
@@ -1299,10 +1403,11 @@ public sealed class CliAppTests : IDisposable
         var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
 
         // No project; `manual` blocks; any label; `manual` is the label of the owner too, the one above `New label…`;
-        // a new label for interrupted tasks, by the name that is proposed; yes.
+        // a new label for interrupted tasks, by the name that is proposed; no skill, the proposed name being
+        // deleted; yes.
         var keys = new Keys().Press(
             Keys.Tab, Keys.Tab, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter, Keys.Enter,
-            Keys.Up, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+            Keys.Up, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Control('u'), Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init");
 
@@ -1315,6 +1420,9 @@ public sealed class CliAppTests : IDisposable
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("blocking = [\"manual\"]", written, StringComparison.Ordinal);
         Assert.Contains("owner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.DoesNotContain("session", written, StringComparison.Ordinal);
+        Assert.Contains("✔ Skill            none", Report(output), StringComparison.Ordinal);
+        Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Take(4).SequenceEqual(["label", "list", "--repo", "acme/rocket"]));
 
         // Only the label that the repository does not have is made.
@@ -1393,7 +1501,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("init", "--help");
 
         Assert.Equal(0, exit);
-        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "-y, --yes"])
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "-y, --yes"])
             Assert.Contains(option, output, StringComparison.Ordinal);
     }
 
@@ -1410,12 +1518,15 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             [
                 $"toobusy · Setting up this project · ~{Path.DirectorySeparatorChar}{folder.Name}",
+                "! There is no skill “task-auto” yet: write .claude/skills/task-auto/SKILL.md before a run.",
+                "`toobusy about` tells what the skill is to say.",
                 "✔ Tracker          GitHub",
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
                 "✔ Owner's label    needs-owner",
                 "✔ Interrupt label  interrupted",
+                "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
                 "The label “needs-owner” was made in acme/rocket.",
                 "The label “interrupted” was made in acme/rocket.",
@@ -1426,7 +1537,55 @@ public sealed class CliAppTests : IDisposable
             output.Split(Environment.NewLine));
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("blocking = []\ntake = []\nowner = \"needs-owner\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.EndsWith("[session]\nskill = \"task-auto\"\n", written, StringComparison.Ordinal);
         Assert.DoesNotContain("board", written.Replace("# ", "", StringComparison.Ordinal).Split('\n').Where(line => line.Contains('=', StringComparison.Ordinal)).Aggregate("", string.Concat), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesTheOptionsOfTheSkillNameItOrSayThatThereIsNone()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Skill            none", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("session", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+
+        // A skill that is written is not spoken of; the settings that exist get its section.
+        WriteSkill("night-shift");
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--skill", "/night-shift"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Skill            night-shift", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
+        Assert.EndsWith(
+            "\n# What a session starts with: the skill of the project that says how a task is done here without its owner.\n[session]\nskill = \"night-shift\"\n",
+            File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")),
+            StringComparison.Ordinal);
+
+        // Settings that name a skill keep it when no option speaks of it.
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Skill            night-shift", output, StringComparison.Ordinal);
+        Assert.Equal(written, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task WithYesANameThatIsNotOneOfASkillFailsAndNothingIsWritten()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--skill", "task auto"]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith("✘ Skill: task auto is not the name of a skill: it is letters, digits and dashes, as task-auto. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
     }
 
     [Fact]
@@ -1576,7 +1735,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         var processes = ElsewhereWithProjects();
-        var keys = new Keys().Press(Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--new-board", "Rocket");
 
@@ -1620,6 +1779,7 @@ public sealed class CliAppTests : IDisposable
     [InlineData("toobusy: `--board-owner` goes with `--new-board`", "--board-owner", "acme")]
     [InlineData("toobusy: give `--blocking-label` or `--no-blocking-labels`, not both", "--blocking-label", "manual", "--no-blocking-labels")]
     [InlineData("toobusy: give `--take-label` or `--no-take-labels`, not both", "--take-label", "bug", "--no-take-labels")]
+    [InlineData("toobusy: give `--skill` or `--no-skill`, not both", "--skill", "task-auto", "--no-skill")]
     public async Task OptionsThatAnswerTheSameQuestionDifferentlyAreAWrongCommandLine(string message, params string[] options)
     {
         GitRepository();
@@ -1637,15 +1797,16 @@ public sealed class CliAppTests : IDisposable
         var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
 
         // Enter on every question, the last one included: no board, `manual` blocks, `bug` is taken, `manual` is
-        // the label of the owner and `interrupted` the one of interrupted tasks.
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        // the label of the owner, `interrupted` the one of interrupted tasks, and `night-shift` is the skill.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--no-board", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--no-board", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted", "--skill", "night-shift");
 
         Assert.Equal(0, exit);
         Assert.Contains("[No project]", output, StringComparison.Ordinal);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("blocking = [\"manual\"]\ntake = [\"bug\"]\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("skill = \"night-shift\"", written, StringComparison.Ordinal);
         Assert.DoesNotContain("was made", Report(output), StringComparison.Ordinal);
     }
 
@@ -1655,8 +1816,8 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
 
         // The first of the boards, no blocking labels, any label, a new label for the owner by the name that is
-        // proposed, the label `interrupted` of the made-up ones, yes.
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        // proposed, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -1667,6 +1828,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("The answers above will be written to .toobusy/settings.toml.", output, StringComparison.Ordinal);
         Assert.Contains("The label “needs-owner” will be made in example/project.", output, StringComparison.Ordinal);
         Assert.DoesNotContain("[tracker]", output, StringComparison.Ordinal);
+        Assert.Contains("A session starts with this skill of the project. Leave empty to start without one.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
         Assert.Equal(
             [
                 $"toobusy · Setting up this project · ~{Path.DirectorySeparatorChar}{folder.Name}",
@@ -1676,6 +1839,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Labels to take   any task",
                 "✔ Owner's label    needs-owner",
                 "✔ Interrupt label  interrupted",
+                "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
                 "Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was.",
                 "",
@@ -1690,7 +1854,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         WriteSettings(Settings);
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -1698,6 +1862,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  manual", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Owner's label    manual", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ Skill            none", Report(output), StringComparison.Ordinal);
         Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, Report(output), StringComparison.Ordinal);
     }
 
@@ -1710,8 +1875,8 @@ public sealed class CliAppTests : IDisposable
             : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
 
         // The board that is linked, no blocking labels, any label, a new label for the owner by the name that is
-        // proposed, the label `interrupted` of the made-up ones, yes.
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        // proposed, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -1730,7 +1895,7 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
         var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
-        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -1746,7 +1911,7 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\torg\tbitpatch\nowner\tuser\tdenis\n", ""));
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -1759,7 +1924,7 @@ public sealed class CliAppTests : IDisposable
     public async Task DecliningTheSetupFails()
     {
         GitRepository();
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter);
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -1784,6 +1949,10 @@ public sealed class CliAppTests : IDisposable
     }
 
     void GitRepository() => folder.CreateSubdirectory(".git");
+
+    // A skill of the project, where Claude Code reads it.
+    void WriteSkill(string name) =>
+        File.WriteAllText(Path.Combine(folder.CreateSubdirectory(Path.Combine(".claude", "skills", name)).FullName, "SKILL.md"), $"---\nname: {name}\n---\n");
 
     void WriteSettings(string text) =>
         File.WriteAllText(Path.Combine(folder.CreateSubdirectory(".toobusy").FullName, "settings.toml"), text);

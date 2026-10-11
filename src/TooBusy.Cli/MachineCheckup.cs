@@ -1,4 +1,5 @@
 using TooBusy.Assistants.ClaudeCode;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
 using TooBusy.Core.Processes;
 using TooBusy.Trackers.GitHub;
@@ -6,8 +7,9 @@ using TooBusy.Trackers.GitHub;
 namespace TooBusy.Cli;
 
 // What the checks of `doctor` ask of this machine: its tools through their own commands, GitHub through `gh` and
-// the login of Claude Code through `claude`.
-public sealed class MachineCheckup(IProcessRunner processes, Platform platform) : ICheckupMachine
+// the login of Claude Code through `claude`. `root` is the root of the project and `configuration` Claude Code's
+// own folder of the user: a skill is looked for in both.
+public sealed class MachineCheckup(IProcessRunner processes, Platform platform, string root, string configuration) : ICheckupMachine
 {
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -51,4 +53,6 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform) 
     public Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken) => tracker.CheckBoardAsync(board, cancellationToken);
 
     public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) => tracker.FindLabelsAsync(repository, cancellationToken);
+
+    public SkillLook FindSkill(string name) => ClaudeSkills.Find(root, configuration, name);
 }

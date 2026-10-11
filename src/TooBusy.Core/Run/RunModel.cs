@@ -6,10 +6,13 @@ namespace TooBusy.Core.Run;
 
 // What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
 // and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
-// a run needs it only to tell a session where a new task stands.
+// a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
+// with, null where the project names none.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
+
+    public string? Skill { get; init; }
 }
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
