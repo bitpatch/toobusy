@@ -283,7 +283,7 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 
 After `Run` stands the number of tasks a run would take as things are: those that are ready and those that open after them. It is counted when the menu opens, and again after a run, after a change of the milestone and after the settings. While the tracker is read, the dots of a wait run in its place, the row is muted, and Enter does nothing on it. A run that would take no task is not opened either: the row says `no tasks`, and Enter counts again, for what has changed meanwhile. When the tasks cannot be read the row says so, and the run is opened all the same: it says why it stops.
 
-When the task that a run would take first is one that an earlier run had to stop, a task with the label of interrupted tasks, the row says so instead of the number, in the colour of a warning: `Run  interrupted: #71 Paint the windows yellow`. It is the task the next run goes on with, and Enter opens that run as it does on a count; the number of the tasks comes back when no task is interrupted any more. A title that does not fit is cut, and the number is not. A task that is interrupted and held, or that waits for another one, is not taken first, so the row does not name it.
+When the task that a run would take first is one that an earlier run had to stop, a task with the label of interrupted tasks, the row says so instead of the number, in the colour of a warning: `Run  interrupted: #71 Paint the windows yellow`. It is the task the next run goes on with, and Enter opens that run as it does on a count; the number of the tasks comes back when no task is interrupted any more. A title that does not fit is cut, and the number is not. A task that is interrupted and held, or that waits for another one, is not taken first, so the row does not name it. The row names in the same way the task that an earlier run left with a session, the task of [the record](#going-on-with-a-session): a run goes on with it before any other, whatever its status.
 
 After `Assistant` stand the model and the effort that are chosen; the assistant's own model is `own model` there. It opens a list of the two choices of the user, each with what is chosen after its name:
 
@@ -377,7 +377,7 @@ In a terminal `run` shows the run on its tape, and leaves the tool when the run 
 
 `about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions and the skills of the project to it. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
 
-It prints, as Markdown and in this order: which tasks a run takes and how it does them; that toobusy keeps the tracker, and what it does there before a session; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
+It prints, as Markdown and in this order: which tasks a run takes and how it does them; that toobusy keeps the tracker, and what it does there before a session; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit, those for a session that a later run goes on with, and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
 
 In a project that is set up the labels of its settings are named, `the needs-owner label`, and it is said whether the project has a board. Where there are no settings, or they do not validate, the labels are spoken of without their names, and the text says that no settings are read.
 
@@ -484,15 +484,15 @@ In a project with a board a task is taken only from the status `Todo`. The three
 
 A task **waits** for the open tasks that block it and for its own open sub-issues. It opens when they are closed, and is held while one of them is held or is not among the tasks that were read: `it waits for #7 (it has the manual label)`.
 
-The tasks that can be taken now are taken in this order: those with the label of interrupted tasks first, then by their numbers.
+The tasks that can be taken now are taken in this order: those with the label of interrupted tasks first, then by their numbers. Before any of them comes the task an earlier run left with a session, as [Going on with a session](#going-on-with-a-session) describes.
 
 ### A task
 
-1. **The working tree** must be clean: no changed file and none that git does not know. Otherwise the run stops with `the working tree is not clean: commit or stash the changes first`.
-2. **The queue** is read, and the first task that can be taken is the one.
+1. **The working tree** must be clean: no changed file and none that git does not know. Otherwise the run stops with `the working tree is not clean: commit or stash the changes first`. Only the changes of the task an earlier run left with a session are started over.
+2. **The queue** is read, and the task of the record, or else the first task that can be taken, is the one.
 3. **The limits** of usage are looked at, as described below.
 4. **The task is moved to `In Progress`** on the board. Nothing of the task is read for the session, which reads it on its own.
-5. **A session is started** with the model and the effort of the user. A task that was interrupted loses its label then.
+5. **A session is started** with the model and the effort of the user, and the task and the session are written down on the machine. A task that was interrupted loses its label then.
 6. **The session is watched** until its turn ends with a line for toobusy.
 7. **The outcome is checked** against the working copy, and the tracker is told.
 
@@ -509,6 +509,7 @@ The first message of a session names the task and gives the rules. It starts wit
 - the work is done in this working copy, which was clean and must be clean at the end: everything committed and pushed, or undone;
 - the session keeps a plan of the work in its task list: the steps are laid out before it starts, each is marked when it is begun and when it is done, and the list changes when the plan does. The page of a run shows it;
 - a task that was interrupted before has the report of that session as its last comment that starts with `**Interrupted.**`;
+- a task that a session worked on before and left no report of, its conversation being gone, may have the changes of that session in the working copy: the session looks at them, keeps what is right and undoes what is not;
 - what cannot be done without the owner, as described below;
 - the last reply is the report of the task, and its last line is one of:
 
@@ -535,7 +536,7 @@ What the session says is checked first: after `done`, `partial`, `owner` and `in
 
 Every comment starts with what became of the task, `**Done.**` for one, and ends with the session.
 
-**The run stops**, with exit code 1 and the task left as it is, in `In Progress`, when the session failed, when it ended without saying how the task went, when the check of the working copy did not pass, when the tracker refused something, and when the same task came up again right after its session. `Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d · the next task did not start · 3 done`. The next task is never built on a doubt.
+**The run stops**, with exit code 1 and the task left as it is, in `In Progress`, when the session failed, when it ended without saying how the task went, when the check of the working copy did not pass, when the tracker refused something, and when the same task came up again right after its session. `Stopped: #12 left changes in the working tree · claude attach 1a2b3c4d · the next task did not start · 3 done`. The next task is never built on a doubt. Such a task is for the owner: what was written down of it is forgotten, and no run goes on with it by itself.
 
 ### What cannot be done without the owner
 
@@ -575,9 +576,9 @@ A run is stopped with the commands of the menu of its page, `stop`, `continue` a
 | `/stop` | the current task is finished, and no other is taken: `Stopped by /stop · 3 done`. Between tasks the queue stops at once |
 | `/continue` | takes `/stop` back |
 | `/abort` | stops as soon as possible, with nothing committed and a report in the task. It cannot be taken back |
-| Ctrl+C twice | kills the run: the session is stopped at once, and the task stays in `In Progress` as it is. The exit code is 130 |
+| Ctrl+C twice | kills the run: the session is stopped at once, and the task stays in `In Progress` as it is; the next run goes on with its session. The exit code is 130 |
 
-**`/abort`.** The session is asked to wrap up: to let the command that runs finish and start no new step, to commit and push nothing, to undo its uncommitted changes, and to reply with a report for the session that will go on with the task — what was found out and decided, what was undone, file by file, and what is left — ended with `TOOBUSY: interrupted`. The request reaches a session that works after its next step, without cutting its turn: a hook of the session prints it. A session that has not wrapped up in ten minutes, and one that waits for the owner, has its turn cut and gets the request as a message. When the session ends, the task gets the label of interrupted tasks and the report, goes back to `Todo`, and the run stops; the next run takes the task first, and its session is told that the report of the one before is among the comments.
+**`/abort`.** The session is asked to wrap up: to let the command that runs finish and start no new step, to commit and push nothing, to undo its uncommitted changes, and to reply with a report for the session that will go on with the task — what was found out and decided, what was undone, file by file, and what is left — ended with `TOOBUSY: interrupted`. The request reaches a session that works after its next step, without cutting its turn: a hook of the session prints it. A session that has not wrapped up in ten minutes, and one that waits for the owner, has its turn cut and gets the request as a message. When the session ends, the task gets the label of interrupted tasks and the report, goes back to `Todo`, and the run stops; the next run takes the task first and goes on with the same session, which is told to do again what it undid. Where the conversation is gone, as on another machine, a new session is told that the report of the one before is among the comments.
 
 ### Usage limits
 
@@ -585,11 +586,62 @@ Claude Code has two limits of usage, a five-hour one and a weekly one; a run kno
 
 - **Before a task.** The weekly limit holds no task back: a task is started however much of it is used, and a session that runs into it is handled as one inside a task. At 96% of the five-hour limit the run waits for the reset and a minute more, and reads the queue again; `/stop` ends the wait.
 - **Inside a task.** A session that runs into a limit is stopped. The run waits for the reset of the five-hour limit, or for half an hour when it does not know the time, and the same session goes on with a message that says so. A task waits so ten times at most.
-- **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session. A pause whose changes are gone is forgotten; one whose task the queue does not take stops the run while the changes wait.
+- **A pause.** When the weekly limit is spent, when the limit did not reset, when the session did not go on, and when the owner stops the run during the wait, the task is paused: the session is stopped, the task gets the label of interrupted tasks and a comment, goes back to `Todo`, and its uncommitted changes stay in the working tree. The run ends. The next run takes the paused task first, over the changes, and goes on with the same session.
+
+### Going on with a session
+
+Whatever stops a run over a task, the next run goes on with the same session. A run writes down the task and its session in `.toobusy/local/session.json` as soon as the session is started, and forgets them when the task comes to an outcome: done, done in part, left to the owner, or failed.
+
+```json
+{"task":12,"session":"1a2b3c4d","conversation":"1a2b3c4d-0c7f-4efb-a0a0-211c72424c97","since":"2030-01-01T09:00:00.0000000Z","state":"working"}
+```
+
+| Key | Meaning |
+|---|---|
+| `task` | the number of the task |
+| `session` | what Claude Code calls the session while it lives, as in `claude attach` |
+| `conversation` | what the session is gone on with when nothing has it any more; it is learnt from the list of the sessions a moment after the start, and written when it is known |
+| `since` | when the session was started or told something last: what it said before does not count |
+| `state` | `working`, for a session that was started and of which nothing more is known; `paused`, for one that a usage limit stopped; `wrapped-up`, for one that wrapped its task up after `/abort` |
+
+The record is local state and not a setting: a conversation lives on one machine. What every machine sees is the tracker, with the label of interrupted tasks and the report in a comment. The record is also the proof that it was a run that moved the task to `In Progress`, so the task it names is taken whatever its status on the board is and whatever it waits for.
+
+**The order of the checks.** Before every task a run does this:
+
+1. It reads the record and the working tree. Changes in the working tree are those of the task of the record, and with no record, or with one of a session that wrapped up, which left none, they stop the run.
+2. It reads the queue.
+3. A task of the record that is not among the open tasks of the milestone any more, as one that was closed, or that got the label of the owner or a blocking label since, or lost its label to take, is not taken: its session is stopped, the record is forgotten, the log says so, and the checks start again, without a record. `▲ #12 was left with a session by an earlier run, but it is not gone on with: it has the manual label · its session is stopped and forgotten`.
+4. Otherwise the task of the record is the one that is taken, before those that were interrupted and before the rest. The limits of usage are looked at as before any task.
+5. The session is looked for, and the task goes on in the way the session was left, as the cases below say. The task is moved to `In Progress` and loses the label of interrupted tasks only when its session goes on.
+
+**The cases.** The log says how the task was taken: `→ #12 Export the data — taken again · its session was stopped, and goes on · claude attach 1a2b3c4d`.
+
+| What the run finds | It does | The log says |
+|---|---|---|
+| the session still works, or waits for the owner: toobusy died, or its terminal was closed | takes the session over and watches it as its own: one that waits is told to go on alone after the same countdown | `its session still works, and is watched again` |
+| the session ended with a line for toobusy while nobody watched | settles the task as usual, the checks of the working copy among it | `its session ended while nobody watched` |
+| the session was stopped: a kill | tells it to go on, over the changes left in the working tree | `its session was stopped, and goes on` |
+| the session was stopped by a usage limit: a pause, or a limit it ran into while nobody watched | tells it that the limit has reset | `its session goes on after the usage limit` |
+| the session wrapped up after `/abort`: the record says so | tells it to go on: to do again what it undid, and what is left | `its session goes on after /abort` |
+| nothing is left of the session: no process has it, and its conversation is not known or is not on this machine | starts a new session with the first message. After a wrap-up it is told that the task was interrupted and has a report; otherwise that a session worked on the task before, left no report and may have left changes | `a new session: the conversation of the one before is gone` |
+| the sessions cannot be read | stops, with the record and the task as they are; the next run looks again | |
+| the session does not go on when it is told to | stops in the same way; the next run tries again | |
+
+A session that is stopped and goes on is told this as the next message of its conversation:
+
+> toobusy was stopped while you worked, and it runs again: go on with task #12 from where you stopped. The uncommitted changes in the working copy are yours. The rules of this session hold as before: nobody will answer, and your last reply ends with a `TOOBUSY:` line.
+
+One that wrapped up is told:
+
+> toobusy runs again: go on with task #12. You wrapped it up when the owner stopped the run, and your report is the last comment of the task that starts with **Interrupted.**: do again what you undid, and do what is left. The rules of this session hold as before: commit and push the finished work as the instructions of the project say, and end your last reply with a `TOOBUSY:` line.
+
+**What a run does not go on with.** A failure stays for the owner: when the session failed, did not say how the task went, or the check of the working copy did not pass, the record is forgotten as the run stops, the task stays in `In Progress`, and the next run does not take it. A task that came to an outcome is forgotten before the tracker is told, so that nothing is told twice: when the tracker refuses then, the task is left for the owner too.
+
+On another machine there is no record: a task that was interrupted or paused is taken first by its label, with a new session, and one that a kill left in `In Progress` is not taken.
 
 ### Local state
 
-What a run leaves on the machine lies in `.toobusy/local/`: the task that is paused, the request that waits for a session, and what the status line of the last session told. The folder is made by the run and has a `.gitignore` of its own that leaves everything in it out, so that nothing of it is committed, the working tree stays clean, and the `.gitignore` of the project is not touched.
+What a run leaves on the machine lies in `.toobusy/local/`: the record of the task a run has a session for, the request that waits for a session, and what the status line of the last session told. The folder is made by the run and has a `.gitignore` of its own that leaves everything in it out, so that nothing of it is committed, the working tree stays clean, and the `.gitignore` of the project is not touched.
 
 ### The machine
 
@@ -628,12 +680,12 @@ Without a terminal the lines of the log are printed as they come: the run, each 
 
 ### A demo of a run
 
-`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first, with the report of the session before it. When that task is taken again, the made-up tasks start over, as they do after any other run.
+`run --demo` is the real run over a made-up tracker and made-up sessions; nothing is changed anywhere, and the waits are seconds long. The tasks fit the rules of the project, and one after another they show: a task that a run was killed over, which stands in `In Progress` with a made-up record, and whose session goes on; a task that is done; a session that stops with a question, the countdown, the message toobusy sends and the session deciding alone; a task done in part, whose rest becomes a task for the owner; a session that runs into the five-hour limit, the wait and the same session going on; a task that opens after another; and tasks that are held by a label and by their status. The commands of the page work as they do in a run. The menu of a demo opens with that task named at `Run`, `interrupted: #100 Rename the settings page`, as the task of a record is. A demo that is aborted remembers it for as long as the demo goes on, and for no longer, and nowhere: the menu it comes back to says `interrupted: #101 Show the total of an order in its header`, and the next run takes that task first and goes on with its session. When that task is taken again, the made-up tasks start over, as they do after any other run; the task a run was killed over is among the first of them only.
 
 ### Tests
 
-- The queue: every reason a task is held for, the order, tasks that wait for others, and the interrupted task a run takes first.
+- The queue: every reason a task is held for, the order, tasks that wait for others, the interrupted task a run takes first, and the task of a record, which comes before it.
 - The line for toobusy in a reply, the messages a session gets, and what `about` tells: the same messages word for word, the labels of the project, and the times and the counts of the policy.
-- The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it.
-- What is asked of `gh` and of `claude`, argument by argument, and what is made of their answers; a conversation of Claude Code read from a file of the test.
-- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first.
+- The run, with hand-written fakes of the tracker, the assistant, the working copy, the machine and the clock: a task after a task, every outcome, a session that asks and is told, the limits of that, every command, a kill, the limits of usage, a pause and the run after it; the record, written at the start of a session, when its conversation is known and at an outcome, and each case of the run that finds one: a session that still works, one that ended, one that was stopped, one that wrapped up, one whose conversation is gone, a task that is not taken any more, and a failure.
+- What is asked of `gh` and of `claude`, argument by argument, and what is made of their answers; a conversation of Claude Code read from a file of the test; a session of an earlier run that is found, lost or gone; the file of the record.
+- The tape of a run over a run that the test writes: what stays and what is redrawn, the menu, the commands a waiting session brings, a kill, a short and a narrow window. A demo from its first line to its last through the command line, with a clock that makes nobody wait: as a log without a terminal, and as a tape in one; and a demo that is aborted, whose menu names the interrupted task and whose next run takes it first; the menu over a record.

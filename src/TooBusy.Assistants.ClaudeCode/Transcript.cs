@@ -48,6 +48,14 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
     // What the session was refused with when the last thing in its conversation is a usage limit.
     public string? Limit { get; private set; }
 
+    // The session was told something at this moment: what it said before does not count any more.
+    public void From(DateTimeOffset told)
+    {
+        since = told;
+        Reply = null;
+        Limit = null;
+    }
+
     // Reads what was written since the last time. A file that is not there yet, or cannot be read now, has nothing new.
     public void Read()
     {

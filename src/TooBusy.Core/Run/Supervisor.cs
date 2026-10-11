@@ -41,6 +41,9 @@ public sealed class Supervisor(
 
     // A task that was paused takes its session with it: nothing is left to stop when the run is killed after that.
     bool paused;
+
+    // The record of the task that is worked on, as it was written last.
+    TaskRecord? record;
     int done;
 
     // What the pause of a task or a kill said last: it is why the run ended.
@@ -93,28 +96,30 @@ public sealed class Supervisor(
                 return new RunResult(RunEnd.Stopped, done);
             }
 
-            // A task that a usage limit stopped left its changes in the working tree, and they are the only ones
-            // a run starts over.
+            // The record of an earlier run is looked at before the queue. A task that has one left its changes in
+            // the working tree, and they are the only ones a run starts over; a session that wrapped up left none.
             Show(new RunStatus(RunPhase.Preparing, "Checking the working tree…"));
-            var waits = state.LoadPaused();
+            var before = state.Load();
             if (await workspace.ReadAsync(kill) is not { } tree)
                 return Stop("the working tree cannot be read");
-            if (waits is null && tree.Changes > 0)
+            if (tree.Changes > 0 && (before is null || before.State == RecordState.WrappedUp))
                 return Stop("the working tree is not clean: commit or stash the changes first");
 
             Show(new RunStatus(RunPhase.Preparing, "Reading the queue…"));
-            var lineup = TaskLineup.Arrange(await tracker.ReadOpenAsync(plan.Milestone, kill), plan.Rules);
-            if (waits is not null && lineup.Ready.All(task => task.Number != waits.Number))
+            var open = await tracker.ReadOpenAsync(plan.Milestone, kill);
+            var lineup = TaskLineup.Arrange(open, plan.Rules);
+            if (before is not null)
             {
-                if (tree.Changes == 0)
+                // The record is the proof that it was a run that moved the task, so its status holds nothing back.
+                // What was done to the task since does: one that is closed or got a label that keeps it out.
+                var (kept, why) = TaskLineup.Recorded(open, plan.Rules, before.Number);
+                if (kept is null)
                 {
-                    state.ClearPaused();
-                    Say(RunMark.Attention, $"#{waits.Number} was paused by a usage limit, but its changes are no longer in the working tree: the pause is dropped");
+                    await ForgetAsync(before, why!, tree.Changes > 0);
                     continue;
                 }
 
-                var why = lineup.Held.FirstOrDefault(held => held.Task.Number == waits.Number)?.Reason ?? "it is not among the open tasks";
-                return Stop($"the changes of #{waits.Number} wait in the working tree after a usage limit, but the queue does not take it ({why}) · make it a task to take, or commit or discard the changes: a clean working tree drops the pause");
+                lineup = lineup.Taking(kept);
             }
 
             if (first)
@@ -140,44 +145,86 @@ public sealed class Supervisor(
                 continue;
             }
 
-            var task = waits is null ? lineup.Ready[0] : lineup.Ready.First(ready => ready.Number == waits.Number);
+            var task = lineup.Ready[0];
             if (task.Number == last)
                 return Stop($"#{task.Number} came up again after its session");
 
             last = task.Number;
-            if (await DoAsync(task, waits, lineup.Ready.Count + lineup.Later.Count - 1, kill) is { } ended)
+            if (await DoAsync(task, before, lineup.Ready.Count + lineup.Later.Count - 1, kill) is { } ended)
                 return ended;
         }
     }
 
-    // Does one task: null when the run goes on to the next one.
-    async Task<RunResult?> DoAsync(QueueTask task, PausedTask? waits, int queued, CancellationToken kill)
+    // A task of the record that is not gone on with: its session is stopped, so that nothing works on with nobody
+    // watching, and the record is forgotten.
+    async Task ForgetAsync(TaskRecord before, string why, bool changes)
+    {
+        await Quietly(async () =>
+        {
+            if (await assistant.FindAsync(before.Session, CancellationToken.None) is { } session)
+                await session.StopAsync(CancellationToken.None);
+        });
+        state.Clear();
+        Say(RunMark.Attention, $"#{before.Number} was left with a session by an earlier run, but it is not gone on with: {why} · its session is stopped and forgotten"
+            + (changes ? ", and its changes are still in the working tree" : ""));
+    }
+
+    // Does one task: null when the run goes on to the next one. `before` is the record of an earlier run that names
+    // the task: its session is gone on with, in the way it was left.
+    async Task<RunResult?> DoAsync(QueueTask task, TaskRecord? before, int queued, CancellationToken kill)
     {
         var number = task.Number;
         var since = clock.Now;
         var again = task.Has(plan.Rules.Interrupted);
         Show(new RunStatus(RunPhase.Preparing, $"Starting #{number}…") { Task = task, Since = since, Queued = queued });
 
-        IAssistantSession session;
-        string how;
-        if (waits is not null)
+        // The session of the record, how the task is taken with it, and the look at a session that ended with an
+        // outcome while nobody watched: it is not watched, only settled.
+        IAssistantSession? session = null;
+        SessionLook? over = null;
+        var how = "";
+        if (before is not null && await assistant.FindAsync(before.Session, kill) is { } found)
         {
-            // The tracker is told only when the session goes on: a session that does not is tried again by the
-            // next run, with the task as the pause left it.
-            if (await assistant.ResumeAsync(waits.Conversation, Start(task, Briefing.AfterLimit(number)), kill) is not { } resumed)
-                return Stop($"the session of #{number} did not go on after the usage limit · its changes wait in the working tree, and the next run tries again");
+            // A session that the run stopped itself is told to go on; one that was left working is looked at.
+            var message = before.State switch
+            {
+                RecordState.Paused => Briefing.AfterLimit(number),
+                RecordState.WrappedUp => Briefing.AfterAbort(number),
+                _ => null,
+            };
+            how = before.State == RecordState.Paused ? "its session goes on after the usage limit" : "its session goes on after /abort";
+            if (message is null)
+            {
+                var look = await found.LookAsync(kill);
+                var stopped = look.Phase == SessionPhase.Lost || (look.Limit is not null && look.Phase != SessionPhase.Working);
+                if (look.Phase == SessionPhase.Unseen)
+                    return Stop($"the sessions of the assistant cannot be read, so the session of #{number} is left as it is · {found.Open} · the next run looks again");
 
-            session = resumed;
-            state.ClearPaused();
+                if (look.Limit is null && look.Phase is SessionPhase.Ended or SessionPhase.Lost && Outcome.Read(look.Reply) is not null)
+                    (over, how) = (look, "its session ended while nobody watched");
+                else if (stopped)
+                    (message, how) = (look.Limit is null ? Briefing.AfterStop(number) : Briefing.AfterLimit(number), look.Limit is null ? "its session was stopped, and goes on" : "its session goes on after the usage limit");
+                else
+                    how = "its session still works, and is watched again";
+            }
+
+            // The tracker is told only when the session goes on: one that does not is tried again by the next
+            // run, with the task and the record as they are.
+            if (message is not null && !await found.TellAsync(message, kill))
+                return Stop($"the session of #{number} did not go on · {found.Open} · the next run tries again");
+
+            session = found;
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
-            how = "its session goes on after the usage limit";
         }
-        else
+
+        if (session is null)
         {
+            // A record whose session and conversation are gone gives a new session, which is told what it finds.
+            var gone = before is not null;
             await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
             try
             {
-                session = await assistant.StartAsync(Start(task, Briefing.Task(task, again)), kill);
+                session = await assistant.StartAsync(Start(task, Briefing.Task(task, again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp })), kill);
             }
             catch (AssistantException)
             {
@@ -186,13 +233,16 @@ public sealed class Supervisor(
                 throw;
             }
 
-            how = again ? "a new session; the task was interrupted before" : "a new session";
+            how = gone ? "a new session: the conversation of the one before is gone"
+                : again ? "a new session; the task was interrupted before"
+                : "a new session";
         }
 
+        state.Save(record = new TaskRecord(number, session.Trace));
         if (again)
             await tracker.RemoveLabelAsync(number, plan.Rules.Interrupted, kill);
 
-        Say(RunMark.Started, $"#{number} {task.Title} — started · {how} · {session.Open}");
+        Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
         if (plan.Rules.Board)
             Say(RunMark.Note, $"#{number} is In Progress on the board; the session is told that toobusy keeps the tracker");
 
@@ -203,15 +253,15 @@ public sealed class Supervisor(
             Watched watched;
             try
             {
-                watched = await WatchAsync(task, session, since, queued, kill);
+                watched = over is { } ended ? new Watched(ended) : await WatchAsync(task, session, since, queued, kill);
             }
             catch (OperationCanceledException) when (kill.IsCancellationRequested)
             {
                 if (!paused)
                 {
                     await Quietly(() => session.StopAsync(CancellationToken.None));
-                    left = $"#{number} stays In Progress · {session.Open} goes on with it";
-                    Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays In Progress · {session.Open} goes on with it");
+                    left = $"#{number} stays In Progress, and the next run goes on with its session · {session.Open}";
+                    Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays In Progress, and the next run goes on with its session · {session.Open}");
                 }
 
                 throw;
@@ -223,8 +273,8 @@ public sealed class Supervisor(
                 return new RunResult(RunEnd.Limited, done, left);
             }
 
-            (mark, var ended) = await SettleAsync(task, session, watched.Look, since, kill);
-            return ended;
+            (mark, var result) = await SettleAsync(task, session, watched.Look, since, kill);
+            return result;
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
         {
@@ -284,6 +334,8 @@ public sealed class Supervisor(
             Drain();
             kill.ThrowIfCancellationRequested();
 
+            Remember(number, session);
+
             if (aborting && !asked)
             {
                 // A session that works reads the request after its next step. One that waits makes no step, so
@@ -317,6 +369,7 @@ public sealed class Supervisor(
             {
                 look = await session.LookAsync(kill);
                 next = clock.Now + policy.Poll;
+                Remember(number, session);
                 if (look.Phase == SessionPhase.Unseen)
                 {
                     if (!unseen)
@@ -407,6 +460,14 @@ public sealed class Supervisor(
         }
     }
 
+    // What the session is found by is written when it is known and whenever it changes: a look may learn it, and
+    // a session that was told something may be known by another name.
+    void Remember(int number, IAssistantSession session)
+    {
+        if (record?.Session != session.Trace)
+            state.Save(record = new TaskRecord(number, session.Trace));
+    }
+
     // A session ran into a usage limit: the reset is waited for and the session goes on, or its task is paused for
     // the next run. False when it is paused.
     async Task<bool> LimitAsync(QueueTask task, IAssistantSession session, DateTimeOffset since, string refusal, int waits, CancellationToken kill)
@@ -469,10 +530,9 @@ public sealed class Supervisor(
         await Try(() => tracker.AddLabelAsync(number, plan.Rules.Interrupted, cancellationToken));
         await Try(() => tracker.SetStatusAsync(number, BoardStatus.Todo, cancellationToken));
         await Try(() => tracker.CommentAsync(number, Briefing.Paused(why, session.Open), cancellationToken));
-        if (session.Conversation is { } conversation)
-            state.SavePaused(new PausedTask(number, conversation));
-        else
-            missing.Add("its session cannot be gone on with");
+        state.Save(record = new TaskRecord(number, session.Trace, RecordState.Paused));
+        if (session.Trace.Conversation is null)
+            missing.Add("the conversation of its session is not known");
 
         left = $"#{number} is paused: {why}. Its changes stay in the working tree, and the next run goes on with its session";
         Say(RunMark.Paused, $"{left} · {done} done");
@@ -491,20 +551,32 @@ public sealed class Supervisor(
         await Quietly(() => session.StopAsync(kill));
         kill.ThrowIfCancellationRequested();
 
+        // A failure is for the owner: the record is forgotten, and no run goes on with the task by itself.
         if (Outcome.Read(look.Reply) is not { } outcome)
         {
+            state.Clear();
             Say(RunMark.Failed, $"#{number} {task.Title} — ended after {took} without saying how the task went");
             return (RunMark.Failed, Stop($"the session of #{number} did not say how the task went · {session.Open}"));
         }
 
         if (outcome.Kind == OutcomeKind.Failed)
         {
+            state.Clear();
             Say(RunMark.Failed, $"#{number} {task.Title} — failed after {took}: {outcome.Reason ?? "no reason is given"}");
             Quote(outcome.Report, session);
             return (RunMark.Failed, Stop($"#{number} failed · {session.Open}"));
         }
 
-        if (await workspace.ReadAsync(kill) is not { } tree)
+        var tree = await workspace.ReadAsync(kill);
+
+        // The task has come to an outcome, and its record is forgotten before the tracker is told, so that nothing
+        // is told twice. Only a task that was wrapped up keeps it: the next run goes on with the same conversation.
+        if (outcome.Kind == OutcomeKind.Interrupted && tree is { Changes: 0 })
+            state.Save(record = new TaskRecord(number, session.Trace, RecordState.WrappedUp));
+        else
+            state.Clear();
+
+        if (tree is null)
             return (RunMark.Failed, Stop($"the working tree cannot be read after #{number} · {session.Open}"));
         if (tree.Changes > 0)
             return (RunMark.Failed, Stop($"#{number} left changes in the working tree · {session.Open}"));

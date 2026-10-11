@@ -7,10 +7,13 @@ public static class LocalFolder
 {
     public const string DisplayPath = ".toobusy/local";
 
+    // Where the folder of the project at the root is, whether it is there or not.
+    public static string Of(string root) => Path.Combine(root, ".toobusy", "local");
+
     // The folder of the project at the root, made when it is not there.
     public static string Ensure(string root)
     {
-        var folder = Path.Combine(root, ".toobusy", "local");
+        var folder = Of(root);
         Directory.CreateDirectory(folder);
         var ignore = Path.Combine(folder, ".gitignore");
         if (!File.Exists(ignore))

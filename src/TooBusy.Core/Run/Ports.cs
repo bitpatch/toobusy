@@ -9,9 +9,9 @@ public interface IAssistant
     // Starts a session for a task. Throws AssistantException when it does not start.
     Task<IAssistantSession> StartAsync(SessionStart start, CancellationToken cancellationToken);
 
-    // Goes on with the conversation of a session of an earlier run; the message of the start is the next one of
-    // it. Null when it cannot be gone on with.
-    Task<IAssistantSession?> ResumeAsync(string conversation, SessionStart start, CancellationToken cancellationToken);
+    // The session of an earlier run, by what was kept of it: it is looked at, told and stopped as one that was
+    // started here. Null when nothing is left of it: no session that lives, and no conversation to go on with.
+    Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken);
 
     // How much of the usage limits of the assistant is used, as far as it is known.
     UsageLimits ReadLimits();
@@ -20,6 +20,11 @@ public interface IAssistant
 // Task is the number of the task and Name what the session is called among the sessions of the assistant.
 public sealed record SessionStart(int Task, string Name, string Message, ModelChoice Model, string Effort);
 
+// What is kept of a session for a later run. Id is what the assistant knows the session by while it lives, and
+// Conversation what it is gone on with when it does not; either is null while it is not known. Since is when the
+// session was started or told something last: what it said before that does not count.
+public sealed record SessionTrace(string? Id, string? Conversation, DateTimeOffset Since);
+
 public sealed class AssistantException(string message) : Exception(message);
 
 public interface IAssistantSession
@@ -27,8 +32,9 @@ public interface IAssistantSession
     // How the owner opens the session, as a command: every message about a session names it.
     string Open { get; }
 
-    // The conversation of the session, by which a later run goes on with it; null when it cannot be gone on with.
-    string? Conversation { get; }
+    // What a later run finds the session by. It changes as the session does: its conversation is learnt after
+    // its start, and a session that goes on may be known by another name.
+    SessionTrace Trace { get; }
 
     Task<SessionLook> LookAsync(CancellationToken cancellationToken);
 
@@ -118,17 +124,32 @@ public interface IMachine
     void Notify(string text);
 }
 
-// What a run leaves for the next one: the task a usage limit stopped, with the conversation of its session.
+// What a run leaves for the next one: the record of the task it has a session for. It is written as soon as the
+// session is started and forgotten when the task comes to an outcome, so whatever stops a run in between, the next
+// one finds the task and its session.
 public interface IRunState
 {
-    PausedTask? LoadPaused();
+    TaskRecord? Load();
 
-    void SavePaused(PausedTask task);
+    void Save(TaskRecord record);
 
-    void ClearPaused();
+    void Clear();
 }
 
-public sealed record PausedTask(int Number, string Conversation);
+// How the session of a record was left, as far as the run knows.
+public enum RecordState
+{
+    // The session was started and nothing more is known: it works, or something stopped it or the run.
+    Working,
+
+    // A usage limit stopped the session, and the run stopped it for the next one.
+    Paused,
+
+    // The session wrapped the task up after `/abort`: its changes are undone and its report is in the task.
+    WrappedUp,
+}
+
+public sealed record TaskRecord(int Number, SessionTrace Session, RecordState State = RecordState.Working);
 
 // Where a run tells what happens: a line of its log for everything that happened, every task that is over, once,
 // and what is going on right now.

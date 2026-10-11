@@ -30,22 +30,33 @@ public sealed class RunStateFileTests : IDisposable
     }
 
     [Fact]
-    public void ATaskThatIsPausedIsRememberedUntilItIsCleared()
+    public void TheRecordOfATaskIsRememberedUntilItIsCleared()
     {
         var folder = LocalFolder.Ensure(root.FullName);
         var state = new RunStateFile(folder);
-        Assert.Null(state.LoadPaused());
+        var since = new DateTimeOffset(2030, 1, 1, 9, 0, 0, TimeSpan.Zero);
+        Assert.Null(state.Load());
 
-        state.SavePaused(new PausedTask(12, "15555bc6-0c7f-4efb-a0a0-211c72424c97"));
+        state.Save(new TaskRecord(12, new SessionTrace("15555bc6", null, since)));
 
-        Assert.Equal(new PausedTask(12, "15555bc6-0c7f-4efb-a0a0-211c72424c97"), new RunStateFile(folder).LoadPaused());
-        Assert.Equal("""{"task":12,"conversation":"15555bc6-0c7f-4efb-a0a0-211c72424c97"}""", File.ReadAllText(Path.Combine(folder, "paused.json")));
+        Assert.Equal(new TaskRecord(12, new SessionTrace("15555bc6", null, since)), new RunStateFile(folder).Load());
+        Assert.Equal("""{"task":12,"session":"15555bc6","since":"2030-01-01T09:00:00.0000000Z","state":"working"}""", File.ReadAllText(Path.Combine(folder, "session.json")));
 
-        state.ClearPaused();
-        state.ClearPaused();
+        // A record that is written again takes the place of the one before, whole.
+        var paused = new TaskRecord(12, new SessionTrace("15555bc6", "15555bc6-0c7f-4efb-a0a0-211c72424c97", since), RecordState.Paused);
+        state.Save(paused);
 
-        Assert.Null(state.LoadPaused());
-        Assert.False(File.Exists(Path.Combine(folder, "paused.json")));
+        Assert.Equal(paused, new RunStateFile(folder).Load());
+        Assert.False(File.Exists(Path.Combine(folder, "session.json.tmp")));
+
+        state.Save(paused with { State = RecordState.WrappedUp });
+        Assert.Equal(RecordState.WrappedUp, state.Load()!.State);
+
+        state.Clear();
+        state.Clear();
+
+        Assert.Null(state.Load());
+        Assert.False(File.Exists(Path.Combine(folder, "session.json")));
     }
 
     [Theory]
@@ -53,13 +64,21 @@ public sealed class RunStateFileTests : IDisposable
     [InlineData("not json")]
     [InlineData("[12]")]
     [InlineData("""{"task":"12","conversation":"c"}""")]
-    [InlineData("""{"task":12}""")]
-    [InlineData("""{"task":12,"conversation":""}""")]
-    public void AFileThatSaysNothingUsefulIsNoPause(string text)
+    [InlineData("""{"conversation":"c"}""")]
+    public void AFileThatSaysNothingUsefulIsNoRecord(string text)
     {
         var folder = LocalFolder.Ensure(root.FullName);
-        File.WriteAllText(Path.Combine(folder, "paused.json"), text);
+        File.WriteAllText(Path.Combine(folder, "session.json"), text);
 
-        Assert.Null(new RunStateFile(folder).LoadPaused());
+        Assert.Null(new RunStateFile(folder).Load());
+    }
+
+    [Fact]
+    public void ARecordThatNamesOnlyItsTaskIsOneOfASessionThatIsNotKnown()
+    {
+        var folder = LocalFolder.Ensure(root.FullName);
+        File.WriteAllText(Path.Combine(folder, "session.json"), """{"task":12,"session":"","state":"later"}""");
+
+        Assert.Equal(new TaskRecord(12, new SessionTrace(null, null, DateTimeOffset.MinValue)), new RunStateFile(folder).Load());
     }
 }

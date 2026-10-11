@@ -154,6 +154,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
+        Assert.Null(state.Record);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
         Assert.Equal([(3, RunMark.Failed)], Ended);
@@ -241,6 +242,9 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(["status 3 InProgress"], tracker.Did);
         Assert.Single(assistant.Started);
         Assert.Equal([(3, RunMark.Failed, 3)], log.Ends);
+
+        // A failure is for the owner: no run goes on with the task by itself.
+        Assert.Equal([Record(3), null], state.Written);
     }
 
     [Fact]
@@ -253,6 +257,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
         Assert.Contains("✖ #3 Task 3 — ended after 3 s without saying how the task went", log.Lines);
+        Assert.Null(state.Record);
     }
 
     [Fact]
@@ -512,6 +517,9 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains("■ #3 Task 3 — interrupted after 9 s: the report is in the task, and the next run takes it first", log.Lines);
         Assert.Contains("  │ Undone: a.cs.", log.Lines);
         Assert.Equal("■ Stopped after /abort · 0 done", log.Lines[^2]);
+
+        // The record stays, and says that the session wrapped up: the next run goes on with its conversation.
+        Assert.Equal(Record(3, RecordState.WrappedUp), state.Record);
     }
 
     [Fact]
@@ -616,10 +624,13 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress · fake attach 3 goes on with it"), result);
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress, and the next run goes on with its session · fake attach 3"), result);
         Assert.Equal(1, session.Stopped);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
-        Assert.Contains("■ Killed the session of #3: the task stays In Progress · fake attach 3 goes on with it", log.Lines);
+        Assert.Contains("■ Killed the session of #3: the task stays In Progress, and the next run goes on with its session · fake attach 3", log.Lines);
+
+        // The record of the task stays: it is what the next run goes on by.
+        Assert.Equal(Record(3), state.Record);
         Assert.False(machine.Awake);
         Assert.Equal([(3, RunMark.Interrupted)], Ended);
     }
@@ -741,7 +752,7 @@ public sealed class SupervisorTests : IDisposable
                 "▶ #3 goes on after the reset of the limit · fake attach 3",
             ],
             log.Lines.Skip(3).Take(3));
-        Assert.Null(state.Paused);
+        Assert.Null(state.Record);
         Assert.Contains(log.Statuses, status => status.Phase == RunPhase.WaitingForLimit && status.Task?.Number == 3 && status.Until == FakeClock.Start + TimeSpan.FromMinutes(61));
     }
 
@@ -769,7 +780,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Limited, 0, "#3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session"), result);
         Assert.Equal(2, session.Told.Count);
         Assert.Equal(["status 3 InProgress", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
-        Assert.Equal(new PausedTask(3, "conversation-3"), state.Paused);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Equal([(3, RunMark.Paused)], Ended);
         Assert.StartsWith("**Stopped by a usage limit** (the limit did not reset after 2 waits).", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("‖ #3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
@@ -789,7 +800,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(RunEnd.Limited, result.End);
         Assert.Contains("‖ #3 is paused: the weekly limit is spent, it resets 2030-01-02 09:00 UTC. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
-        Assert.NotNull(state.Paused);
+        Assert.Equal(RecordState.Paused, state.Record?.State);
     }
 
     [Fact]
@@ -805,7 +816,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(session.Told);
         Assert.Contains("‖ #3 waits for a limit: it is paused now, and the next run goes on with its session", log.Lines);
         Assert.Contains(log.Lines, line => line.StartsWith("‖ #3 is paused: toobusy was stopped while it waited for the limit.", StringComparison.Ordinal));
-        Assert.Equal(new PausedTask(3, "conversation-3"), state.Paused);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
     }
 
     [Fact]
@@ -818,7 +829,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(RunEnd.Killed, result.End);
-        Assert.Equal(new PausedTask(3, "conversation-3"), state.Paused);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Contains("label 3 +interrupted", tracker.Did);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith("■ Killed", StringComparison.Ordinal));
     }
@@ -834,14 +845,144 @@ public sealed class SupervisorTests : IDisposable
 
         await RunAsync();
 
-        Assert.Null(state.Paused);
-        Assert.Contains("▲ The pause of #3 is not whole: The tracker refused: comment 3. · its session cannot be gone on with · set it right by hand before the next run", log.Lines);
+        Assert.Equal(new TaskRecord(3, new SessionTrace("fake-3", null, FakeClock.Start), RecordState.Paused), state.Record);
+        Assert.Contains("▲ The pause of #3 is not whole: The tracker refused: comment 3. · the conversation of its session is not known · set it right by hand before the next run", log.Lines);
+    }
+
+    [Fact]
+    public async Task TheRecordIsWrittenWhenASessionStartsAndForgottenWhenTheTaskComesToAnOutcome()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Add(7);
+        TaskRecord? atWork = null;
+        assistant.Session(3).Works(and: () => atWork = state.Record).Ends(Done);
+        assistant.Session(5).Works().Ends("Half of it.\nTOOBUSY: partial");
+        assistant.Session(7).Works().Ends("Which key?\nTOOBUSY: owner");
+
+        await RunAsync();
+
+        Assert.Equal(Record(3), atWork);
+        Assert.Equal([Record(3), null, Record(5), null, Record(7), null], state.Written);
+    }
+
+    [Fact]
+    public async Task AConversationThatIsKnownOnlyLaterIsWrittenWhenItIsKnown()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3);
+        session.Conversation = null;
+        session.Works(2).Works(and: () => session.Conversation = "conversation-3").Works().Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal([new TaskRecord(3, new SessionTrace("fake-3", null, FakeClock.Start)), Record(3), null], state.Written);
+    }
+
+    [Fact]
+    public async Task ASessionThatStillWorksIsTakenOverAndWatchedWhateverTheStatusOfItsTask()
+    {
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Works(2).Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([Record(5).Session], assistant.Found);
+        Assert.Empty(session.Told);
+        Assert.Equal([3], assistant.Started.Select(started => started.Task));
+        Assert.Equal(["status 5 InProgress", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(4));
+        Assert.Equal(
+            [
+                "✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort",
+                "→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5",
+            ],
+            log.Lines.Take(2));
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
+    public async Task ASessionThatEndedWithAnOutcomeWhileNobodyWatchedIsSettledAsUsual()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Ends("Half of it.\nTOOBUSY: partial");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal(1, session.Looks);
+        Assert.Empty(session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session ended while nobody watched · fake attach 5", log.Lines);
+        Assert.Contains("◐ #5 Task 5 — done in part in 0 s", log.Lines);
+        Assert.Equal(["status 5 InProgress", "create 100", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
+    public async Task ASessionThatFailedWhileNobodyWatchedStopsTheRunAndIsNotGoneOnWithAgain()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        assistant.Session(5).Lost("No way.\nTOOBUSY: failed the tests do not pass");
+
+        var result = await RunAsync();
+
+        Assert.Equal("#5 failed · fake attach 5", result.Why);
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
+    public async Task ASessionThatWasStoppedGoesOnWithTheSameConversationOverItsChanges()
+    {
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        workspace.Next.Enqueue(new WorkspaceState(2, 0));
+        var session = assistant.Session(5).Lost("I was about to").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([Briefing.AfterStop(5)], session.Told);
+        Assert.Equal([3], assistant.Started.Select(started => started.Task));
+        Assert.Contains("→ #5 Task 5 — taken again · its session was stopped, and goes on · fake attach 5", log.Lines);
+        Assert.Contains("✔ #5 Task 5 — done in 3 s", log.Lines);
+    }
+
+    [Fact]
+    public async Task ASessionThatALimitStoppedWhileNobodyWatchedIsToldThatItHasReset()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Limit().Then().Works().Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal([Briefing.AfterLimit(5)], session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session goes on after the usage limit · fake attach 5", log.Lines);
+    }
+
+    [Fact]
+    public async Task ASessionThatWaitsForTheOwnerIsTakenOverAndToldToGoOnAlone()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Asks().Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal([Briefing.Alone(5)], session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
     }
 
     [Fact]
     public async Task ThePausedTaskGoesFirstWithItsSessionAndItsChanges()
     {
-        state.Paused = new PausedTask(5, "conversation-of-yesterday");
+        state.Record = Record(5, RecordState.Paused);
         tracker.Add(3);
         tracker.Add(5, labels: ["feature", "interrupted"]);
         workspace.Next.Enqueue(new WorkspaceState(2, 0));
@@ -849,54 +990,142 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
-        var (conversation, start) = Assert.Single(assistant.Resumed);
-        Assert.Equal(("conversation-of-yesterday", 5, Briefing.AfterLimit(5)), (conversation, start.Task, start.Message));
+        Assert.Equal([Briefing.AfterLimit(5)], assistant.Session(5).Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
         Assert.Equal(["status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(5));
-        Assert.Null(state.Paused);
-        Assert.Contains("→ #5 Task 5 — started · its session goes on after the usage limit · fake attach 5", log.Lines);
+        Assert.Null(state.Record);
+        Assert.Contains("→ #5 Task 5 — taken again · its session goes on after the usage limit · fake attach 5", log.Lines);
     }
 
     [Fact]
-    public async Task APauseWhoseChangesAreGoneIsDropped()
+    public async Task AfterAnAbortTheNextRunGoesOnWithTheSameConversation()
     {
-        state.Paused = new PausedTask(5, "conversation-of-yesterday");
+        state.Record = Record(5, RecordState.WrappedUp);
+        tracker.Add(3);
+        tracker.Add(5, labels: ["feature", "interrupted"]);
+        var session = assistant.Session(5);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([Briefing.AfterAbort(5)], session.Told);
+        Assert.Equal([3], assistant.Started.Select(started => started.Task));
+        Assert.Equal(["status 5 InProgress", "label 5 -interrupted"], tracker.Did.Take(2));
+        Assert.Contains("→ #5 Task 5 — taken again · its session goes on after /abort · fake attach 5", log.Lines);
+    }
+
+    [Fact]
+    public async Task AfterAnAbortANewSessionStartsWithTheReportOnlyWhenTheConversationIsGone()
+    {
+        state.Record = Record(5, RecordState.WrappedUp);
+        tracker.Add(5, labels: ["feature", "interrupted"]);
+        assistant.Gone = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        var start = Assert.Single(assistant.Started);
+        Assert.Contains("- This task was interrupted before.", start.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("its conversation is gone", start.Message, StringComparison.Ordinal);
+        Assert.Contains("→ #5 Task 5 — taken again · a new session: the conversation of the one before is gone · fake attach 5", log.Lines);
+        Assert.Equal([Record(5), null], state.Written);
+    }
+
+    [Theory]
+    [InlineData(RecordState.Working)]
+    [InlineData(RecordState.Paused)]
+    public async Task ASessionWhoseConversationIsGoneGivesANewOneThatIsToldWhatItFinds(RecordState left)
+    {
+        state.Record = Record(5, left);
+        tracker.Add(5, labels: left == RecordState.Paused ? ["feature", "interrupted"] : null, status: left == RecordState.Paused ? BoardStatus.Todo : BoardStatus.InProgress);
+        workspace.Next.Enqueue(new WorkspaceState(2, 0));
+        assistant.Gone = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        var start = Assert.Single(assistant.Started);
+        Assert.Contains("- A session worked on this task before, and its conversation is gone: it left no report.", start.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("- This task was interrupted before.", start.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ATaskOfTheRecordThatIsClosedIsNotTakenAndTheRecordIsForgotten()
+    {
+        state.Record = Record(5);
         tracker.Add(3);
 
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Null(state.Paused);
-        Assert.Empty(assistant.Resumed);
-        Assert.Equal("▲ #5 was paused by a usage limit, but its changes are no longer in the working tree: the pause is dropped", log.Lines[0]);
+        Assert.Null(state.Record);
+        Assert.Equal(1, assistant.Session(5).Stopped);
+        Assert.Equal([3], assistant.Started.Select(started => started.Task));
+        Assert.Equal("▲ #5 was left with a session by an earlier run, but it is not gone on with: it is not among the open tasks · its session is stopped and forgotten", log.Lines[0]);
     }
 
-    [Fact]
-    public async Task APauseThatTheQueueDoesNotTakeStopsTheRunWhileItsChangesWait()
+    [Theory]
+    [InlineData("needs-owner", "it waits for the owner: it has the needs-owner label")]
+    [InlineData("manual", "it has the manual label")]
+    public async Task ATaskOfTheRecordThatGotALabelThatKeepsItOutIsNotTaken(string label, string why)
     {
-        state.Paused = new PausedTask(5, "conversation-of-yesterday");
-        tracker.Add(5, labels: ["feature", "manual"]);
+        state.Record = Record(5, RecordState.Paused);
+        tracker.Add(3);
+        tracker.Add(5, labels: ["feature", label]);
         workspace.State = new WorkspaceState(1, 0);
 
         var result = await RunAsync();
 
-        Assert.StartsWith("the changes of #5 wait in the working tree after a usage limit, but the queue does not take it (it has the manual label)", result.Why, StringComparison.Ordinal);
-        Assert.NotNull(state.Paused);
+        // Its changes are nobody's now: the run stops over them, as over any others.
+        Assert.Equal("the working tree is not clean: commit or stash the changes first", result.Why);
+        Assert.Null(state.Record);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(tracker.Did);
+        Assert.Equal($"▲ #5 was left with a session by an earlier run, but it is not gone on with: {why} · its session is stopped and forgotten, and its changes are still in the working tree", log.Lines[0]);
     }
 
     [Fact]
-    public async Task ASessionThatDoesNotGoOnAfterAPauseIsLeftForTheNextRun()
+    public async Task ASessionThatDoesNotGoOnIsLeftForTheNextRun()
     {
-        state.Paused = new PausedTask(5, "conversation-of-yesterday");
+        state.Record = Record(5, RecordState.Paused);
         tracker.Add(5, labels: ["feature", "interrupted"]);
         workspace.State = new WorkspaceState(1, 0);
-        assistant.RefuseToResume = true;
+        assistant.Session(5).Deaf = true;
 
         var result = await RunAsync();
 
-        Assert.StartsWith("the session of #5 did not go on after the usage limit", result.Why, StringComparison.Ordinal);
-        Assert.NotNull(state.Paused);
+        Assert.Equal("the session of #5 did not go on · fake attach 5 · the next run tries again", result.Why);
+        Assert.Equal(Record(5, RecordState.Paused), state.Record);
         Assert.Empty(tracker.Did);
+    }
+
+    [Fact]
+    public async Task WhileTheSessionsCannotBeReadTheSessionOfTheRecordIsLeftAsItIs()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Unseen();
+
+        var result = await RunAsync();
+
+        Assert.Equal("the sessions of the assistant cannot be read, so the session of #5 is left as it is · fake attach 5 · the next run looks again", result.Why);
+        Assert.Equal(Record(5), state.Record);
+        Assert.Empty(session.Told);
+        Assert.Empty(tracker.Did);
+    }
+
+    [Fact]
+    public async Task ChangesInTheTreeAreNotThoseOfASessionThatWrappedUp()
+    {
+        state.Record = Record(5, RecordState.WrappedUp);
+        tracker.Add(5, labels: ["feature", "interrupted"]);
+        workspace.State = new WorkspaceState(1, 0);
+
+        var result = await RunAsync();
+
+        Assert.Equal("the working tree is not clean: commit or stash the changes first", result.Why);
+        Assert.Equal(Record(5, RecordState.WrappedUp), state.Record);
+        Assert.Empty(assistant.Found);
     }
 
     [Fact]
@@ -1005,6 +1234,10 @@ public sealed class SupervisorTests : IDisposable
 
     // The tasks that were told to be over, each with its mark.
     IEnumerable<(int Task, RunMark Mark)> Ended => log.Ends.Select(ended => (ended.Task, ended.Mark));
+
+    // The record of a task as a run writes it for the session the fake assistant gives the task.
+    static TaskRecord Record(int task, RecordState left = RecordState.Working) =>
+        new(task, new SessionTrace($"fake-{task}", $"conversation-{task}", FakeClock.Start), left);
 
     Supervisor Run => run ??= new Supervisor(tracker, assistant, workspace, state, machine, clock, plan, policy);
 

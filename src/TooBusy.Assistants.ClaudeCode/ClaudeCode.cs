@@ -52,14 +52,18 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         return new Session(this, id, null, since);
     }
 
-    public async Task<IAssistantSession?> ResumeAsync(string conversation, SessionStart start, CancellationToken cancellationToken)
+    // A session of an earlier run is the one of the list that has its name or its conversation. Nothing is left
+    // of it when no process has it and its conversation is not known or is not on this machine any more. While
+    // the list cannot be read nothing is known, and the session says so when it is looked at.
+    public async Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken)
     {
-        if (!File.Exists(folders.Transcript(conversation)))
+        var listed = await ListAsync(cancellationToken);
+        var found = listed is null ? null : Session.Find(listed, trace.Id, trace.Conversation);
+        var conversation = trace.Conversation ?? found?.Conversation;
+        if (listed is not null && found is not { Alive: true } && (conversation is null || !File.Exists(folders.Transcript(conversation))))
             return null;
 
-        Forget();
-        var session = new Session(this, null, conversation, clock.Now);
-        return await session.TellAsync(start.Message, cancellationToken) ? session : null;
+        return new Session(this, found?.Id ?? trace.Id, conversation, trace.Since, earlier: true);
     }
 
     // The limits as the status line of the last session told of them; nothing is known before a session has run.
@@ -147,18 +151,22 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
 
     // A background session. It is known by the short name Claude Code gave it; its conversation, which later runs go
     // on with it by, is learnt from the list of the sessions.
-    sealed class Session(ClaudeCode claude, string? id, string? conversation, DateTimeOffset since) : IAssistantSession
+    //
+    // A session of an earlier run has been listed for long: a list that is silent or lacks it is believed at once.
+    sealed class Session(ClaudeCode claude, string? id, string? conversation, DateTimeOffset since, bool earlier = false) : IAssistantSession
     {
         string? id = id;
         Transcript? transcript;
 
         // Since when the list is silent, and since when it lacks the session; null when neither is so.
-        DateTimeOffset? silent;
-        DateTimeOffset? missing;
+        DateTimeOffset? silent = earlier ? DateTimeOffset.MinValue : null;
+        DateTimeOffset? missing = earlier ? DateTimeOffset.MinValue : null;
 
         public string Open => $"claude attach {id ?? Conversation}";
 
-        public string? Conversation { get; private set; } = conversation;
+        public SessionTrace Trace => new(id, Conversation, since);
+
+        string? Conversation { get; set; } = conversation;
 
         public async Task<SessionLook> LookAsync(CancellationToken cancellationToken)
         {
@@ -171,7 +179,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 if (now - silent >= Tolerance)
                     phase = SessionPhase.Unseen;
             }
-            else if (Find(listed) is not { } found)
+            else if (Find(listed, id, Conversation) is not { } found)
             {
                 // A session that has just started is not always listed at once.
                 silent = null;
@@ -200,10 +208,13 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
 
         public async Task<bool> TellAsync(string message, CancellationToken cancellationToken)
         {
+            // A request that waits for the session was for what it did before the message.
+            var told = claude.clock.Now;
+            claude.Forget();
             for (var attempt = 0; attempt < Tries; attempt++)
             {
                 // A session goes on only when nothing has it: it is stopped first, and waited for.
-                if (await claude.ListAsync(cancellationToken) is { } listed && Find(listed) is { } found)
+                if (await claude.ListAsync(cancellationToken) is { } listed && Find(listed, id, Conversation) is { } found)
                 {
                     Conversation ??= found.Conversation;
                     if (found.Alive)
@@ -228,9 +239,12 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                     continue;
                 }
 
+                // What the session said before the message does not count from here on.
                 id = woken;
                 silent = null;
                 missing = null;
+                since = told;
+                transcript?.From(told);
                 return true;
             }
 
@@ -254,8 +268,8 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 await claude.AskAsync(["stop", id], cancellationToken);
         }
 
-        Listed? Find(List<Listed> listed) =>
-            listed.FirstOrDefault(entry => id is not null && entry.Id == id) ?? listed.LastOrDefault(entry => Conversation is not null && entry.Conversation == Conversation);
+        public static Listed? Find(List<Listed> listed, string? id, string? conversation) =>
+            listed.FirstOrDefault(entry => id is not null && entry.Id == id) ?? listed.LastOrDefault(entry => conversation is not null && entry.Conversation == conversation);
 
         async Task StopAndWaitAsync(string running, CancellationToken cancellationToken)
         {

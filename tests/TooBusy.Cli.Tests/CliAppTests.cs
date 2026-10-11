@@ -193,7 +193,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.StartsWith("Demo: nothing is changed." + Environment.NewLine + "✻ v0.1.0 (made up) · 5 tasks in the queue", output, StringComparison.Ordinal);
+        Assert.StartsWith("Demo: nothing is changed." + Environment.NewLine + "✻ v0.1.0 (made up) · 6 tasks in the queue", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -216,13 +216,14 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             [
                 "",
+                " ✔ #100 Rename the settings page  0:06",
                 " ✔ #101 Show the total of an order in its header  0:09",
                 " ✔ #102 Export the orders as a file  0:21",
                 " ◐ #103 Fix the rounding of a discount  0:10",
                 " ✔ #104 Update the dependencies  0:16",
                 " ✔ #105 Describe the export in the manual  0:07",
                 "",
-                " 5 tasks in 63 s · 4 done · 1 done in part",
+                " 6 tasks in 69 s · 5 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             rows.Skip(3));
@@ -266,9 +267,15 @@ public sealed class CliAppTests : IDisposable
         var rows = Scroll.Read(output).Rows.Where(row => row.Length > 0).ToList();
         Assert.Matches(@"^ ■ #12 Export the data  [\d:]+$", rows[1]);
         Assert.Matches(@"^ 1 task in .+ · 1 interrupted$", rows[2]);
-        Assert.Equal(" ■ Killed: #12 stays In Progress · claude attach abc12345 goes on with it", rows[3]);
+        Assert.Equal(" ■ Killed: #12 stays In Progress, and the next run goes on with its session · claude attach abc12345", rows[3]);
         Assert.Equal(4, rows.Count);
         Assert.Contains(processes.Asked, asked => asked.Command == "claude" && asked.Arguments.Contains("stop"));
+
+        // The task and its session are written down on the machine, and nowhere git sees: the next run goes on by them.
+        using var record = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "local", "session.json")));
+        Assert.Equal(
+            (12, "abc12345", "abc12345-0000", "working"),
+            (record.RootElement.GetProperty("task").GetInt32(), record.RootElement.GetProperty("session").GetString(), record.RootElement.GetProperty("conversation").GetString(), record.RootElement.GetProperty("state").GetString()));
     }
 
     [Fact]
@@ -994,6 +1001,30 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOfTheMenuNamesTheTaskThatAnEarlierRunLeftWithASession()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // A record of the task that waits for another: a run goes on with it before any other, and it counts.
+        var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local"));
+        File.WriteAllText(Path.Combine(local.FullName, "session.json"), """{"task":13,"session":"abc12345","since":"2030-01-01T09:00:00.0000000Z","state":"working"}""");
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments[1] == "graphql" => "total\t2\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n"
+                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\n",
+            _ => "",
+        }, ""));
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("❯ Run        interrupted: #13 Describe the export", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunOfTheMenuOpensNoRunThatWouldTakeNoTask()
     {
         GitRepository();
@@ -1033,9 +1064,10 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
 
-        // Straight to the menu: the run, which comes back to the menu by itself when it is over, and out.
+        // Straight to the menu, which names the task a run was killed over: the run, which goes on with it and
+        // comes back to the menu by itself when it is over, and out.
         var keys = new Keys()
-            .Hold(() => Shown("5 tasks")).Press(Keys.Enter)
+            .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Enter)
             .Hold(() => Shown("What to do", times: 2)).Press(Keys.Up, Keys.Enter);
 
         var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
@@ -1048,22 +1080,24 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
-        Assert.Contains("❯ Run        5 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run        interrupted: #100 Rename the settings page", output, StringComparison.Ordinal);
 
-        // The menu that the run comes back to says how the run went.
-        Assert.Contains("5 tasks in 63 s · 4 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
+        // The menu that the run comes back to says how the run went, and counts the tasks that are made up anew.
+        Assert.Contains("❯ Run        5 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("6 tasks in 69 s · 5 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
 
         // The screen is left for the run and entered again for the menu; the tasks of the run stay in the history
         // of the terminal, and only what else there is to say is printed under them.
         Assert.Equal(2, output.Split("\u001b[?1049h").Length - 1);
         Assert.Equal(
             [
+                " ✔ #100 Rename the settings page  0:06",
                 " ✔ #101 Show the total of an order in its header  0:09",
                 " ✔ #102 Export the orders as a file  0:21",
                 " ◐ #103 Fix the rounding of a discount  0:10",
                 " ✔ #104 Update the dependencies  0:16",
                 " ✔ #105 Describe the export in the manual  0:07",
-                " 5 tasks in 63 s · 4 done · 1 done in part",
+                " 6 tasks in 69 s · 5 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             Scroll.Read(output).Rows.Where(row => row.Length > 0).Skip(1));
@@ -1076,15 +1110,15 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
 
-        // The run is aborted while the first task is worked on. The menu it comes back to says which task was
+        // The run is aborted while the first new task is worked on. The menu it comes back to says which task was
         // interrupted instead of the number of tasks; Run takes that task first, and when the run is over the tasks
-        // are counted as they were.
+        // are counted.
         var keys = new Keys()
-            .Hold(() => Shown("5 tasks")).Press(Keys.Enter)
+            .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Enter)
             .Hold(() => Shown("Read src/Orders/Order.cs")).Type("/")
             .Hold(() => Shown("❯ stop")).Press(Keys.Down, Keys.Enter)
             .Hold(() => Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
-            .Hold(() => Shown("5 tasks", times: 2)).Press(Keys.Up, Keys.Enter);
+            .Hold(() => Shown("5 tasks")).Press(Keys.Up, Keys.Enter);
         var context = Context(null) with
         {
             Clock = new PacedClock(),
@@ -1111,16 +1145,20 @@ public sealed class CliAppTests : IDisposable
 
         var (exit, output, _) = await RunAsync("run", "--demo");
 
-        // The whole of a demo: a task that is done, a session that asks and is told to go on alone, a task done in
-        // part whose rest is a new task for the owner, a usage limit that is waited out, a task that opened after
-        // another one, and the tasks that are held.
+        // The whole of a demo: a task whose session a kill stopped and which goes on with it, a task that is done, a
+        // session that asks and is told to go on alone, a task done in part whose rest is a new task for the owner,
+        // a usage limit that is waited out, a task that opened after another one, and the tasks that are held.
         Assert.Equal(0, exit);
         Assert.Equal(
             """
             Demo: nothing is changed.
-            ✻ v0.1.0 (made up) · 5 tasks in the queue · the assistant's own model · high effort
+            ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort
               Opens later: #105 after #102
               Held: #106 it has the manual label · #107 its status is In Progress
+            → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
+              #100 is In Progress on the board; the session is told that toobusy keeps the tracker
+            ✔ #100 Rename the settings page — done in 6 s
+              #100 is closed, with the report of the session as its comment
             → #101 Show the total of an order in its header — started · a new session · claude attach 4f2a101 (made up)
               #101 is In Progress on the board; the session is told that toobusy keeps the tracker
             ✔ #101 Show the total of an order in its header — done in 9 s
@@ -1149,8 +1187,8 @@ public sealed class CliAppTests : IDisposable
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
               Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label
-            ✔ No task is left · 5 done
-              Worked 63 s
+            ✔ No task is left · 6 done
+              Worked 69 s
 
             """.ReplaceLineEndings(),
             output);

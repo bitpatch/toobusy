@@ -20,6 +20,9 @@ public class AboutTests
         Assert.Contains($"```text\n{Briefing.Alone(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterLimit(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.WrapUp(12)}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.AfterStop(12)}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.AfterAbort(12)}\n```", text, StringComparison.Ordinal);
+        Assert.Contains("```text\n- A session worked on this task before, and its conversation is gone: it left no report.", text, StringComparison.Ordinal);
         Assert.EndsWith("is the project's to say in its instructions.\n", text, StringComparison.Ordinal);
     }
 
@@ -39,6 +42,7 @@ public class AboutTests
         Assert.Contains("the task gets the `interrupted` label and a comment that starts with `**Stopped by a usage limit**`", text, StringComparison.Ordinal);
         Assert.Contains("| `TOOBUSY: owner` | the working copy is clean | puts the `needs-owner` label on the task", text, StringComparison.Ordinal);
         Assert.Contains("| `TOOBUSY: interrupted` | the working copy is clean | puts the `interrupted` label on the task", text, StringComparison.Ordinal);
+        Assert.Contains("A task that was closed since, or got the `needs-owner` label or a label that keeps a task out, is not taken.", text, StringComparison.Ordinal);
     }
 
     [Fact]

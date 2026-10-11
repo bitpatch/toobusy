@@ -11,7 +11,8 @@ public static class Briefing
 {
     // The first message of a session: the task, the rules of a session without the owner, and how its last reply
     // is to end. The task is named and not passed on: the session reads it in the tracker, whole and as it is now.
-    public static string Task(QueueTask task, bool interrupted)
+    // `lost` is a task that a session worked on before whose conversation is gone, with no report of it.
+    public static string Task(QueueTask task, bool interrupted, bool lost = false)
     {
         var message = new StringBuilder();
         message.Append(CultureInfo.InvariantCulture, $"""
@@ -36,6 +37,14 @@ public static class Briefing
         {
             message.Append("""
                 - This task was interrupted before. The report of that session is the last comment of the task that starts with **Interrupted.**: go on with what it says is left, and do again what it says was undone.
+
+                """);
+        }
+
+        if (lost)
+        {
+            message.Append("""
+                - A session worked on this task before, and its conversation is gone: it left no report. What it changed and did not commit may still be in the working copy: the changes that `git status` shows before you start are its. Look at them with `git diff`, keep what is right, undo what is not, and go on from there.
 
                 """);
         }
@@ -66,6 +75,16 @@ public static class Briefing
     // What a session is told when the usage limit it ran into has reset.
     public static string AfterLimit(int task) => string.Create(CultureInfo.InvariantCulture, $"""
         The usage limit has reset: go on with task #{task} from where you stopped. The uncommitted changes in the working copy are yours. End your reply with a `{Outcome.Mark}` line, as the rules of this session say.
+        """);
+
+    // What a session is told when a later run goes on with it after it was stopped, by a kill or by anything else.
+    public static string AfterStop(int task) => string.Create(CultureInfo.InvariantCulture, $"""
+        toobusy was stopped while you worked, and it runs again: go on with task #{task} from where you stopped. The uncommitted changes in the working copy are yours. The rules of this session hold as before: nobody will answer, and your last reply ends with a `{Outcome.Mark}` line.
+        """);
+
+    // What a session that wrapped its task up after `/abort` is told when a later run goes on with it.
+    public static string AfterAbort(int task) => string.Create(CultureInfo.InvariantCulture, $"""
+        toobusy runs again: go on with task #{task}. You wrapped it up when the owner stopped the run, and your report is the last comment of the task that starts with **Interrupted.**: do again what you undid, and do what is left. The rules of this session hold as before: commit and push the finished work as the instructions of the project say, and end your last reply with a `{Outcome.Mark}` line.
         """);
 
     // What a session is told when the owner aborts the run.

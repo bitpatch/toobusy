@@ -35,7 +35,7 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(["--bg", "--permission-mode", "auto", "--permission-prompts", "none", "--settings"], arguments.Take(6));
         Assert.Equal(["--model", "opus", "--effort", "high", "-n", "#12 Export the data", "Do the task."], arguments.Skip(7));
         Assert.Equal("claude attach 15555bc6", session.Open);
-        Assert.Null(session.Conversation);
+        Assert.Equal(new SessionTrace(Id, null, clock.Now), session.Trace);
 
         using var settings = JsonDocument.Parse(arguments[6]);
         var hook = settings.RootElement.GetProperty("hooks").GetProperty("PostToolUse")[0];
@@ -128,7 +128,7 @@ public sealed class ClaudeCodeTests : IDisposable
         var look = await session.LookAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal((phase, asks), (look.Phase, look.Asks));
-        Assert.Equal(Conversation, session.Conversation);
+        Assert.Equal(Conversation, session.Trace.Conversation);
         Assert.Equal(["agents", "--json", "--all"], claude.Asked[^1]);
     }
 
@@ -309,7 +309,7 @@ public sealed class ClaudeCodeTests : IDisposable
             [["agents", "--json", "--all"], ["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"], ["--bg", "--resume", Conversation, "Go on alone."]],
             claude.Asked.Skip(1));
         Assert.Equal(TimeSpan.FromMilliseconds(500), clock.Passed);
-        Assert.Equal(Conversation, session.Conversation);
+        Assert.Equal(Conversation, session.Trace.Conversation);
     }
 
     [Fact]
@@ -373,30 +373,90 @@ public sealed class ClaudeCodeTests : IDisposable
     }
 
     [Fact]
-    public async Task ASessionOfAnEarlierRunGoesOnByItsConversation()
+    public async Task ASessionOfAnEarlierRunThatStillWorksIsFoundAndReadFromWhereItWasStarted()
     {
-        Write(Said("I was stopped by the limit.", at: "2029-12-31T23:00:00Z"));
-        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        var since = clock.Now;
+        Write(Said("An old one.", at: "2029-12-31T23:00:00Z"), Used("Bash", """{"command":"dotnet test"}"""), Said("All pass.\nTOOBUSY: done"));
+        claude.Sessions = Listing(Entry(Id, Conversation, "done", "idle"));
+        clock.Pass(TimeSpan.FromHours(3));
 
-        var session = await Assistant().ResumeAsync(Conversation, Start with { Message = "The limit has reset." }, TestContext.Current.CancellationToken);
+        // The conversation was not known yet when the run before was stopped: the list has it.
+        var session = await Assistant().FindAsync(new SessionTrace(Id, null, since), TestContext.Current.CancellationToken);
 
         Assert.NotNull(session);
-        Assert.Equal(["--bg", "--resume", Conversation, "The limit has reset."], claude.Asked[^1]);
-        Assert.Equal(("claude attach 15555bc6", Conversation), (session.Open, session.Conversation));
-
-        // What it said before this run took it does not count.
-        Assert.Null((await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+        Assert.Equal(("claude attach 15555bc6", new SessionTrace(Id, Conversation, since)), (session.Open, session.Trace));
+        var look = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((SessionPhase.Ended, "All pass.\nTOOBUSY: done", 1), (look.Phase, look.Reply, look.Steps));
+        Assert.All(claude.Asked, arguments => Assert.Equal("agents", arguments[0]));
     }
 
     [Fact]
-    public async Task ASessionWhoseConversationIsGoneCannotGoOn()
+    public async Task ASessionOfAnEarlierRunThatIsNotListedAnyMoreIsLostAtOnce()
     {
-        Assert.Null(await Assistant().ResumeAsync(Conversation, Start, TestContext.Current.CancellationToken));
-        Assert.Empty(claude.Asked);
+        Write(Said("I was about to."));
 
-        Write(Said("Here."));
-        claude.Answer = _ => new ProcessResult(ProcessStatus.Exited, 1, "", "error");
-        Assert.Null(await Assistant().ResumeAsync(Conversation, Start, TestContext.Current.CancellationToken));
+        var session = await Assistant().FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(session);
+        Assert.Equal(SessionPhase.Lost, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
+    }
+
+    [Fact]
+    public async Task ASessionOfAnEarlierRunIsNotKnownWhileTheListCannotBeRead()
+    {
+        claude.List = new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
+
+        var session = await Assistant().FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(session);
+        Assert.Equal(SessionPhase.Unseen, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
+    }
+
+    [Fact]
+    public async Task ASessionOfAnEarlierRunGoesOnByItsConversation()
+    {
+        var since = clock.Now;
+        File.WriteAllText(folders.Request, "{}");
+        Write(Said("I was stopped by the limit.\nTOOBUSY: interrupted"));
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        clock.Pass(TimeSpan.FromHours(3));
+
+        var session = await Assistant().FindAsync(new SessionTrace(Id, Conversation, since), TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+        var before = await session.LookAsync(TestContext.Current.CancellationToken);
+        var told = await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken);
+
+        Assert.Equal((SessionPhase.Lost, "I was stopped by the limit.\nTOOBUSY: interrupted"), (before.Phase, before.Reply));
+        Assert.True(told);
+        Assert.Equal(["--bg", "--resume", Conversation, "The limit has reset."], claude.Asked[^1]);
+        Assert.Equal(new SessionTrace(Id, Conversation, clock.Now), session.Trace);
+
+        // What it said before it was told does not count any more, and a request that waited for it is forgotten.
+        Assert.Null((await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+        Assert.False(File.Exists(folders.Request));
+
+        Write(Said("On it again.", at: "2030-01-01T12:00:05Z"));
+        Assert.Equal("On it again.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+    }
+
+    [Fact]
+    public async Task NothingIsLeftOfASessionThatNoProcessHasAndWhoseConversationIsGone()
+    {
+        var trace = new SessionTrace(Id, Conversation, clock.Now);
+
+        // Not listed, and no conversation on this machine.
+        Assert.Null(await Assistant().FindAsync(trace, TestContext.Current.CancellationToken));
+
+        // Listed as one that was stopped, with its conversation deleted.
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        Assert.Null(await Assistant().FindAsync(trace, TestContext.Current.CancellationToken));
+
+        // Neither its name nor its conversation was ever known.
+        Assert.Null(await Assistant().FindAsync(new SessionTrace(null, null, clock.Now), TestContext.Current.CancellationToken));
+
+        // A session that a process has is there, whatever is written of it yet.
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        Assert.NotNull(await Assistant().FindAsync(trace with { Conversation = null }, TestContext.Current.CancellationToken));
     }
 
     [Fact]

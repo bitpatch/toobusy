@@ -55,6 +55,35 @@ public class TaskLineupTests
     }
 
     [Fact]
+    public void ATaskThatARunHasASessionForIsGoneOnWithWhateverItsStatusAndWhateverItWaitsFor()
+    {
+        QueueTask[] open = [Task(3), Task(5, BoardStatus.InProgress, "In Progress"), Task(7, blockedBy: [5]), Task(9, blockedBy: [3])];
+
+        var (recorded, why) = TaskLineup.Recorded(open, Rules, 5);
+        var lineup = TaskLineup.Arrange(open, Rules).Taking(recorded!);
+
+        Assert.Null(why);
+        Assert.Equal([5, 3], lineup.Ready.Select(task => task.Number));
+        Assert.Equal([9], lineup.Later.Select(later => later.Task.Number));
+        Assert.Equal([(7, "it waits for #5 (its status is In Progress)")], Held(lineup));
+
+        // It is what a run goes on with first, and it counts among the tasks a run would take.
+        Assert.Equal(new QueueOutlook(3, recorded), TaskLineup.Arrange(open, Rules).Outlook(Rules, recorded));
+        Assert.Equal([9, 3], TaskLineup.Arrange(open, Rules).Taking(open[3]).Ready.Select(task => task.Number));
+    }
+
+    [Fact]
+    public void ATaskThatARunHasASessionForIsNotGoneOnWithWhenItIsClosedOrALabelKeepsItOut()
+    {
+        QueueTask[] open = [Task(3, labels: ["feature", "manual"]), Task(5, labels: ["feature", "needs-owner"]), Task(7, labels: ["docs"])];
+
+        Assert.Equal((null, "it has the manual label"), TaskLineup.Recorded(open, Rules, 3));
+        Assert.Equal((null, "it waits for the owner: it has the needs-owner label"), TaskLineup.Recorded(open, Rules, 5));
+        Assert.Equal((null, "it has none of the labels to take: feature, bug"), TaskLineup.Recorded(open, Rules, 7));
+        Assert.Equal((null, "it is not among the open tasks"), TaskLineup.Recorded(open, Rules, 9));
+    }
+
+    [Fact]
     public void ATaskWithABlockingLabelIsHeld()
     {
         var lineup = TaskLineup.Arrange([Task(3, labels: ["feature", "Draft"]), Task(5)], Rules);

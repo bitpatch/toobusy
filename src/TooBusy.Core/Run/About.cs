@@ -19,6 +19,7 @@ public static class About
         var owner = rules is null ? "the label of the owner" : $"the `{rules.Owner}` label";
         var interrupted = rules is null ? "the label of interrupted tasks" : $"the `{rules.Interrupted}` label";
         var again = Briefing.Task(Sample, interrupted: true).Split('\n').First(line => line.StartsWith("- This task was interrupted before.", StringComparison.Ordinal));
+        var lost = Briefing.Task(Sample, interrupted: false, lost: true).Split('\n').First(line => line.StartsWith("- A session worked on this task before", StringComparison.Ordinal));
 
         var text = new StringBuilder();
         text.Append("""
@@ -52,9 +53,10 @@ public static class About
         text.Append(CultureInfo.InvariantCulture, $"""
             - A task that has {owner} waits for the owner and is not taken.
             - A task waits for the open tasks that block it and for its own open sub-tasks.
-            - The tasks that were interrupted are taken first, then the others by their numbers.
+            - The tasks that were interrupted are taken first, then the others by their numbers. A task that an earlier run was stopped over comes before any of them.
             - One task is done at a time, in the working copy of the project itself. The working copy must be clean before a task, and it must be clean after it.
-            - Each task is done by a new session of the assistant, which goes on by itself in the background. Nobody answers its questions or its permission prompts.
+            - Each task is done by a session of the assistant of its own, which goes on by itself in the background. Nobody answers its questions or its permission prompts.
+            - A task is gone on with by the same session whatever stopped the run over it, as told under “When a run goes on with a session”.
 
             ## The tracker is kept by toobusy
 
@@ -94,6 +96,32 @@ public static class About
             {Briefing.AfterLimit(Sample.Number)}
             ```
 
+            ### When a run goes on with a session
+
+            A run writes down the task and its session on the machine as soon as the session is started, and forgets them when the task comes to an outcome. The next run looks at what is written before it reads the queue, and takes that task first, whatever its status. A task that was closed since, or got {owner} or a label that keeps a task out, is not taken.
+
+            - A session that still works, because only toobusy was stopped, is watched again and told nothing.
+            - A session that ended with a line for toobusy while nobody watched is settled as any other, as told under “How a task ends”.
+            - A session that was stopped, as a kill of the run stops it, goes on over the changes it left in the working copy, and is told:
+
+            ```text
+            {Briefing.AfterStop(Sample.Number)}
+            ```
+
+            - A session that wrapped its task up when the owner stopped the run goes on too, and is told:
+
+            ```text
+            {Briefing.AfterAbort(Sample.Number)}
+            ```
+
+            - Where the conversation is gone, a new session is started with the first message. After a wrap-up it has the rule of a task that was interrupted, above; otherwise it has this one:
+
+            ```text
+            {lost}
+            ```
+
+            A session that failed, or whose task did not pass the checks, is not gone on with: that is for the owner.
+
             ### When the owner stops the run at once
 
             The owner can stop a run after the task that is being done, which its session does not notice, or at once. Then the session is told:
@@ -113,7 +141,7 @@ public static class About
             | `{Outcome.Mark} done` | the working copy is clean and every commit is pushed | puts the report into the task as a comment, closes the task and moves it to `Done` |
             | `{Outcome.Mark} partial` | the same | makes a new task of what the reply says after `{Outcome.RestMark}`, its title on that line and its description under it, with {owner}, the labels of the first task that let a task in, and the same milestone; puts the report into the first task as a comment that names the new one, closes it and moves it to `Done` |
             | `{Outcome.Mark} owner` | the working copy is clean | puts {owner} on the task and the report into it as a comment, and moves it back to `Todo`; no run takes it while it has the label |
-            | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first, with a new session |
+            | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
             | `{Outcome.Mark} failed <the reason>` | nothing | stops the run; the task stays in `In Progress` and the working copy as it is, for the owner to look at |
 
             The run stops as well, with the task left as it is, when a check does not pass, and when a session ended its turn without such a line and telling it to go on brought none. The next task is never started on a doubt.

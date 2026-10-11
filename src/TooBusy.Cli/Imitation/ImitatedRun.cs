@@ -4,8 +4,8 @@ using TooBusy.Core.Run;
 namespace TooBusy.Cli.Imitation;
 
 // A run of a demo: the real run over made-up tasks and made-up sessions, with a working tree that is always clean
-// and a machine that is left alone. It shows what a run meets: a task that is done, a session that stops with a
-// question and is told to go on alone, a task done in part whose rest becomes a task for the owner, a usage limit
+// and a machine that is left alone. It shows what a run meets: a task whose session a kill stopped and which goes on
+// with it, a task that is done, a session that stops with a question and is told to go on alone, a task done in part whose rest becomes a task for the owner, a usage limit
 // that is waited out, a task that opens after another, and tasks that are held. Nothing is changed anywhere.
 public static class ImitatedRun
 {
@@ -20,24 +20,13 @@ public static class ImitatedRun
         UnknownLimitWait = TimeSpan.FromSeconds(5),
     };
 
-    // The tracker is the one the demo keeps for the menu and for the runs after this one.
-    public static IQueueRun Open(RunPlan plan, IClock clock, ITaskTracker tasks) =>
-        new Supervisor(tasks, new ImitatedAssistant(clock), new CleanWorkspace(), new ForgottenState(), new QuietMachine(), clock, plan, Pace);
+    // The tracker and the record are those the demo keeps for the menu and for the runs after this one.
+    public static IQueueRun Open(RunPlan plan, IClock clock, ITaskTracker tasks, IRunState state) =>
+        new Supervisor(tasks, new ImitatedAssistant(clock), new CleanWorkspace(), state, new QuietMachine(), clock, plan, Pace);
 
     sealed class CleanWorkspace : IWorkspace
     {
         public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult<WorkspaceState?>(new WorkspaceState(0, 0));
-    }
-
-    sealed class ForgottenState : IRunState
-    {
-        PausedTask? paused;
-
-        public PausedTask? LoadPaused() => paused;
-
-        public void SavePaused(PausedTask task) => paused = task;
-
-        public void ClearPaused() => paused = null;
     }
 
     sealed class QuietMachine : IMachine
@@ -57,18 +46,34 @@ public static class ImitatedRun
     }
 }
 
+// The record of a demo: it is remembered for as long as the demo goes on, and nowhere.
+public sealed class UnwrittenState : IRunState
+{
+    TaskRecord? record;
+
+    public TaskRecord? Load() => record;
+
+    public void Save(TaskRecord record) => this.record = record;
+
+    public void Clear() => record = null;
+}
+
 // The tasks of a demo, made up to fit the rules of the project: each has a label that lets it in, one waits for
 // another, and, where the rules can hold a task, one is held by a label and one by its status. What a run changes
-// is changed here and nowhere else.
+// is changed here and nowhere else. The first tasks of a demo have one more: a task that a run was killed over, which
+// stands as one that is worked on and has a record.
 public sealed class ImitatedTasks : ITaskTracker
 {
+    // The task a run was killed over.
+    public const int Killed = 100;
+
     static readonly string[] Types = ["feature", "bug", "chore", "docs"];
 
     readonly List<QueueTask> open = [];
     readonly Dictionary<int, string> descriptions = [];
     int next = 108;
 
-    public ImitatedTasks(QueueRules rules)
+    public ImitatedTasks(QueueRules rules, bool killed)
     {
         string Type(int kind) => rules.Take.Count > 0 ? rules.Take[kind % rules.Take.Count] : Types[kind];
         void Add(int number, string title, string description, string[] labels, BoardStatus status = BoardStatus.Todo, int[]? after = null)
@@ -78,6 +83,8 @@ public sealed class ImitatedTasks : ITaskTracker
             descriptions[number] = description;
         }
 
+        if (killed)
+            Add(Killed, "Rename the settings page", "The page is called Options in the menu and Settings in its own title. Call it Settings everywhere.", [Type(2)], BoardStatus.InProgress);
         Add(101, "Show the total of an order in its header", "The header of an order shows its number and its date. Add the total, with the currency of the order.", [Type(0)]);
         Add(102, "Export the orders as a file", "The list of the orders gets a button that saves what the list shows as a file.", [Type(0)]);
         Add(103, "Fix the rounding of a discount", "A discount of 12.5% on 9.99 gives 8.74125, and the price is shown as 8.74 in the cart and as 8.75 in the order. Round once, in one place.", [Type(1)]);
@@ -146,7 +153,8 @@ public sealed class ImitatedTasks : ITaskTracker
 // The assistant of a demo. Its sessions are plays written here, one for each made-up task, and they last as long as
 // the clock says: a session works through its steps, each a few seconds long, and then ends its turn, asks, or runs
 // into a usage limit. What it is told starts its next act. A session with a play keeps a plan of it, a step of the
-// plan for each step of the acts it has started: the plan grows when it goes on with the next act.
+// plan for each step of the acts it has started: the plan grows when it goes on with the next act. A session of an
+// earlier run is found stopped, as a kill left it, and plays its play when it is told to go on.
 public sealed class ImitatedAssistant(IClock clock) : IAssistant
 {
     static readonly TimeSpan Reset = TimeSpan.FromSeconds(6);
@@ -159,6 +167,12 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
 
     static readonly Dictionary<int, Act[]> Plays = new()
     {
+        [ImitatedTasks.Killed] =
+        [
+            new(
+                [(2, "Edit src/Settings/SettingsPage.razor"), (2, "Bash: dotnet test"), (2, "Bash: git push")],
+                Ended("The page is called Settings in the menu, in its title and in the manual.\n\n- Went on after toobusy was stopped: the menu was renamed already, the title and the manual were left.\n- Checked with the tests of the pages: 18 pass.\n- Commit f6a7b8c.\n\nTOOBUSY: done")),
+        ],
         [101] =
         [
             new(
@@ -219,8 +233,11 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
         return Task.FromResult<IAssistantSession>(new MadeUpSession(this, start.Task, Plays.GetValueOrDefault(start.Task, Plain)));
     }
 
-    public Task<IAssistantSession?> ResumeAsync(string conversation, SessionStart start, CancellationToken cancellationToken) =>
-        Task.FromResult<IAssistantSession?>(null);
+    // The session of a record is known by the number of its task, which its made-up name ends with.
+    public Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken) =>
+        Task.FromResult<IAssistantSession?>(trace.Id is { } id && id.StartsWith(Name, StringComparison.Ordinal) && int.TryParse(id[Name.Length..], out var task)
+            ? new MadeUpSession(this, task, Plays.GetValueOrDefault(task, Plain), earlier: true)
+            : null);
 
     // The near window starts anew a few seconds after a session ran into it.
     public UsageLimits ReadLimits()
@@ -232,13 +249,23 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
 
     static SessionLook Ended(string reply) => new(SessionPhase.Ended, Reply: reply);
 
+    // What the name of a made-up session starts with.
+    const string Name = "4f2a";
+
+    // A session that a kill stopped: it does nothing until it is told to go on.
+    static readonly Act Stopped = new([], new SessionLook(SessionPhase.Lost));
+
+    // What is kept of the session of the task a run was killed over.
+    public static SessionTrace Trace(int task, DateTimeOffset since) => new($"{Name}{task}", null, since);
+
     // An act of a play: the steps the session makes, each for so many seconds, and how the act ends.
     sealed record Act((int Seconds, string Step)[] Steps, SessionLook End);
 
-    sealed class MadeUpSession(ImitatedAssistant assistant, int task, Act[] acts) : IAssistantSession
+    sealed class MadeUpSession(ImitatedAssistant assistant, int task, Act[] acts, bool earlier = false) : IAssistantSession
     {
-        Act act = acts[0];
-        int played;
+        readonly DateTimeOffset started = assistant.clock.Now;
+        Act act = earlier ? Stopped : acts[0];
+        int played = earlier ? -1 : 0;
         DateTimeOffset since = assistant.clock.Now;
 
         // The steps of the acts that are over, and the size of the conversation they left.
@@ -246,13 +273,13 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
 
         // The plan: whether the act that is played is of the play, and so of the plan, how many steps the plan
         // has, and how many of them the acts that are over have done.
-        bool planned = acts != Plain;
-        int cells = acts != Plain ? acts[0].Steps.Length : 0;
+        bool planned = acts != Plain && !earlier;
+        int cells = acts != Plain && !earlier ? acts[0].Steps.Length : 0;
         int done;
 
-        public string Open => $"claude attach 4f2a{task} (made up)";
+        public string Open => $"claude attach {Name}{task} (made up)";
 
-        public string? Conversation => null;
+        public SessionTrace Trace => ImitatedAssistant.Trace(task, started);
 
         public Task<SessionLook> LookAsync(CancellationToken cancellationToken)
         {
@@ -275,7 +302,7 @@ public sealed class ImitatedAssistant(IClock clock) : IAssistant
             if (message == Briefing.WrapUp(task))
                 Next(WrapUp, false);
             else if (played + 1 < acts.Length)
-                Next(acts[++played], true);
+                Next(acts[++played], acts != Plain);
             else
                 Next(Plain[0], false);
             return Task.FromResult(true);

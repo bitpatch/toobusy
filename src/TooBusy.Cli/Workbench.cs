@@ -35,8 +35,9 @@ public sealed record Workbench(
     string Home,
     ICheckupMachine Machine)
 {
-    // The made-up tasks of a demo that an abort left an interrupted one among: the menu and the next run see it.
-    // They are kept in memory for as long as the demo goes on, and nowhere else.
+    // The made-up tasks of a demo and the record of its runs: the menu and the next run see a task that an abort
+    // left interrupted. They are kept in memory for as long as the demo goes on, and nowhere else.
+    readonly UnwrittenState remembered = new();
     ImitatedTasks? kept;
 
     // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
@@ -104,7 +105,7 @@ public sealed record Workbench(
     {
         var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort);
         if (Demo)
-            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules));
+            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules), remembered);
         if (Repository is null)
             return null;
 
@@ -120,18 +121,27 @@ public sealed record Workbench(
             RunPolicy.Default);
     }
 
-    // The made-up tasks of a demo: those that were kept while one of them is interrupted, and otherwise tasks that
-    // are made up anew, so that a demo can be run again and again.
+    // The made-up tasks of a demo: those that were kept while one of them is interrupted or has a record, and
+    // otherwise tasks that are made up anew, so that a demo can be run again and again. The first of them have a
+    // task that a run was killed over, with its record, so that a demo starts by going on with a session.
     ImitatedTasks DemoTasks(QueueRules rules)
     {
-        if (kept is null || !kept.HasInterrupted(rules.Interrupted))
-            kept = new ImitatedTasks(rules);
+        if (kept is null)
+        {
+            kept = new ImitatedTasks(rules, killed: true);
+            remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, Clock.Now)));
+        }
+        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Interrupted))
+        {
+            kept = new ImitatedTasks(rules, killed: false);
+        }
+
         return kept;
     }
 
     // What a run over these settings and this milestone would take as things are: how many tasks, those that are
-    // ready and those that open after them, and the one that was interrupted before, which comes first. Null when
-    // the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
+    // ready and those that open after them, and the one it goes on with first: the task of the record an earlier
+    // run left, or one that was interrupted before. Null when the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
     public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
     {
         var rules = QueueRules.Of(settings);
@@ -144,7 +154,10 @@ public sealed record Workbench(
             if (Demo)
                 await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
 
-            return TaskLineup.Arrange(await tasks.ReadOpenAsync(milestone, cancellationToken), rules).Outlook(rules);
+            var open = await tasks.ReadOpenAsync(milestone, cancellationToken);
+            IRunState state = Demo ? remembered : new RunStateFile(LocalFolder.Of(Root));
+            var recorded = state.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
+            return TaskLineup.Arrange(open, rules).Outlook(rules, recorded);
         }
         catch (Exception refused) when (refused is TrackerException or OperationCanceledException)
         {

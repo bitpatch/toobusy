@@ -32,6 +32,34 @@ public class BriefingTests
     }
 
     [Fact]
+    public void ATaskWhoseSessionIsGoneIsToldOfTheChangesItMayFind()
+    {
+        var message = Briefing.Task(Export, interrupted: false, lost: true);
+
+        Assert.Contains(
+            "- A session worked on this task before, and its conversation is gone: it left no report. What it changed and did not commit may still be in the working copy: "
+            + "the changes that `git status` shows before you start are its. Look at them with `git diff`, keep what is right, undo what is not, and go on from there.\n\n# What cannot be done without the owner",
+            message,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("interrupted before", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("its conversation is gone", Briefing.Task(Export, interrupted: true), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASessionOfAnEarlierRunIsToldToGoOnInTheWayItWasLeft()
+    {
+        Assert.Equal(
+            "toobusy was stopped while you worked, and it runs again: go on with task #12 from where you stopped. The uncommitted changes in the working copy are yours. "
+            + "The rules of this session hold as before: nobody will answer, and your last reply ends with a `TOOBUSY:` line.",
+            Briefing.AfterStop(12));
+        Assert.Equal(
+            "toobusy runs again: go on with task #12. You wrapped it up when the owner stopped the run, and your report is the last comment of the task that starts with **Interrupted.**: "
+            + "do again what you undid, and do what is left. The rules of this session hold as before: commit and push the finished work as the instructions of the project say, "
+            + "and end your last reply with a `TOOBUSY:` line.",
+            Briefing.AfterAbort(12));
+    }
+
+    [Fact]
     public void ATaskThatWasInterruptedIsToldWhereTheReportOfItsSessionIs()
     {
         var message = Briefing.Task(Export, interrupted: true);

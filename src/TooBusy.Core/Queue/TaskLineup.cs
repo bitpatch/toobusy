@@ -16,8 +16,8 @@ public sealed record LaterTask(QueueTask Task, IReadOnlyList<int> After);
 // A task that no run takes as things are, and why.
 public sealed record HeldTask(QueueTask Task, string Reason);
 
-// What a run would take as things are: the number of the tasks, and the task that was interrupted before, which it
-// takes first; null when there is none.
+// What a run would take as things are: the number of the tasks, and the task it goes on with first, one that was
+// interrupted before or that an earlier run left with a session; null when there is none.
 public sealed record QueueOutlook(int Tasks, QueueTask? Interrupted);
 
 // The open tasks as a run sees them. Ready can be taken now, in this order: those that were interrupted first, then
@@ -60,12 +60,13 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
     public QueueTask? Interrupted(QueueRules rules) => Ready is [var first, ..] && first.Has(rules.Interrupted) ? first : null;
 
     // What a run would take as things are: how many tasks, and the interrupted one it goes on with first.
-    public QueueOutlook Outlook(QueueRules rules) => new(Ready.Count + Later.Count, Interrupted(rules));
+    // `recorded` is the task an earlier run left with a session, which comes before any other.
+    public QueueOutlook Outlook(QueueRules rules, QueueTask? recorded = null) =>
+        recorded is null ? new(Ready.Count + Later.Count, Interrupted(rules)) : Taking(recorded).Outlook(rules) with { Interrupted = recorded };
 
-    static List<int> Before(QueueTask task) => [.. task.BlockedBy.Concat(task.Parts).Distinct().Order()];
-
-    // Why the task is not taken whatever closes before it; null when nothing speaks against it.
-    static string? Refusal(QueueTask task, QueueRules rules)
+    // Why a task that a run has a session for already is not gone on with; null when nothing speaks against it.
+    // Its status on the board and what it waits for do not: it was a run that took it and moved it.
+    public static string? Keeps(QueueTask task, QueueRules rules)
     {
         if (rules.Blocking.FirstOrDefault(task.Has) is { } blocking)
             return $"it has the {blocking} label";
@@ -73,6 +74,29 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
             return $"it waits for the owner: it has the {rules.Owner} label";
         if (rules.Take.Count > 0 && !rules.Take.Any(task.Has))
             return $"it has none of the labels to take: {string.Join(", ", rules.Take)}";
+        return null;
+    }
+
+    // The task with this number among the open ones, when a run that has a session for it goes on with it, and
+    // otherwise why it does not.
+    public static (QueueTask? Task, string? Why) Recorded(IReadOnlyList<QueueTask> open, QueueRules rules, int number) =>
+        open.FirstOrDefault(task => task.Number == number) is not { } task ? (null, "it is not among the open tasks")
+        : Keeps(task, rules) is { } why ? (null, why)
+        : (task, null);
+
+    // The lineup of a run that goes on with this task before any other, whatever held it.
+    public TaskLineup Taking(QueueTask task) => new(
+        [task, .. Ready.Where(ready => ready.Number != task.Number)],
+        [.. Later.Where(later => later.Task.Number != task.Number)],
+        [.. Held.Where(held => held.Task.Number != task.Number)]);
+
+    static List<int> Before(QueueTask task) => [.. task.BlockedBy.Concat(task.Parts).Distinct().Order()];
+
+    // Why the task is not taken whatever closes before it; null when nothing speaks against it.
+    static string? Refusal(QueueTask task, QueueRules rules)
+    {
+        if (Keeps(task, rules) is { } kept)
+            return kept;
         if (!rules.Board || task.Status == BoardStatus.Todo)
             return null;
         return task.Status == BoardStatus.Missing ? "it is not on the board" : $"its status is {task.StatusName}";

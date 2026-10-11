@@ -149,13 +149,15 @@ sealed class FakeAssistant : IAssistant
 
     public List<SessionStart> Started { get; } = [];
 
-    public List<(string Conversation, SessionStart Start)> Resumed { get; } = [];
+    // The sessions of earlier runs that were asked for, each by what was kept of it.
+    public List<SessionTrace> Found { get; } = [];
 
     public UsageLimits Limits { get; set; } = UsageLimits.Unknown;
 
     public string? RefuseToStart { get; set; }
 
-    public bool RefuseToResume { get; set; }
+    // An assistant that has nothing left of the sessions of earlier runs.
+    public bool Gone { get; set; }
 
     // The session of a task; one that is not written works for a look and ends with the task done.
     public FakeSession Session(int task)
@@ -174,10 +176,11 @@ sealed class FakeAssistant : IAssistant
         return Task.FromResult<IAssistantSession>(Session(start.Task).Begin());
     }
 
-    public Task<IAssistantSession?> ResumeAsync(string conversation, SessionStart start, CancellationToken cancellationToken)
+    // A session of an earlier run is the one of the task its conversation is named after, `conversation-5`.
+    public Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken)
     {
-        Resumed.Add((conversation, start));
-        return Task.FromResult<IAssistantSession?>(RefuseToResume ? null : Session(start.Task).Begin());
+        Found.Add(trace);
+        return Task.FromResult<IAssistantSession?>(Gone ? null : Session(int.Parse(trace.Conversation!.Split('-')[^1], System.Globalization.CultureInfo.InvariantCulture)).Begin());
     }
 
     public UsageLimits ReadLimits() => Limits;
@@ -196,6 +199,8 @@ sealed class FakeSession(int task) : IAssistantSession
     public string Open => $"fake attach {task}";
 
     public string? Conversation { get; set; } = $"conversation-{task}";
+
+    public SessionTrace Trace => new($"fake-{task}", Conversation, FakeClock.Start);
 
     public List<string> Told { get; } = [];
 
@@ -338,13 +343,20 @@ sealed class FakeMachine : IMachine
 
 sealed class FakeState : IRunState
 {
-    public PausedTask? Paused { get; set; }
+    public TaskRecord? Record { get; set; }
 
-    public PausedTask? LoadPaused() => Paused;
+    // Every record that was written, in its order; null is a record that was forgotten.
+    public List<TaskRecord?> Written { get; } = [];
 
-    public void SavePaused(PausedTask task) => Paused = task;
+    public TaskRecord? Load() => Record;
 
-    public void ClearPaused() => Paused = null;
+    public void Save(TaskRecord record) => Written.Add(Record = record);
+
+    public void Clear()
+    {
+        if (Record is not null)
+            Written.Add(Record = null);
+    }
 }
 
 // What a run said and showed.
