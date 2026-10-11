@@ -504,6 +504,64 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task WithoutAGitHubOriginTheBoardsAreOfferedAndANewOneIsNot()
+    {
+        machine.Origin = null;
+        boards.Read = new SetupBoards([new(Moon, "Moon", false)], [new("denis", false), new("acme", true)]);
+
+        await RunAsync();
+
+        Assert.Equal(boards.Read.Boards, dialog.Question!.Known);
+        Assert.Empty(dialog.Question.Owners);
+    }
+
+    [Fact]
+    public async Task WithoutAGitHubOriginANewBoardOfAnOptionIsAWarningAndTheQuestionIsAskedWithoutIt()
+    {
+        machine.Origin = null;
+        boards.Read = new SetupBoards([], [new("denis", false)]);
+
+        var result = await RunAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
+
+        Assert.Contains(new SetupNote(SetupTone.Warning, "Project: A new project cannot be made where nothing is verified."), dialog.Shown.Notes);
+        Assert.Null(dialog.Question!.Proposed);
+        Assert.Empty(dialog.Question.Owners);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Null(store.Saved!.Tracker.Board);
+        Assert.Empty(tracker.Made);
+    }
+
+    [Fact]
+    public async Task WithoutAGitHubOriginNoBoardIsMadeWhateverIsAnswered()
+    {
+        machine.Origin = null;
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("denis", false), "Rocket"));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new SetupAnswer("Project", "none"), result.Answers[1]);
+        Assert.Null(store.Saved!.Tracker.Board);
+        Assert.Empty(tracker.Made);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WithoutQuestionsANewBoardIsAnErrorWhereNothingIsVerified(bool reachable)
+    {
+        machine.TrackerReachable = reachable;
+        machine.Origin = reachable ? null : machine.Origin;
+        boards.Read = new SetupBoards([], [new("denis", false)]);
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Project: A new project cannot be made where nothing is verified.", result.Failure);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Made);
+    }
+
+    [Fact]
     public async Task WhatTakesAMomentIsSaid()
     {
         await RunAsync();

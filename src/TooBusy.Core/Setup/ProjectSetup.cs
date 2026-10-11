@@ -125,8 +125,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                     return new SetupResult(SetupOutcome.Left, []);
                 known = read;
 
-                // A new board is proposed for the owner of the repository when the user can make one there.
-                known = known with { Owners = [.. known.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] };
+                // A new board is proposed for the owner of the repository when the user can make one there. Without
+                // a repository to link it to no board is made, so there is nobody to make one for.
+                known = known with { Owners = verified ? [.. known.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] : [] };
             }
 
             offeredBoard = OfferedBoard();
@@ -185,6 +186,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             case BoardProposal.Created created:
                 if (string.IsNullOrWhiteSpace(created.Title))
                     Reject($"{ProjectLabel}: A project needs a title.");
+                else if (!verified)
+                    Reject($"{ProjectLabel}: A new project cannot be made where nothing is verified.");
                 else if (known.Owners.Count == 0)
                     Reject($"{ProjectLabel}: A new project cannot be made: GitHub named nobody it can be made for.");
                 else if (created.Owner is null)
@@ -272,7 +275,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 }
             }
 
-            board = answer;
+            // Nothing is made where nothing is verified, whatever the dialog answers.
+            board = answer is BoardAnswer.Created && !verified ? new BoardAnswer.None() : answer;
             return true;
         }
     }

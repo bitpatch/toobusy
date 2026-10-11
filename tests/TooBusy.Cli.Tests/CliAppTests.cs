@@ -1557,6 +1557,38 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task WithYesANewBoardIsAnErrorWhereTheOriginIsNotAGitHubRepository()
+    {
+        GitRepository();
+        var processes = ElsewhereWithProjects();
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--new-board", "Rocket"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("nothing is verified", output, StringComparison.Ordinal);
+        Assert.EndsWith("✘ Project: A new project cannot be made where nothing is verified. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)));
+        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task WhereTheOriginIsNotAGitHubRepositoryTheSetupOffersNoNewProject()
+    {
+        GitRepository();
+        var processes = ElsewhereWithProjects();
+        var keys = new Keys().Press(Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--new-board", "Rocket");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("! Project: A new project cannot be made where nothing is verified.", output, StringComparison.Ordinal);
+        Assert.Contains("By URL", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("New project", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task WithYesADemoChangesNothing()
     {
         GitRepository();
@@ -1817,6 +1849,17 @@ public sealed class CliAppTests : IDisposable
         "gh" when arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)) => "https://github.com/users/ann/projects/9\n",
         "gh" when arguments.Any(argument => argument.Contains("projectV2(number:", StringComparison.Ordinal) && argument.Contains("repository(owner:", StringComparison.Ordinal)) => "P_1\tR_1\n",
         "gh" when arguments.Any(argument => argument.Contains("projectV2(number:", StringComparison.Ordinal)) => "P_1\n",
+        "gh" when arguments.Any(argument => argument.Contains("(login: $login) { id }", StringComparison.Ordinal)) => "U_1\n",
+        "gh" when arguments[0] == "api" => "owner\tuser\tann\n",
+        _ => "",
+    }, ""));
+
+    // A machine whose `gh` is logged in and can make a board for the user, in a project whose `origin` remote is
+    // not a GitHub repository.
+    static FakeProcesses ElsewhereWithProjects() => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    {
+        "git" => "https://gitlab.com/acme/rocket.git\n",
+        "gh" when arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)) => "https://github.com/users/ann/projects/9\n",
         "gh" when arguments.Any(argument => argument.Contains("(login: $login) { id }", StringComparison.Ordinal)) => "U_1\n",
         "gh" when arguments[0] == "api" => "owner\tuser\tann\n",
         _ => "",
