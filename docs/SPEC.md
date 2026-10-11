@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run. `doctor` and the options of `init` that answer without questions are described but not built.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run. The options of `init` that answer without questions are described but not built.
 
 ## Setting a project up
 
@@ -181,7 +181,7 @@ The bar and the steps of a screen stand on a grey a little off the background, `
 
 The steps, in order:
 
-1. **Environment.** Whether `gh` is installed and logged in to github.com, and whether the `origin` remote is a GitHub repository; the other checks of `doctor` come with `doctor`. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh`, or when the `origin` remote is not a GitHub repository, the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
+1. **Environment.** The checks of [`doctor`](#toobusy-doctor) that need no settings: whether `git`, `gh` and `claude` are installed and whether `gh` and Claude Code are logged in; and whether the `origin` remote is a GitHub repository. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a working `gh`, or when the `origin` remote is not a GitHub repository, the steps below cannot read the tracker: they accept typed values and say that nothing was verified.
 2. **Tracker.** GitHub is the only one; it is shown, not asked.
 3. **Project.** The GitHub Projects board of the tasks, optional. A project that has one already, the board of the settings or one that is linked to the repository, shows it as the first of two choices, as it stands in the list of the boards, with `Choose another project` under it; one Enter keeps it. That choice, and a project without a board, open four ways to answer, as tabs that Tab goes through: one of the boards the user can reach, the address of a board, a new board with its owner and title, or no board. The address of any page of a project is taken as its board. A chosen board is checked for access and for the token scope it needs.
 4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first.
@@ -389,38 +389,58 @@ In a project that is set up the labels of its settings are named, `the needs-own
 
 ### `toobusy doctor`
 
-`doctor` checks everything a run needs and prints one line per check: passed, failed or skipped, and for a failed one what is wrong and the command that fixes it. It exits with 0 when nothing failed and with 1 otherwise. It changes nothing.
+`doctor` checks everything a run needs and prints one line per check: passed, failed or skipped, and for a failed one what is wrong and, on a line under it, the command that fixes it. It exits with 0 when nothing failed and with 1 otherwise. It changes nothing. Outside a git working copy it fails as the other commands do, with exit code 2.
 
-In a terminal the check that is running shows a spinner on its line, and the line is replaced by the result when the check finishes. Without a terminal each line is printed when its check finishes.
+```
+✔ git
+✔ GitHub CLI
+✘ GitHub login       `gh` is not logged in to github.com.
+  fix: gh auth login
+✔ Claude Code
+✔ Claude Code login
+✔ settings           .toobusy/settings.toml
+○ repository         waits for the GitHub login
+○ board              waits for the GitHub login
+○ labels             waits for the repository
+```
+
+A line is the mark, the name of the check and what the check found: `✔` in the success colour, `✘` and what is wrong in the error colour, `○` and what a skipped check waits for in the muted colour, as is the line of the fix. Settings that do not validate have their errors under the check, a line each, as `run` prints them.
+
+In a terminal the check that is running has a line with a sign that turns, and the line is replaced by the result when the check finishes; without colours the sign stands still. Without a terminal each line is printed when its check finishes.
 
 | Check | Fails when | Needs |
 |---|---|---|
-| git | `git` is not on the path | — |
+| git | `git` is not on the path, or does not run | — |
 | GitHub CLI | `gh` is not on the path | — |
 | GitHub login | `gh auth status` reports no login for github.com | GitHub CLI |
 | Claude Code | `claude` is not on the path | — |
 | Claude Code login | Claude Code is not logged in | Claude Code |
 | settings | the file is missing or does not validate | — |
-| repository | the `origin` remote is not a GitHub repository, or that repository cannot be read | GitHub login |
+| repository | the `origin` remote is not a GitHub repository, or that repository cannot be read | git, GitHub login |
 | board | the board cannot be read, or the token lacks the `project` scope | settings with a board, GitHub login |
-| labels | a label of the settings does not exist in the repository | repository |
+| labels | a label of the settings does not exist in the repository, or the labels cannot be read | settings, repository |
 
-A check whose need is not met is skipped and says what it waits for. Without settings the first five checks run, and the settings check fails with the "not set up" message.
+A check whose need is not met is skipped and says what it waits for; the board of a project that has none is skipped as well, and says so. Without settings the first five checks run, the settings check fails with the "not set up" message and `toobusy init` as its fix, and the repository is checked all the same.
+
+A tool is on the path when it tells its version: `git --version`, `gh --version`, `claude --version`. The `git` that macOS has before its developer tools are installed is on the path and only says how to install them, so it does not count. Claude Code is logged in when `claude auth status` exits with 0 and its answer, which is JSON, does not have `"loggedIn": false`; nothing of a session is started for it. Labels are compared whatever their case, as GitHub does.
 
 **Fixes.** Each failure names a fix for the platform the tool runs on:
 
 | | macOS | Linux | Windows |
 |---|---|---|---|
-| git | `xcode-select --install` | the distribution's package | `winget install Git.Git` |
+| git | `xcode-select --install` | link to the official instructions | `winget install Git.Git` |
 | GitHub CLI | `brew install gh` | link to the official instructions | `winget install GitHub.cli` |
 | Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | the same | `irm https://claude.ai/install.ps1 \| iex` |
 | GitHub login | `gh auth login` | | |
 | `project` scope | `gh auth refresh -s project` | | |
 | Claude Code login | `claude`, then `/login` | | |
+| a missing label | `gh label create "<name>" --repo <owner>/<name>`, one for each | | |
 
-A command of a package manager is proposed only when that manager is on the path (`brew`, `winget`); otherwise the fix is the link to the tool's official installation page. Only macOS is verified by hand in the first version.
+A command of a package manager is proposed only when that manager is on the path (`brew`, `winget`); otherwise the fix is the link to the tool's official installation page. A repository or a board that cannot be read, and an `origin` remote that is not on GitHub, have no fix to name. Only macOS is verified by hand in the first version.
 
-**Use by other commands.** `init` runs the checks that need no settings and goes on whatever they say. `run` will run all of them before anything else and, when one fails, print the failures and exit with code 1 without starting; until `doctor` is built it starts without them, and what is missing stops it where it is needed.
+**A demo.** `doctor --demo` runs the same checks over a made-up machine that has it all: every tool, both logins, a repository and a board that can be read, and every label the settings name; where the project has no settings they are made up. Each check takes a moment, so that the line of a running check can be looked at, and the last line says that the checks were made up.
+
+**Use by other commands.** `init` runs the checks that need no settings and goes on whatever they say. `run` runs all of them before anything else, after it has found the settings and before it asks for the milestone, the model and the effort. When one fails it prints the failures with their fixes, as errors, says that the run did not start, and exits with code 1. In a terminal the check that is running is shown while it runs and leaves nothing behind. A demo of a run checks nothing.
 
 ### Exit codes
 
@@ -438,12 +458,8 @@ A command of a package manager is proposed only when that manager is on the path
 - What is asked of `gh`, argument by argument, and what is made of its answers and its failures, with the commands of the machine faked.
 - The setup steps, with the questions answered from a script and the tracker and the environment faked: a first setup, an existing setup, going back, a new board, a missing `gh`, every option, `--yes`, no terminal.
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn. A tape is read as the rows the terminal's own screen has after it, sequence by sequence, so that a tape that has lost count of its lines fails. A key that a test holds back for something that never happens fails the test instead of letting the page go on for ever.
-- `doctor`: each check passed, failed and skipped, and the fix for each platform with and without its package manager.
+- `doctor`: each check passed, failed and skipped, the fix for each platform with and without its package manager, the lines of the checks with and without a terminal, and a run that does not start while a check fails.
 - The "not set up" message and the exit codes, through the command line; `about` outside a project, in one that is set up and in one whose settings do not validate.
-
-### To be settled while building
-
-- **How to tell that Claude Code is logged in** without starting a session.
 
 ## Running the tasks
 

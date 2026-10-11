@@ -1,6 +1,7 @@
 using System.CommandLine;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Setup;
@@ -24,6 +25,7 @@ public static class CliApp
         root.Subcommands.Add(CreateModelCommand(context, demo));
         root.Subcommands.Add(CreateEffortCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
+        root.Subcommands.Add(CreateDoctorCommand(context, demo));
         root.Subcommands.Add(CreateAboutCommand(context));
 
         // Without a command the tool opens its page in a terminal: the setup when the project needs it, the choices
@@ -284,6 +286,10 @@ public static class CliApp
                 return ExitCode.Failed;
             }
 
+            // Everything a run needs is checked before anything else; a demo has it all.
+            if (!bench.Demo && !await ChecksPassAsync(context, bench, cancellationToken))
+                return Fail(context, "toobusy: the run did not start. `toobusy doctor` checks all of it again.");
+
             var standing = await bench.StandAsync(cancellationToken);
             if (!standing.Ready)
             {
@@ -316,6 +322,35 @@ public static class CliApp
             return Code(await run.RunAsync(new PlainRun(context.Output, context.OutputPalette), cancellationToken));
         });
         return command;
+    }
+
+    // Checks everything a run needs, a line for each check, and changes nothing. A demo checks a made-up machine
+    // that has it all.
+    static Command CreateDoctorCommand(CliContext context, Option<bool> demo)
+    {
+        var command = new Command("doctor", "Checks everything a run needs, and says how to fix what is missing.");
+        command.SetAction(async (result, cancellationToken) =>
+        {
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+                return ExitCode.NotReady;
+
+            IReadOnlyList<CheckResult> checks;
+            using (var list = new CheckList(context.Output, context.OutputPalette, context.Output, terminal: context.Terminal))
+                checks = await bench.Checkup.RunAsync(list, cancellationToken);
+
+            if (bench.Demo)
+                context.Output.WriteLine(context.OutputPalette.Muted("Demo: the checks were made up."));
+            return checks.Any(check => check.State == CheckState.Failed) ? ExitCode.Failed : ExitCode.Done;
+        });
+        return command;
+    }
+
+    // The checks before a run: only those that failed are told, with their fixes, as the errors they are. In a
+    // terminal the check that is running is shown while it runs.
+    static async Task<bool> ChecksPassAsync(CliContext context, Workbench bench, CancellationToken cancellationToken)
+    {
+        using var list = new CheckList(context.Error, context.ErrorPalette, context.Output, context.OutputPalette, context.Terminal, failuresOnly: true);
+        return (await bench.Checkup.RunAsync(list, cancellationToken)).All(check => check.State != CheckState.Failed);
     }
 
     // Tells how a run works, for the owner of a project and for the assistant that helps them. It reads nothing but

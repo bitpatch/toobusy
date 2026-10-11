@@ -24,6 +24,9 @@ public sealed class CliAppTests : IDisposable
         type = "claude-code"
         """;
 
+    // The labels the settings name, as `gh` lists those of a repository.
+    const string Labels = "manual\ninterrupted\n";
+
     readonly DirectoryInfo folder = Directory.CreateTempSubdirectory("toobusy-cli-");
 
     // Where the choice of the user is kept, in place of the home folder.
@@ -108,6 +111,7 @@ public sealed class CliAppTests : IDisposable
     [InlineData]
     [InlineData("run")]
     [InlineData("run", "--demo")]
+    [InlineData("doctor")]
     public async Task OutsideAGitRepositoryACommandFails(params string[] args)
     {
         var (exit, output, error) = await RunAsync(args);
@@ -239,6 +243,7 @@ public sealed class CliAppTests : IDisposable
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
             ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
             ("gh", "issue") => "Write it as CSV.\n",
             ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
             ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"working","status":"busy","pid":1}]""",
@@ -272,7 +277,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         WriteSettings(Settings);
 
-        var (exit, output, error) = await RunAsync("run");
+        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "", Labels)), ["run"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
@@ -288,7 +293,7 @@ public sealed class CliAppTests : IDisposable
         WriteSettings(Settings);
         var processes = GitHub(milestones: "v2\t\t3\nv3\t\t0\n");
         await RunAsync(Context(processes), ["milestone", "v2"]);
-        var later = GitHub(milestones: "v3\t\t0\n");
+        var later = GitHub(milestones: "v3\t\t0\n", Labels);
 
         var (exit, _, error) = await RunAsync(Context(later), ["run"]);
 
@@ -302,12 +307,178 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
+        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "git@example.com:acme/rocket.git\n" : "", ""));
 
-        var (exit, output, error) = await RunAsync("run");
+        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
-        Assert.Equal("toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take" + Environment.NewLine, error);
+        Assert.Equal(
+            """
+            ✘ repository         The `origin` remote is not a GitHub repository.
+            toobusy: the run did not start. `toobusy doctor` checks all of it again.
+
+            """.ReplaceLineEndings(),
+            error);
+    }
+
+    [Fact]
+    public async Task ARunDoesNotStartWhileACheckFailsAndTellsTheFailuresWithTheirFixes()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Claude Code is there and says that it is not logged in; the repository lacks a label of the settings.
+        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        {
+            ("claude", "auth") => new ProcessResult(ProcessStatus.Exited, 1, """{"loggedIn": false}""", ""),
+            ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
+            ("gh", "label") => new ProcessResult(ProcessStatus.Exited, 0, "manual\n", ""),
+            _ => new ProcessResult(ProcessStatus.Exited, 0, "", ""),
+        });
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal(
+            """
+            ✘ Claude Code login  Claude Code is not logged in.
+              fix: claude, then /login
+            ✘ labels             acme/rocket has no label “interrupted”.
+              fix: gh label create "interrupted" --repo acme/rocket
+            toobusy: the run did not start. `toobusy doctor` checks all of it again.
+
+            """.ReplaceLineEndings(),
+            error);
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+    }
+
+    [Fact]
+    public async Task InATerminalTheChecksBeforeARunLeaveNothingOnItWhenTheyPass()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        var keys = new Keys();
+
+        var (exit, output, error) = await RunWithKeysAsync(keys, GitHub(milestones: "", Labels), "run");
+
+        Assert.Equal(1, exit);
+        Assert.StartsWith("toobusy: the milestone to work on is not chosen.", error, StringComparison.Ordinal);
+        Assert.Contains("⣾ labels", output, StringComparison.Ordinal);
+        Assert.All(Scroll.Read(output).Rows, row => Assert.Equal("", row));
+    }
+
+    [Fact]
+    public async Task DoctorTellsEveryCheckOfAProjectThatIsReady()
+    {
+        GitRepository();
+        WriteSettings(Settings.Replace("type = \"github\"", "type = \"github\"\nboard = \"https://github.com/orgs/acme/projects/1\"", StringComparison.Ordinal));
+        var processes = GitHub(milestones: "", Labels);
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["doctor"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal(
+            """
+            ✔ git
+            ✔ GitHub CLI
+            ✔ GitHub login
+            ✔ Claude Code
+            ✔ Claude Code login
+            ✔ settings           .toobusy/settings.toml
+            ✔ repository         acme/rocket
+            ✔ board              https://github.com/orgs/acme/projects/1
+            ✔ labels
+
+            """.ReplaceLineEndings(),
+            output);
+        Assert.Contains(processes.Asked, asked => asked.Command == "claude" && asked.Arguments.SequenceEqual(["auth", "status"]));
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["api", "repos/acme/rocket", "--jq", ".full_name"]));
+    }
+
+    [Fact]
+    public async Task DoctorOnAMachineWithNothingFailsEveryToolAndSkipsWhatWaitsForThem()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("doctor");
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", error);
+        var lines = output.ReplaceLineEndings("\n").Split('\n');
+        Assert.Equal("✘ git                `git` is not installed.", lines[0]);
+        Assert.StartsWith("  fix: ", lines[1], StringComparison.Ordinal);
+        Assert.Equal("✘ GitHub CLI         The GitHub command-line tool `gh` is not installed.", lines[2]);
+        Assert.Equal("○ GitHub login       waits for the GitHub CLI", lines[4]);
+        Assert.Equal("✘ Claude Code        Claude Code is not installed: `claude` is not on the path.", lines[5]);
+        Assert.Equal("○ Claude Code login  waits for Claude Code", lines[7]);
+        Assert.Equal(
+            [
+                "✘ settings           This project is not set up yet.",
+                "  fix: toobusy init",
+                "○ repository         waits for git",
+                "○ board              waits for the settings",
+                "○ labels             waits for the settings",
+                "",
+            ],
+            lines[8..]);
+    }
+
+    [Fact]
+    public async Task DoctorTellsWhatIsWrongWithSettingsThatDoNotValidate()
+    {
+        GitRepository();
+        WriteSettings("version = 2\n");
+
+        var (exit, output, _) = await RunAsync(Context(GitHub(milestones: "")), ["doctor"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("✘ settings           .toobusy/settings.toml does not validate:" + Environment.NewLine + "  .toobusy/settings.toml:1: version: ", output, StringComparison.Ordinal);
+        Assert.Contains("✔ repository         acme/rocket", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DoctorPaintsTheMarksAndWhatIsWrong()
+    {
+        GitRepository();
+        var palette = Palette.Dark;
+
+        var (_, output, _) = await RunAsync(Context(GitHub(milestones: "")) with { OutputPalette = palette }, ["doctor"]);
+
+        Assert.Contains($"{palette.Success("✔")} git" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains($"{palette.Error("✘")} settings           {palette.Error("This project is not set up yet.")}" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains($"  {palette.Muted("fix: toobusy init")}" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains($"{palette.Muted("○")} board              {palette.Muted("waits for the settings")}" + Environment.NewLine, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InATerminalDoctorShowsTheCheckThatRunsAndPutsItsResultInItsPlace()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys(), GitHub(milestones: "", Labels), "doctor");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("\r⣾ GitHub login\r\u001b[K✔ GitHub login" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Equal(
+            ["✔ git", "✔ GitHub CLI", "✔ GitHub login", "✔ Claude Code", "✔ Claude Code login", "✔ settings           .toobusy/settings.toml", "✔ repository         acme/rocket", "○ board              the project has no board", "✔ labels"],
+            Scroll.Read(output).Rows.Where(row => row.Length > 0));
+    }
+
+    [Fact]
+    public async Task DoctorOfADemoChecksAMadeUpMachineThatHasItAll()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("doctor", "--demo");
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("✘", output, StringComparison.Ordinal);
+        Assert.Contains("✔ labels" + Environment.NewLine + "Demo: the checks were made up." + Environment.NewLine, output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -325,6 +496,7 @@ public sealed class CliAppTests : IDisposable
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
             ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
             ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
             ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
             ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
@@ -374,6 +546,7 @@ public sealed class CliAppTests : IDisposable
         var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments[0] == "label" => Labels,
             "gh" => "total\t0\n",
             _ => "",
         }, ""));
@@ -397,7 +570,7 @@ public sealed class CliAppTests : IDisposable
         await RunAsync("milestone", "--none");
         await RunAsync("effort", "high");
 
-        var (exit, output, error) = await RunAsync("run");
+        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "", Labels)), ["run"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
@@ -414,7 +587,7 @@ public sealed class CliAppTests : IDisposable
         await RunAsync("milestone", "--none");
         await RunAsync("model", "--default");
 
-        var (exit, output, error) = await RunAsync("run");
+        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "", Labels)), ["run"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);

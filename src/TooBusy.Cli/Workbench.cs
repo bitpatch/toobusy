@@ -1,6 +1,7 @@
 using TooBusy.Assistants.ClaudeCode;
 using TooBusy.Cli.Imitation;
 using TooBusy.Core.Assistant;
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
@@ -17,7 +18,8 @@ namespace TooBusy.Cli;
 // Everything the commands work with in one project: its root, its settings, the tracker and the choice of the user.
 // It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the tasks
 // are read from; null when the `origin` remote is not a GitHub repository. Processes runs the commands of the
-// machine, and Home is the home folder of the user, where Claude Code keeps its conversations.
+// machine, Home is the home folder of the user, where Claude Code keeps its conversations, and Machine is what
+// the checks of `doctor` ask.
 public sealed record Workbench(
     string Root,
     bool Demo,
@@ -30,7 +32,8 @@ public sealed record Workbench(
     IPersonalSettings Personal,
     IClock Clock,
     IProcessRunner Processes,
-    string Home)
+    string Home,
+    ICheckupMachine Machine)
 {
     // The made-up tasks of a demo that an abort left an interrupted one among: the menu and the next run see it.
     // They are kept in memory for as long as the demo goes on, and nowhere else.
@@ -48,6 +51,7 @@ public sealed record Workbench(
             var read = processes is null ? "example/project" : await new GitOrigin(processes).ReadAsync(root, cancellationToken);
             var repository = read ?? "example/project";
             var imitated = new ImitatedSetup(read);
+            var unwritten = new UnwrittenSettings(new SettingsFile(root), madeUp: ready);
             var milestones = new ImitatedMilestones(processes is null ? null : new GitHubMilestones(processes));
             var first = ready && MilestoneOrder.Sorted(await milestones.ReadOpenAsync(repository, cancellationToken) ?? []) is [var lowest, ..] ? lowest : null;
             return new Workbench(
@@ -57,7 +61,7 @@ public sealed record Workbench(
                 imitated,
                 imitated,
                 new ImitatedBoards(processes is null ? null : new GitHubBoards(processes), clock),
-                new UnwrittenSettings(new SettingsFile(root), madeUp: ready),
+                unwritten,
                 milestones,
                 new UnsavedChoice(
                     first is null ? null : new MilestoneChoice(first.Title),
@@ -65,16 +69,18 @@ public sealed record Workbench(
                     ready ? ClaudeCodeOptions.ProposedEffort : null),
                 clock,
                 processes ?? new NoProcesses(),
-                home);
+                home,
+                new ImitatedCheckup(clock, unwritten));
         }
 
         processes ??= new NoProcesses();
         var origin = await new GitOrigin(processes).ReadAsync(root, cancellationToken);
+        var machine = new MachineCheckup(processes, MachineCheckup.Here);
         return new Workbench(
             root,
             demo,
             origin,
-            new MachineEnvironment(processes, origin),
+            new MachineEnvironment(machine, origin),
             new GitHubSetup(processes),
             new GitHubBoards(processes),
             new SettingsFile(root),
@@ -82,8 +88,12 @@ public sealed record Workbench(
             new PersonalSettingsFile(personalFolder, root),
             clock,
             processes,
-            home);
+            home,
+            machine);
     }
+
+    // The checks of everything a run needs, over the settings as they are now.
+    public Checkup Checkup => new(Machine, Settings, Repository);
 
     // A run of the queue over the settings and the choices of the user as they are now; the milestone is null for
     // tasks whatever their milestone, and the share of the weekly limit is the proposed one until the user chooses. In a demo the run is an imitated one. Otherwise the tasks are the issues of

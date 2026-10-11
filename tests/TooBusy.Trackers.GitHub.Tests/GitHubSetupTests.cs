@@ -1,3 +1,4 @@
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Setup;
@@ -30,6 +31,49 @@ public class GitHubSetupTests
         processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found"));
 
         Assert.Empty(await Setup().ReadLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task LabelsThatCannotBeReadAreToldApartFromNoLabels()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found"));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        Assert.Equal([], await Setup().FindLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().FindLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().FindLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(ProcessStatus.Exited, 0, true)]
+    [InlineData(ProcessStatus.Exited, 1, false)]
+    [InlineData(ProcessStatus.TimedOut, 0, false)]
+    [InlineData(ProcessStatus.NotFound, 0, false)]
+    public async Task ARepositoryCanBeReadWhenGitHubGivesIt(ProcessStatus status, int exitCode, bool expected)
+    {
+        processes.Answers.Enqueue(new ProcessResult(status, exitCode, "acme/rocket\n", ""));
+
+        Assert.Equal(expected, await Setup().CanReadRepositoryAsync("acme/rocket", TestContext.Current.CancellationToken));
+        var (command, arguments) = Assert.Single(processes.Asked);
+        Assert.Equal("gh", command);
+        Assert.Equal(["api", "repos/acme/rocket", "--jq", ".full_name"], arguments);
+    }
+
+    [Fact]
+    public async Task TheAccessToABoardIsWhatTheToolTells()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\n"));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        Assert.Equal(BoardAccess.Readable, await Setup().CheckBoardAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Equal(BoardAccess.Unreadable, await Setup().CheckBoardAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Equal(BoardAccess.LacksScope, await Setup().CheckBoardAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Equal(BoardAccess.NoAnswer, await Setup().CheckBoardAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Equal(BoardAccess.Unreadable, await Setup().CheckBoardAsync("https://github.com/acme/rocket", TestContext.Current.CancellationToken));
+        Assert.Equal(4, processes.Asked.Count);
     }
 
     [Fact]

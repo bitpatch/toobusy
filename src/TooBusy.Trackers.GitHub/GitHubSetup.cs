@@ -1,3 +1,4 @@
+using TooBusy.Core.Doctor;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Setup;
@@ -11,10 +12,21 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
-    public async Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken)
+    public async Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) =>
+        Parts(board) is null ? "That is not the address of a project."
+        : await CheckBoardAsync(board, cancellationToken) switch
+        {
+            BoardAccess.Readable => null,
+            BoardAccess.NoAnswer => "GitHub did not answer, so the project could not be checked.",
+            BoardAccess.LacksScope => Scope,
+            _ => "The project cannot be read: it does not exist, or you have no access to it.",
+        };
+
+    // Whether the board can be read with the scope it needs, and when not, what stands in the way.
+    public async Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken)
     {
         if (Parts(board) is not var (kind, login, number))
-            return "That is not the address of a project.";
+            return BoardAccess.Unreadable;
 
         var result = await AskAsync(
             [
@@ -25,21 +37,30 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
             cancellationToken);
         return result switch
         {
-            { Status: not ProcessStatus.Exited } => "GitHub did not answer, so the project could not be checked.",
-            { ExitCode: 0 } when result.Output.Trim().Length > 0 => null,
-            _ when LacksScope(result) => Scope,
-            _ => "The project cannot be read: it does not exist, or you have no access to it.",
+            { Status: not ProcessStatus.Exited } => BoardAccess.NoAnswer,
+            { ExitCode: 0 } when result.Output.Trim().Length > 0 => BoardAccess.Readable,
+            _ when LacksScope(result) => BoardAccess.LacksScope,
+            _ => BoardAccess.Unreadable,
         };
     }
 
+    // Whether the repository is there for the login to read.
+    public async Task<bool> CanReadRepositoryAsync(string repository, CancellationToken cancellationToken) =>
+        await processes.RunAsync("gh", ["api", $"repos/{repository}", "--jq", ".full_name"], Patience, cancellationToken)
+            is { Status: ProcessStatus.Exited, ExitCode: 0 };
+
     // A repository whose labels cannot be read has none to offer.
-    public async Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
+        await FindLabelsAsync(repository, cancellationToken) ?? [];
+
+    // The labels of the repository; null when they cannot be read.
+    public async Task<IReadOnlyList<string>?> FindLabelsAsync(string repository, CancellationToken cancellationToken)
     {
         var result = await processes.RunAsync(
             "gh", ["label", "list", "--repo", repository, "--limit", "1000", "--json", "name", "--jq", ".[].name"], Patience, cancellationToken);
         return result is { Status: ProcessStatus.Exited, ExitCode: 0 }
             ? [.. result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).Where(name => name.Length > 0)]
-            : [];
+            : null;
     }
 
     public async Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)

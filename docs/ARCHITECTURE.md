@@ -1,6 +1,6 @@
 # Architecture
 
-This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings, the setup and the run are the parts that exist.
+This describes how the code is laid out and why. The behaviour of the tool is described in [IDEA.md](IDEA.md) and, part by part, in [SPEC.md](SPEC.md). The settings, the setup, the doctor and the run are the parts that exist.
 
 ## Projects
 
@@ -87,7 +87,7 @@ TOML is parsed with [Tomlyn](https://github.com/xoofx/Tomlyn), through its synta
 | Port | What it hides | Implementations |
 |---|---|---|
 | `ISetupDialog` | showing the notes, the answers and the place among the steps; asking: a selection, a multiple choice, a text, the board, a confirmation; waiting for something that is read. Every question can be gone back from, and so can a wait: the reading is told to stop | `SetupScreen` in `TooBusy.Cli`; a scripted one in the tests |
-| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which puts together `GitHubCli` of `TooBusy.Trackers.GitHub` and the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
+| `ISetupEnvironment` | what is installed and logged in, and the `origin` remote | `MachineEnvironment` in `TooBusy.Cli`, which runs the checks of the doctor that need no settings and adds the `origin` read by `GitOrigin` of `TooBusy.Infrastructure`; imitated in a demo |
 | `ISetupTracker` | whether a board can be read, the labels; making a board, linking one to the repository and making a label, which throw `TrackerException` when GitHub refuses | `GitHubSetup` in `TooBusy.Trackers.GitHub`; imitated in a demo |
 | `ISetupBoards` | the boards the user can reach, those linked to the repository, and who a new one can belong to | `GitHubBoards` in `TooBusy.Trackers.GitHub`, which asks `gh` through `IProcessRunner` |
 | `ISettingsStore` | the settings file: loading, the text before and after a change, saving | `SettingsFile` in `TooBusy.Infrastructure` |
@@ -109,6 +109,17 @@ The setup never asks for the repository: `ISetupEnvironment` gives the one of th
 
 `Session` is what happens on the page from the moment it is opened: the setup when the project needs it, the choices of the milestone, the model and the effort when the user has none, the menu and the run, each a screen that takes the page for a while. A run that is opened from the menu comes back to it; `toobusy run` runs the queue alone and leaves. It remembers what was done for the report that `CliApp` leaves in the terminal, which says nothing of a run again: a run leaves its own tape there. `Workbench.CountTasksAsync` counts the tasks a run would take, for the menu.
 
+## Doctor
+
+`TooBusy.Core/Doctor` holds the checks of everything a run needs. `Checkup` runs them in their order and knows which check waits for which: `MachineAsync` is the five that need no settings, the tools and their logins, and `RunAsync` adds the settings, the repository, the board and the labels. A check ends as a `CheckResult`: passed, failed or skipped, with what it found or what is wrong and, for a failure, its fix. `Fixes` is the table of the fixes, a function of the tool, the platform and whether its package manager is there. The checks have two ports:
+
+| Port | What it hides | Implementations |
+|---|---|---|
+| `ICheckupMachine` | the platform; whether `git`, `gh` and `claude` run and whether a package manager is on the path; the logins of the tracker and of the assistant; whether the repository and the board can be read; the labels of the repository | `MachineCheckup` in `TooBusy.Cli`, which asks the tools for their versions through `IProcessRunner` and puts together `GitHubCli` and `GitHubSetup` of `TooBusy.Trackers.GitHub` and `ClaudeLogin` of `TooBusy.Assistants.ClaudeCode`; in a demo `ImitatedCheckup`, a machine that has it all |
+| `ICheckupView` | where the checks tell that one starts and how each ends | `CheckList` in `TooBusy.Cli`; `NoCheckupView` where nobody watches, as in the setup |
+
+`Workbench.Checkup` puts them together over the settings and the `origin` remote of the project. `toobusy doctor` shows every check, `toobusy run` runs them before it starts and tells the failures only, and `MachineEnvironment` turns the failed ones of the machine into the notes of the setup.
+
 ## Terminal
 
 `TooBusy.Cli/Terminal` is everything that knows it talks to a terminal.
@@ -120,6 +131,7 @@ The setup never asks for the repository: `ISetupEnvironment` gives the one of th
 - `Page` is what every screen of the tool shares: it takes the terminal and gives it back, puts the body, the status and the foot it is given around the question of the moment, and reads the keys. Ctrl+C twice in a row throws `OperationCanceledException`, which the command that opened the page catches. While more keys are waiting, as in a paste, it does not draw. `WaitAsync` runs something that takes a moment under the dots of a wait and goes on reading the keys meanwhile, looking for one every thirty milliseconds, so that `Back`, Escape and Ctrl+C work before the work ends; work that is not waited for gets its cancellation and is left behind.
 - `SetupScreen` is the setup on a page, `MilestoneScreen` the list of the milestones, `ModelScreen` and `EffortScreen` the lists of the models and of the levels of effort, `LimitScreen` the list of the shares of the weekly limit, `HomeScreen` the menu, and `AssistantScreen` the list its `Assistant` opens.
 - `RunScreen` is the page of a run, on a `Tape`: the tasks that are over and what the run warns of stay, and the foot is the task that is worked on, with the plan of its session as a bar under it, the menu of the commands between two rules, and the keys with the usage limits. The run goes on by itself on another thread and never touches the page: it speaks into a `RunFeed`, and the page takes from there what was said when it draws. The page waits for a key with `Page.ReadAsync`, which looks for one again and again and gives up when something changed, so that the foot is drawn anew; a foot that would show the same is not drawn. When the run is over the page writes how it went and gives the result; however the page is left, the run is killed and never left to go on alone. `RunLook` is what a run looks like: the lines of its log, the line of a task that is over, the bar of a plan, the summary. `PlainRun` prints the log where there is no terminal. `Picker` is the list the screens share: a row is a pointer, a name, what explains it and what is to be noticed about it, and a list that does not fit scrolls between marks. A choice may be off, and may wait: `PickAsync` draws the list again when what it waits for is done, as the menu does while the tasks are counted. Where Escape goes back and does not leave the page, a list ends with `Back`, which names its key: `Picker` adds the row by itself, and the lists that `SetupScreen` draws on its own ask it whether to. `Prompt` is the question that is answered with a text. `LineEditor` is the text of a field and the caret in it; it knows nothing of the screen.
+- `CheckList` is the checks of the doctor as lines on the terminal's own screen, outside the alternate one: a mark, the name and what was found, and the fix under a failure. In a terminal the check that is running has a line with the sign of a tape, which turns with the same beat and is erased when the check ends; a list of failures only, as a run wants it, writes them where errors go and leaves nothing of the rest.
 - `CliContext` carries the folder, the streams, their palettes, the terminal device, the process runner, the clock and the folder of the user's own settings into the commands, so that tests run them with string writers, scripted keys, a faked `git`, `gh` and `claude`, and a clock that makes nobody wait.
 
 The screens are drawn by hand with the escape sequences every terminal knows. Spectre.Console was the first candidate and was not taken: the setup needs the whole window, with a panel that stays at its bottom, and its prompts write below one another.

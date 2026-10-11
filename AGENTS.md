@@ -19,6 +19,8 @@ dotnet run --project src/TooBusy.Cli -- --demo            # the whole tool over 
 dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup; writes nothing
 dotnet run --project src/TooBusy.Cli -- run --demo        # a run over made-up tasks and sessions; changes nothing
 dotnet run --project src/TooBusy.Cli -- about             # how a run works, with every message a session gets
+dotnet run --project src/TooBusy.Cli -- doctor            # checks everything a run needs; changes nothing
+dotnet run --project src/TooBusy.Cli -- doctor --demo     # the same over a made-up machine that has it all
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
 tools/screenshot.py init --demo -- shot tab shot blink    # pictures of the screen in artifacts/screens
 tools/screenshot.py run --demo -- "until:Edit src" shot type:/ shot   # a run goes on by itself: wait for what it shows
