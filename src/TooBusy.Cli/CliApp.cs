@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using TooBusy.Cli.Imitation;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
@@ -21,7 +22,7 @@ public static class CliApp
             Description = "Show the tool over made-up data: nothing is made, linked, written or remembered.",
             Recursive = true,
         };
-        var root = new RootCommand("Runs the tasks of your tracker one after another with AI coding assistants.");
+        var root = new RootCommand($"Runs the tasks of your tracker one after another with AI coding assistants. {ForAnAssistant}");
         root.Options.Add(demo);
         root.Subcommands.Add(CreateInitCommand(context, demo));
         root.Subcommands.Add(CreateMilestoneCommand(context, demo));
@@ -76,12 +77,32 @@ public static class CliApp
         var after = new Option<string?>("--after") { Description = "The command a run runs after the session of a task, however the task went: a line for the shell.", HelpName = "command" };
         var noAfter = new Option<bool>("--no-after") { Description = "No command after a task." };
         var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
-        var command = new Command("init", "Sets the project up: asks what it needs and writes the settings.")
+        var assist = new Option<string?>("--assist")
         {
-            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes,
+            Description = "Tell an assistant how to set the project up, one step at a time: the introduction with the first step, or the step of this number. It changes nothing, and goes with no other option.",
+            HelpName = "step",
+            Arity = ArgumentArity.ZeroOrOne,
+        };
+        var command = new Command("init", $"Sets the project up: asks what it needs and writes the settings. {ForAnAssistant}")
+        {
+            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes, assist,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
+            // The walk for an assistant sets nothing, so no option that sets something goes with it. A demo changes
+            // nothing of it: it changes nothing as it is.
+            if (result.GetResult(assist) is { Implicit: false })
+            {
+                Option[] others = [board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes];
+                if (others.Any(other => result.GetResult(other) is { Implicit: false }))
+                {
+                    Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
+                    return ExitCode.NotReady;
+                }
+
+                return await AssistAsync(context, result.GetValue(assist), cancellationToken);
+            }
+
             // Each answer is given once: options that answer the same question differently are a wrong command line.
             (bool Wrong, string Message)[] clashes =
             [
@@ -143,7 +164,8 @@ public static class CliApp
             if (context.Terminal is not { } terminal)
             {
                 Fail(context, "toobusy: `init` asks questions and needs a terminal.");
-                return Fail(context, "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.");
+                Fail(context, "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.");
+                return Fail(context, ForAnAssistant);
             }
 
             if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
@@ -169,6 +191,38 @@ public static class CliApp
             return failed ? ExitCode.Failed : ExitCode.Done;
         });
         return command;
+    }
+
+    // Where an assistant that is told to set a project up finds the walk through the setup: the help says it, and
+    // so do the messages of a project that is not set up and of `init` where there is no terminal.
+    const string ForAnAssistant = "An assistant that sets a project up for its owner starts with `toobusy init --assist`.";
+
+    // Tells the assistant of the owner how to set the project up: the introduction with the list of the steps and
+    // the first step, or the step of the number alone. It needs a project and no terminal, reads what the setup
+    // reads, and changes nothing.
+    static async Task<int> AssistAsync(CliContext context, string? number, CancellationToken cancellationToken)
+    {
+        var step = 0;
+        if (number is not null && (!int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out step) || step < 1))
+        {
+            Fail(context, "toobusy: `--assist` takes the number of a step, which is 1 or more");
+            return ExitCode.NotReady;
+        }
+
+        if (FindProject(context) is not { } root)
+            return ExitCode.NotReady;
+        if (step > Assist.Steps.Count)
+        {
+            context.Output.Write(Assist.Complete);
+            return ExitCode.Done;
+        }
+
+        if (await OpenAsync(context, root, demo: false, ready: false, cancellationToken) is not { } bench)
+            return ExitCode.NotReady;
+
+        var ground = await bench.AssistAsync(number is null ? AssistReading.Nothing : Assist.Reads(step), cancellationToken);
+        context.Output.Write(number is null ? Assist.Introduction(ground) : Assist.Step(step, ground));
+        return ExitCode.Done;
     }
 
     // The milestone to work on is the choice of the user: it is asked for on a page, or given here for a script.
@@ -706,6 +760,10 @@ public static class CliApp
 
         Fail(context, "toobusy: this project is not set up yet.");
         Fail(context, "Run `toobusy init` to set it up.");
+
+        // Nobody is at a terminal to be asked: who reads this may be an assistant.
+        if (context.Terminal is null)
+            Fail(context, ForAnAssistant);
         return null;
     }
 

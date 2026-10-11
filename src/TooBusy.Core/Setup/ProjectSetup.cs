@@ -61,11 +61,11 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string NewLabel = "New label…";
 
     // What a first setup proposes to call the two labels.
-    const string ProposedOwner = "needs-owner";
-    const string ProposedInterrupted = "interrupted";
+    internal const string ProposedOwner = "needs-owner";
+    internal const string ProposedInterrupted = "interrupted";
 
     // What a first setup proposes to call the skill a session starts with.
-    const string ProposedSkill = "task-auto";
+    internal const string ProposedSkill = "task-auto";
 
     static readonly string[] Steps = [ProjectLabel, BlockingLabel, TakeLabel, OwnerLabel, InterruptLabel, SkillLabel];
 

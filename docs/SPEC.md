@@ -1,6 +1,6 @@
 # Specification
 
-This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy queue`, `toobusy about`, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
+This is the detailed description of what toobusy does. It grows one part at a time; [IDEA.md](IDEA.md) says what the tool is meant to be, and where the two disagree, this file wins. It has two parts. [Setting a project up](#setting-a-project-up) covers the settings file, `toobusy init`, the walk through the setup that `toobusy init --assist` tells an assistant, the milestone of the user, the model and the effort the tasks are done with, the page `toobusy` opens with, `toobusy queue`, `toobusy about`, `toobusy doctor`, and what the tool says in a project that is not set up. [Running the tasks](#running-the-tasks) covers `toobusy run`: the queue, the sessions of the assistant and what they are told, what a run does to the tracker, the limits of usage, and the page of a run.
 
 ## Setting a project up
 
@@ -10,6 +10,7 @@ In scope:
 
 - the settings file in `.toobusy/`: its format, its first sections, reading and validating it;
 - `toobusy init`: an interactive setup, and the same setup driven by options alone;
+- `toobusy init --assist`: the walk through the setup, told to the assistant of the owner one step at a time;
 - the milestone to work on: the choice of the user, kept on their machine, and `toobusy milestone`;
 - the model and the effort the tasks are done with by default: choices of the user too, `toobusy model` and `toobusy effort`;
 - `toobusy` without a command: the page with the menu;
@@ -17,7 +18,7 @@ In scope:
 - `toobusy status`: whether a run is going on in the working copy;
 - `toobusy about`: the text that tells how a run works;
 - `toobusy doctor`: the check that everything a run needs is installed and logged in;
-- the message of `toobusy`, `toobusy run` and `toobusy queue` in a project that is not set up.
+- the message of `toobusy`, `toobusy run` and `toobusy queue` in a project that is not set up, and where it names `init --assist`.
 
 Out of scope, each a later part of this specification:
 
@@ -123,6 +124,12 @@ In a git repository without `.toobusy/settings.toml`, `toobusy run`, `toobusy qu
 ```
 toobusy: this project is not set up yet.
 Run `toobusy init` to set it up.
+```
+
+Where there is no terminal, the one who reads it may be an assistant, and a third line names where it starts:
+
+```
+An assistant that sets a project up for its owner starts with `toobusy init --assist`.
 ```
 
 The message is coloured: `toobusy:` in the muted colour, the command between backticks in the accent, the rest in the terminal's own colour. The text is the same without colour.
@@ -259,6 +266,7 @@ Without a terminal and without `--yes`, `init` changes nothing and fails with ex
 ```
 toobusy: `init` asks questions and needs a terminal.
 Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.
+An assistant that sets a project up for its owner starts with `toobusy init --assist`.
 ```
 
 **A demo.** `--demo` is an option of every command: it shows the tool over made-up data and changes nothing. What it reads is real where reading changes nothing: the `origin` remote and, through `gh`, the boards of the user and the open milestones of the repository. When there are fewer than ten boards, made-up ones follow the real ones, so that there is a list to scroll; the owners a new project can be made for and the milestones are filled up to ten in the same way. The rest is imitated: the labels are made up, the project has whatever skill it names, the settings that exist are read, nothing is made, linked or written, with `--yes` as well as on the screen, and the settings, the milestone, the model and the effort that are chosen are remembered only until the demo ends. In a folder whose `origin` remote is not a GitHub repository the setup of a demo says, as the real one does, that nothing is verified, and its labels are typed. `toobusy --demo` and `run --demo` show a project that is ready, whatever the project is: where there are no settings they are made up, the first of the milestones is the chosen one, the model is the assistant's own and the effort is `high`, so that the menu opens at once; the setup and the choices are tried from the menu, or with `init --demo`, `milestone --demo`, `model --demo` and `effort --demo`, where nothing is made up for them: the settings are those the project has, when it has any, and nothing is chosen yet. Without a terminal `toobusy --demo` is no different from `toobusy`: it prints the help or the "not set up" message. A run of a demo is the real run over made-up tasks and made-up sessions, described with [the page of a run](#a-demo-of-a-run). The bar of the screen says `demo`. It is there to try the tool and to see what it looks like.
@@ -296,6 +304,87 @@ Escape from these tabs comes back to those two choices when the project has a bo
 **The report.** When the screen is closed, the terminal gets the name of the command and the folder, the answers as `✔ Blocking labels  manual, draft` lines, under them a command around a task that an option set, changed or took away, as it was and as it is now, `✔ Before a task    none → scripts/dev.sh ports free`, and one line that says how the setup ended. After a setup that wrote the settings the last line names the command that tells how a run works: `` `toobusy about` tells how a run works, for you and for your assistant. ``
 
 The setup is written against an interface for asking questions, so that tests answer them from a script and the terminal implementation can change without touching the steps.
+
+#### With an assistant
+
+The owner of a project has their assistant set toobusy up: “set toobusy up here: run `toobusy init --assist` and follow it”. The command tells the assistant how, one step at a time, so that an assistant in a project it knows, and that toobusy has never seen, fits the whole of toobusy to that project: the settings, the choices of the owner, the instructions of the project, its skill and its commands around a task. [`toobusy about`](#toobusy-about) stays what it is: it describes how a run works and asks for nothing. `init --assist` is the walk through the setup, and points at `about` instead of saying it again.
+
+| Command | Prints |
+|---|---|
+| `toobusy init --assist` | the introduction, the list of the steps with how each of them stands, and the first step |
+| `toobusy init --assist <n>` | step `n` alone |
+| `toobusy init --assist <n>` after the last step | `All the steps are done: the setup is complete.` and nothing else; exit code 0 |
+
+- Every step ends with the next one: ``Next: `toobusy init --assist 3` ``. The last step ends so too, and the number after it gives that one line.
+- A number that is not 1 or more, or not a number, is a wrong command line, and so is `--assist` with any other option of `init`: exit code 2.
+- It changes nothing and keeps nothing: there is no record of the steps that are done. A step can be asked for again at any time, and it tells how things stand then, so the same walk sets a project up for the first time and changes a setup that exists.
+- It needs a git working copy, as `init` does, and no terminal: in one it prints the same and opens no screen. It prints Markdown, in English, to the output, and exits with 0.
+- `--demo` changes nothing of it: it changes nothing as it is.
+
+**What it reads.** The settings: missing, valid, or not valid, and then their errors stand at the head of every step, and over the list of the introduction, with that the file is put right by hand first. The choices of the user. Whether the skill of the settings is there. The sign of a run: while a run goes on in the working copy, the introduction says so, and that the setup waits for it. The `origin` remote. And from the tracker, for the steps that choose among what it has: for step 2 the labels of the repository, for step 3 the boards linked to it and the others the user can reach, each with its statuses, and for step 4 the open milestones. These are the readings of `init` and of `doctor`, with their timeouts; the statuses of the boards are asked a few boards at a time, and the board of the settings stands among the boards when the user does not reach it. What cannot be read is said, with the reason and the step that puts it right, and the step is told without it: `gh` is not installed or not logged in, which is asked before anything is read, the `origin` remote is not a GitHub repository, or GitHub did not answer. The introduction and the other steps ask nothing of the tracker.
+
+**The introduction.** A few lines on what toobusy is and what a setup is made of: the settings of the project in `.toobusy/settings.toml`, which are committed; the choices of the owner, which are kept on their machine; and what is the project's own, its instructions, its skill and its commands. Then the rules of the walk:
+
+- Go step by step, in order. A step whose “As things are” already says what the project needs is passed.
+- Ask the owner whatever you do not know, and whatever a step says is theirs to decide.
+- Set things with the commands the steps name, and do not write `.toobusy/settings.toml` by hand; a file that does not validate is the exception.
+- Start no run: a run commits, pushes and closes tasks. Commit nothing of the setup before the owner agrees, where the instructions of the project say so.
+- The steps are written in English; speak to the owner in their language.
+- The walk changes nothing and has no record of the steps that are done.
+
+Then the list of the steps, each with a few words on how it stands, from what is read without the tracker: `Not set: there are no settings yet`, the labels, the board, `Milestone: not chosen`, the name of the skill and whether it is written, the commands around a task.
+
+**A step.** Every step has the same parts, under the same names and in this order, and those that have nothing to say are left out:
+
+- **As things are**: what is set already and what the project has to choose from.
+- **Decide**: what is decided here, and what each answer means for a run.
+- **Look at**: where the answer is likely to be found in the project.
+- **Ask the owner**: what is theirs to decide or to do.
+- **Set it**: the command, written out with the options of this step, on a line of its own.
+- **Check**: how to see that it is set as meant.
+- **Next**: the next step.
+
+```text
+## Step 2 of 9: Which tasks are taken
+
+As things are: not set: there are no settings yet. The labels of acme/rocket: `bug`, `feature`, `docs`, `question`, `wontfix`.
+
+Decide: …
+
+Look at: `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, the issue templates, and how the open tasks are labelled: `gh issue list --limit 50`.
+
+Ask the owner: show the four answers before you set them, and say that the last two labels are made in the repository when it does not have them: everyone who works there sees them.
+
+Set it:
+
+    toobusy init --yes --no-board --no-skill --take-label <label>,<label> --blocking-label <label>,<label> --owner-label needs-owner --interrupt-label interrupted
+
+… `--no-board` and `--no-skill` stand there only because nothing is set yet: steps 3 and 6 set them.
+
+Check: the command ends with `The settings are written to .toobusy/settings.toml.`, or with `Nothing to change`, and `toobusy doctor` passes `settings` and `labels`.
+
+Next: `toobusy init --assist 3`
+```
+
+What the assistant puts in stands in angle brackets. Over settings that exist a command names what is set now, as `--take-label feature,bug`, and a value with a space in it stands in quotes. In a project without settings every command of a step that writes them names, beside its own options, those that keep a first setup from proposing a board or a skill, `--no-board` and `--no-skill`, and the step says why they stand there.
+
+**The steps.**
+
+1. **The machine.** `toobusy doctor`: `git`, `gh` and Claude Code, their logins, and an `origin` remote that is a GitHub repository. What only the owner can do is asked of them: the logins, the `project` scope of the token, and running `claude` once in the folder so that it is trusted. In a project without settings the step says that the check of the settings fails until the next step.
+2. **Which tasks are taken.** The four settings of the labels: the labels to take, the blocking ones, the label of the owner and the label of interrupted tasks, with what each does to a run and which of them must not share a label. It is the first step that writes, and it comes before the board because the first writing of the settings makes the two labels of a run in the repository: they are decided first. The labels of the repository stand there, and those the settings name and the repository does not have. In a project without settings the command says `--no-board --no-skill`; over settings that exist it names the options of the labels alone, with the labels as they are set. The owner sees the four answers before they are set.
+3. **The board.** One of the boards the user can reach, a new one, or none, and what a board means: a task is taken only from `Todo`, a task that is not on the board is held, and the token needs the `project` scope. The boards stand there with their statuses, and one that lacks a status a run knows is marked. The owner is always asked: a board is seen by everyone, and a new one is made on GitHub. `toobusy init --yes --board <URL>`, `--new-board "<title>"` with `--board-owner <login>`, or `--no-board`. Whether the open tasks are put on the board is the owner's to decide.
+4. **The owner's own choices.** The milestone to work on, the model and the effort: `toobusy milestone`, `toobusy model`, `toobusy effort`. The open milestones stand there with their open tasks, and a chosen one that is not open any more is said. All three are asked of the owner, and the step says that they are kept on the machine and not committed, so everyone who clones the project chooses their own. Then `toobusy queue`: the owner is shown which tasks a run would take, in which order, and which are held and why; when that is not what they expect, the walk goes back to step 2 or 3.
+5. **The instructions of the project.** `toobusy about` is read first. The instructions of the project, `CLAUDE.md`, `AGENTS.md`, its skills and the like, are compared with what holds over them in a session, and get what a project with toobusy needs: that an assistant that works with the owner looks at `toobusy status` before it commits, and that in a session of a run the task is kept by toobusy, where they tell an assistant to move, label or close its task. The owner is asked what a session may do alone in this project; a kind of task that it must not do gets a blocking label, back in step 2. No command of toobusy sets this step: the changes are shown to the owner.
+6. **The skill a session starts with.** Whether the project needs one: it does when work without the owner differs from work with them. What the skill says and what it leaves to the first message, as `about` tells; where it is written, `.claude/skills/<name>/SKILL.md`, and what the file needs to be loaded by its command: a front matter with the name of its folder and a description. The step says whether the skill the settings name is written, and where. Then `toobusy init --yes --skill <name>`, or `--no-skill` for a project that needs none. `toobusy doctor` checks that the skill is there, and `toobusy about` shows the first message with it.
+7. **The commands around a task.** What is to be so around every task whatever its session does: the branch of the working copy and its sync with the remote, free ports, services that are up, and what is stopped afterwards. The rules of a command: a line for the shell at the root of the working copy, exit code 0, its time, the task in its environment, no input, and a working tree that is clean after it. `toobusy init --yes --before "<command>" --after "<command>"`, or `--no-before` and `--no-after`. The check is the command run by hand once.
+8. **What a session may do.** A session is a background one in the permission mode `auto`, and nobody answers its prompts: what it is refused is not done. The settings of Claude Code in the project are looked at: what every task needs must be allowed there, the build, the tests, `git` and `gh` among it, and hooks and servers that wait for a person do not work. The owner is asked before anything more is allowed. No command of toobusy sets this step.
+9. **The last check.** `toobusy doctor` passes every check. The step names what is to be committed: `.toobusy/settings.toml`, the skill, and the instructions and the settings of Claude Code that were changed, as the instructions of the project say a commit is made. The assistant tells the owner in a few lines what was set, and that the setup is complete. The step proposes nothing more: no demo, no first run, no next thing to try.
+
+A step tells what the tool does at the time. A later change of what can be set, as the names of the statuses of a board or the branch of the working copy, changes its step in the same commit.
+
+**Where an assistant finds it.** So that an assistant finds the command without being told of it, one sentence, `` An assistant that sets a project up for its owner starts with `toobusy init --assist`. ``, stands in the description of `toobusy` in `--help` and in the description of `init`, where `--assist` is among the options; as the last line of two messages where there is no terminal, `` `init` asks questions and needs a terminal `` and the message of [a project that is not set up](#not-set-up); and `toobusy about` names the command at its head, for the assistant that reads `about` first. An assistant does not take the output of a tool for an order, so it is the owner who tells it to follow the steps.
+
+The steps are a function of what was read that gives the text, with nothing of the terminal in it.
 
 ### `toobusy`
 
@@ -596,7 +685,7 @@ Without a run, `left` is the task an earlier run left with a session, when there
 
 ### `toobusy about`
 
-`about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions of the project to it and to write or correct the skill a session starts with. It describes and asks for nothing: what is done with it is theirs to decide. A run needs none of it, as a session is told all it needs in its first message.
+`about` tells how a run works, for the owner of a project and for the assistant that helps them to fit the instructions of the project to it and to write or correct the skill a session starts with. It describes and asks for nothing: what is done with it is theirs to decide. At its head it names [`toobusy init --assist`](#with-an-assistant), the walk through the setup, for the assistant that reads `about` first. A run needs none of it, as a session is told all it needs in its first message.
 
 It prints, as Markdown and in this order: which tasks a run takes and how it does them, with the commands that show the queue and say whether a run is going on; that toobusy keeps the task of a session, and what it does to it before the session; that a session makes new tasks itself, which of them toobusy asks for, and what of them is the project's to say; that a session starts with the skill the settings name, what the first message says already, so that the skill does not say it again or against it, and what is the skill's to say: how the work of the project is done and checked without its owner, what is done before and after it, the language of the report, and which tasks a session makes besides the one of what is left; the commands of the project a run runs around a task, when each runs, what it learns of the task and what a failure does, so that the instructions of a project do not tell a session to do the same; the messages a session gets, word for word, and when each of them comes — the first one, the one for a session that waits for the owner, the one after a usage limit, those for a session that a later run goes on with, and the one of `/abort`; the lines a reply ends with, what is checked after each and what is done to the tracker, and that a commit may close its task, which the run settles all the same; and what holds over the instructions of a project. The messages, the times and the counts are those a run uses, so the text cannot say another thing than a run does.
 
@@ -675,7 +764,7 @@ A command of a package manager is proposed only when that manager is on the path
 
 | Code | Meaning |
 |---|---|
-| 0 | done; a run that ran out of tasks, that its owner stopped, that did the task or the number of tasks it was started for, or that a usage limit paused; a queue that is shown, whatever is in it; `status` when no run is going on |
+| 0 | done; a run that ran out of tasks, that its owner stopped, that did the task or the number of tasks it was started for, or that a usage limit paused; a queue that is shown, whatever is in it; `status` when no run is going on; the steps of `init --assist`, whatever they find |
 | 1 | failed: a check did not pass, a value was refused, `init` was declined or left, the settings do not validate, the milestone to work on, the model or the effort is not chosen, the tasks cannot be read, a run stopped because something was wrong, the task of `run --task` is not one a run takes |
 | 2 | there is no project, the project is not set up, there is no home folder to keep the choices in, or the command line is wrong |
 | 3 | a run is going on in the working copy: `status` says so, and `run` did not start beside it |
@@ -690,6 +779,8 @@ A command of a package manager is proposed only when that manager is on the path
 - The screens, through a terminal of a test: scripted keys, a size, and the frames that were drawn. A tape is read as the rows the terminal's own screen has after it, sequence by sequence, so that a tape that has lost count of its lines fails. A key that a test holds back for something that never happens fails the test instead of letting the page go on for ever.
 - `doctor`: each check passed, failed and skipped, the statuses of a board with each one missing, without the field and not read, the skill looked for in the folders of a test, the fix for each platform with and without its package manager, the lines of the checks with and without a terminal, and a run that does not start while a check fails, from the command line and from the menu, where one that starts after the checks is covered too.
 - `status` through the command line: no run, the task of a record, a run that goes on, with its task, between tasks and waiting for a usage limit, what a run that died left behind, `--json`, a demo, outside a git working copy, and that it asks nothing of the machine and leaves nothing on it.
+- The steps of `init --assist`, as a function of what is read: every step over what a project may have: no settings, settings that are valid and settings that are not; a board, no board and a board with other statuses; a skill that is named and written, named and not written, and none; commands around a task and none; choices that are made and not made; a tracker that cannot be read. Through the command line: the introduction with its list; a number after the last step; a number that is not one; `--assist` with another option; outside a git working copy; without a terminal and in one; a run that goes on; that nothing is written anywhere, and nothing is asked of the tracker but what is read; and that every command line a step names is parsed by the real command line of the tool, so that no step names a command or an option that is not there.
+- The help of `toobusy` and of `init`, and the two messages that name `init --assist` where there is no terminal.
 - The "not set up" message and the exit codes, through the command line; `about` outside a project, in one that is set up, with a skill and without one, with the commands around a task, and in one whose settings do not validate.
 
 ## Running the tasks

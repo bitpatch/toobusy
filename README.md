@@ -9,6 +9,7 @@ toobusy is in development, and there is no release yet: it is built from source,
 What works today:
 
 - **Setting a project up**: `toobusy init` asks what it needs and writes the settings, on a screen or by options alone.
+- **Setting it up with your assistant**: `toobusy init --assist` tells the assistant how, one step at a time, and changes nothing itself.
 - **Checking the machine**: `toobusy doctor` says whether everything a run needs is there, and how to fix what is not.
 - **Your own choices**: the milestone to work on, and the model and the effort the tasks are done with.
 - **Looking at the queue**: `toobusy queue` shows which tasks a run would take, which open later and which are held, and why, without running anything.
@@ -105,6 +106,16 @@ Each is optional, and a line for the shell that runs at the root of the working 
 Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way.
 
 Without questions, as in a script: `toobusy init --yes` takes what the options say and, for the rest, what the setup proposes. `toobusy init --help` lists the options.
+
+### With an assistant
+
+Your assistant can set the project up with you. Tell it, in the folder of the project:
+
+> Set toobusy up here: run `toobusy init --assist` and follow it.
+
+The command prints a walk through the setup for the assistant, one step at a time, and changes nothing itself: the machine, which tasks are taken, the board, your own choices, the instructions of the project, the skill, the commands around a task, what a session may do, and a last check. Each step says how things stand now, what is to be decided, where to look in the project, what to ask you, the command that sets it and how to check it; `toobusy init --assist 3` prints step 3 alone. The assistant asks you whatever is yours to decide, starts no run, and commits nothing before you agree. The same walk changes a setup that exists.
+
+It is you who tells the assistant to follow the steps: an assistant does not take what a tool prints for an order.
 
 ### `toobusy doctor`
 

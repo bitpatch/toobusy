@@ -214,7 +214,9 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(2, exit);
         Assert.Equal("", output);
         Assert.Equal(
-            "toobusy: this project is not set up yet." + Environment.NewLine + "Run `toobusy init` to set it up." + Environment.NewLine,
+            "toobusy: this project is not set up yet." + Environment.NewLine
+            + "Run `toobusy init` to set it up." + Environment.NewLine
+            + "An assistant that sets a project up for its owner starts with `toobusy init --assist`." + Environment.NewLine,
             error);
     }
 
@@ -2034,7 +2036,8 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(2, exit);
         Assert.Equal(
-            $"{Palette.Dark.Muted("toobusy:")} this project is not set up yet.{Environment.NewLine}Run {Palette.Dark.Accent("`toobusy init`")} to set it up.{Environment.NewLine}",
+            $"{Palette.Dark.Muted("toobusy:")} this project is not set up yet.{Environment.NewLine}Run {Palette.Dark.Accent("`toobusy init`")} to set it up.{Environment.NewLine}"
+            + $"An assistant that sets a project up for its owner starts with {Palette.Dark.Accent("`toobusy init --assist`")}.{Environment.NewLine}",
             error.ToString());
     }
 
@@ -2058,7 +2061,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", output);
         Assert.Equal(
             "toobusy: `init` asks questions and needs a terminal." + Environment.NewLine
-            + "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options." + Environment.NewLine,
+            + "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options." + Environment.NewLine
+            + "An assistant that sets a project up for its owner starts with `toobusy init --assist`." + Environment.NewLine,
             error);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
@@ -2917,6 +2921,322 @@ public sealed class CliAppTests : IDisposable
 
         // Nothing was checked for a run that does not start.
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude");
+    }
+
+    // What `gh` answers of the boards of a user who can reach two, one of them linked to the repository.
+    const string TwoBoards = "owner\tuser\tann\nlinked\thttps://github.com/orgs/acme/projects/1\tRocket\nboard\thttps://github.com/users/ann/projects/2\tGarden\n";
+
+    // A machine with git and a logged-in `gh`, in a project cloned from acme/rocket: the repository has these
+    // labels and these open milestones, the user reaches the two boards, and the second of them has statuses of
+    // its own.
+    static FakeProcesses GitHubForAssist(string labels = "", string milestones = "") => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    {
+        "git" => "https://github.com/acme/rocket.git\n",
+        "gh" when arguments[0] == "label" => labels,
+        "gh" when arguments[0] == "api" && arguments[1].StartsWith("repos/", StringComparison.Ordinal) => milestones,
+        "gh" when arguments.Any(argument => argument.Contains("options { name }", StringComparison.Ordinal)) =>
+            arguments.Contains("number=2") ? "board\nstatus\tBacklog\nstatus\tDone\n" : NewBoard,
+        "gh" when arguments[0] == "api" => TwoBoards,
+        _ => "",
+    }, ""));
+
+    // What is in the folders of the test, to see that a command left them as they were.
+    string[] Files() => [.. new[] { folder, personal }.SelectMany(root => root.GetFileSystemInfos("*", SearchOption.AllDirectories)).Select(entry => entry.FullName).Order(StringComparer.Ordinal)];
+
+    [Fact]
+    public async Task AssistTellsTheIntroductionAndTheFirstStepWithoutATerminalAndAsksNothingOfTheTracker()
+    {
+        GitRepository();
+        var processes = GitHubForAssist();
+        var before = Files();
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["init", "--assist"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.StartsWith("# Setting a project up for toobusy\n", output, StringComparison.Ordinal);
+        Assert.Contains("1. **The machine.** `toobusy doctor` tells; the `origin` remote is acme/rocket.\n2. **Which tasks are taken.** Not set: there are no settings yet.\n", output, StringComparison.Ordinal);
+        Assert.EndsWith("Next: `toobusy init --assist 2`\n", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", output, StringComparison.Ordinal);
+
+        // The remote is read, and nothing else is asked of the machine.
+        Assert.Equal(["git"], processes.Asked.Select(asked => asked.Command).Distinct());
+        Assert.Equal(before, Files());
+    }
+
+    [Fact]
+    public async Task AssistTellsTheStandingOfAProjectThatIsSetUp()
+    {
+        GitRepository();
+        WriteSettings(SettingsWithABoard + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\n");
+        WriteSkill("task-auto");
+        await ChooseAllAsync();
+        var before = Files();
+
+        var (exit, output, _) = await RunFromAsync(folder.CreateSubdirectory("src").FullName, "init", "--assist");
+
+        Assert.Equal(0, exit);
+        Assert.Contains(
+            """
+            2. **Which tasks are taken.** Take: `feature`, `bug`; blocking: `draft`; owner: `needs-owner`; interrupted: `interrupted`.
+            3. **The board.** The board is https://github.com/orgs/acme/projects/1.
+            4. **The owner's own choices.** Milestone: no milestone; model: the assistant's own; effort: high.
+            5. **The instructions of the project.** The project's own; toobusy does not read them.
+            6. **The skill a session starts with.** `task-auto`, written.
+            7. **The commands around a task.** Before: `scripts/dev.sh ports free`; after: none.
+            """.ReplaceLineEndings("\n"),
+            output,
+            StringComparison.Ordinal);
+        folder.GetDirectories("src")[0].Delete();
+        Assert.Equal(before, Files());
+    }
+
+    [Fact]
+    public async Task AssistSaysThatTheSetupWaitsForARunThatGoesOn()
+    {
+        GitRepository();
+        GoingRun(Working);
+
+        var (exit, output, _) = await RunAsync("init", "--assist");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("**A run is going on in this working copy: #12 Export the orders as a file · claude attach 1a2b3c4d.** The setup waits for it", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStepOfAssistReadsFromTheTrackerWhatItChoosesAmongAndChangesNothing()
+    {
+        GitRepository();
+        WriteSettings(SettingsWithABoard);
+        var processes = GitHubForAssist(labels: "bug\nfeature\ndraft\nquestion\n", milestones: "v2\t\t1\nv1\t2030-03-01T00:00:00Z\t12\n");
+        var before = Files();
+        var settings = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+
+        var (exit, labels, error) = await RunAsync(Context(processes), ["init", "--assist", "2"]);
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.StartsWith("## Step 2 of 9: Which tasks are taken\n\nAs things are: the labels to take: `feature`, `bug`;", labels, StringComparison.Ordinal);
+        Assert.Contains("The labels of acme/rocket: `bug`, `feature`, `draft`, `question`. The settings name `needs-owner`, `interrupted`, which the repository does not have.", labels, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --take-label feature,bug --blocking-label draft --owner-label needs-owner --interrupt-label interrupted\n", labels, StringComparison.Ordinal);
+        Assert.EndsWith("Next: `toobusy init --assist 3`\n", labels, StringComparison.Ordinal);
+        Assert.DoesNotContain("# Setting a project up", labels, StringComparison.Ordinal);
+
+        var (_, boards, _) = await RunAsync(Context(processes), ["init", "--assist", "3"]);
+        Assert.Contains(
+            "- Rocket, https://github.com/orgs/acme/projects/1, linked to acme/rocket: Todo, In Progress, Done\n"
+            + "- Garden, https://github.com/users/ann/projects/2: Backlog, Done. **It lacks `Todo`, `In Progress`, which a run knows.**\n",
+            boards,
+            StringComparison.Ordinal);
+
+        var (_, milestones, _) = await RunAsync(Context(processes), ["init", "--assist", "4", "--demo"]);
+        Assert.Contains("The open milestones of acme/rocket, each with its open tasks:\n\n- v1: 12 tasks, due 2030-03-01\n- v2: 1 task\n", milestones, StringComparison.Ordinal);
+
+        // Nothing is asked of GitHub but what is read: no label and no board is made, and nothing is linked.
+        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Any(argument =>
+            argument is "create" or "edit" or "delete" || argument.Contains("mutation", StringComparison.Ordinal) || argument is "POST" or "PATCH" or "PUT" or "DELETE"));
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude");
+        Assert.Equal(before, Files());
+        Assert.Equal(settings, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task TheBoardOfTheSettingsStandsAmongTheBoardsOfAStepWhenTheUserDoesNotReachIt()
+    {
+        GitRepository();
+        WriteSettings(SettingsWithABoard.Replace("projects/1", "projects/7", StringComparison.Ordinal));
+
+        var (_, output, _) = await RunAsync(Context(GitHubForAssist()), ["init", "--assist", "3"]);
+
+        Assert.Contains("each with what it calls its statuses:\n\n- https://github.com/orgs/acme/projects/7: Todo, In Progress, Done\n- Rocket, ", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStepOfAssistIsToldWithoutATrackerThatCannotBeRead()
+    {
+        GitRepository();
+
+        // No command runs on this machine: `gh` is not there.
+        var (exit, output, error) = await RunAsync("init", "--assist", "2");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("The labels of the repository cannot be read: the GitHub command-line tool `gh` is not installed. Step 1 puts it right: `toobusy init --assist 1`. The step is told without them.", output, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --no-board --no-skill --take-label", output, StringComparison.Ordinal);
+
+        var loggedOut = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
+            ? new ProcessResult(ProcessStatus.Exited, 1, "", "")
+            : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+        var (_, boards, _) = await RunAsync(Context(loggedOut), ["init", "--assist", "3"]);
+        Assert.Contains("The boards cannot be read: `gh` is not logged in to github.com. Step 1 puts it right", boards, StringComparison.Ordinal);
+
+        var elsewhere = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://gitlab.com/acme/rocket.git\n" : "", ""));
+        var (_, milestones, _) = await RunAsync(Context(elsewhere), ["init", "--assist", "4"]);
+        Assert.Contains("The open milestones cannot be read: the `origin` remote is not a GitHub repository. Step 1 puts it right", milestones, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStepOfAssistStartsWithTheErrorsOfSettingsThatDoNotValidate()
+    {
+        GitRepository();
+        WriteSettings(Settings.Replace("type = \"github\"", "type = \"jira\"", StringComparison.Ordinal));
+
+        var (exit, output, _) = await RunAsync("init", "--assist", "6");
+
+        Assert.Equal(0, exit);
+        Assert.StartsWith("## Step 6 of 9: The skill a session starts with\n\n**The settings of this project do not validate:**\n\n- .toobusy/settings.toml:4: tracker.type: ", output, StringComparison.Ordinal);
+        Assert.Contains("Put `.toobusy/settings.toml` right by hand first", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANumberAfterTheLastStepOfAssistSaysThatTheSetupIsCompleteAndNothingElse()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync("init", "--assist", "10");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal("All the steps are done: the setup is complete.\n", output);
+    }
+
+    [Theory]
+    [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "0")]
+    [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "two")]
+    [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "1.5")]
+    [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--assist", "--yes")]
+    [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--assist", "3", "--no-board")]
+    [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--skill", "task-auto", "--assist")]
+    public async Task AssistWithANumberThatIsNotOneOrWithAnotherOptionIsAWrongCommandLine(string message, params string[] options)
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync(["init", .. options]);
+
+        Assert.Equal(2, exit);
+        Assert.Equal("", output);
+        Assert.Equal(message + Environment.NewLine, error);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
+    public async Task AssistWithANegativeNumberIsAWrongCommandLineToo()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("init", "--assist", "-1");
+
+        Assert.Equal(2, exit);
+        Assert.DoesNotContain("Step", output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--assist")]
+    [InlineData("--assist", "3")]
+    [InlineData("--assist", "10")]
+    public async Task AssistNeedsAGitRepositoryAsInitDoes(params string[] options)
+    {
+        var (exit, output, error) = await RunAsync(["init", .. options]);
+
+        Assert.Equal(2, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task InATerminalAssistPrintsTheSameAndOpensNoScreen()
+    {
+        GitRepository();
+        var (_, plain, _) = await RunAsync("init", "--assist", "5");
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys(), "init", "--assist", "5");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(plain, output);
+    }
+
+    [Fact]
+    public async Task ADemoChangesNothingOfAssist()
+    {
+        GitRepository();
+        var (_, plain, _) = await RunAsync("init", "--assist");
+
+        var (exit, output, _) = await RunAsync("init", "--assist", "--demo");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(plain, output);
+    }
+
+    // The projects the steps are told over: one that toobusy has never seen, one whose settings do not validate,
+    // and one that is set up, with a board, a skill and commands around a task, and with labels that need quotes.
+    public static TheoryData<string> ProjectsOfAssist =>
+    [
+        "",
+        Settings.Replace("type = \"github\"", "type = \"jira\"", StringComparison.Ordinal),
+        Settings,
+        SettingsWithABoard.Replace("take = [\"feature\", \"bug\"]", "take = [\"feature\", \"good first issue\"]", StringComparison.Ordinal) + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n",
+    ];
+
+    [Theory]
+    [MemberData(nameof(ProjectsOfAssist))]
+    public async Task EveryCommandAStepOfAssistNamesIsOneTheToolHas(string settings)
+    {
+        GitRepository();
+        if (settings.Length > 0)
+            WriteSettings(settings);
+        var processes = GitHubForAssist(labels: "bug\nfeature\n", milestones: "v1\t\t3\n");
+        var root = CliApp.CreateRootCommand(Context(null));
+
+        var texts = new List<string> { (await RunAsync(Context(processes), ["init", "--assist"])).Output };
+        for (var step = 1; step <= 10; step++)
+            texts.Add((await RunAsync(Context(processes), ["init", "--assist", $"{step}"])).Output);
+
+        // A command stands on a line of its own in a block of code, or between backticks in a sentence.
+        var commands = texts
+            .SelectMany(text => Regex.Matches(text, @"^    (toobusy .+)$|`(toobusy [^`]+)`", RegexOptions.Multiline))
+            .Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value)
+            .Distinct()
+            .ToList();
+
+        Assert.True(commands.Count > 25, string.Join('\n', commands));
+        Assert.Contains(commands, command => command.EndsWith(" --before \"<command>\" --after \"<command>\"", StringComparison.Ordinal));
+        Assert.Contains("toobusy queue --json", commands);
+        foreach (var command in commands)
+        {
+            var parsed = root.Parse([.. System.CommandLine.Parsing.CommandLineParser.SplitCommandLine(command).Skip(1)]);
+            Assert.True(parsed.Errors.Count == 0, $"{command}: {string.Join("; ", parsed.Errors.Select(wrong => wrong.Message))}");
+            Assert.Empty(parsed.UnmatchedTokens);
+        }
+    }
+
+    [Fact]
+    public async Task TheHelpOfTheToolAndOfInitSayWhereAnAssistantStarts()
+    {
+        const string Said = "An assistant that sets a project up for its owner starts with `toobusy init --assist`.";
+
+        var (_, tool, _) = await RunAsync("--help");
+        var (_, init, _) = await RunAsync("init", "--help");
+
+        Assert.Contains(Said, Regex.Replace(tool, @"\s+", " "), StringComparison.Ordinal);
+        Assert.Contains(Said, Regex.Replace(init, @"\s+", " "), StringComparison.Ordinal);
+        Assert.Contains("--assist <step>", init, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutNamesAssistAtItsHead()
+    {
+        var (_, output, _) = await RunAsync("about");
+
+        Assert.Contains("An assistant that sets a project up for its owner starts with `toobusy init --assist`", output.Split("## A run")[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InATerminalTheNotSetUpMessageDoesNotSpeakToAnAssistant()
+    {
+        GitRepository();
+
+        var (_, _, error) = await RunWithKeysAsync(new Keys(), "run");
+
+        Assert.Equal("toobusy: this project is not set up yet." + Environment.NewLine + "Run `toobusy init` to set it up." + Environment.NewLine, error);
     }
 
     // A task that a run works on, as its sign says it.

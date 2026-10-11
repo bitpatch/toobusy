@@ -51,6 +51,8 @@ public static class About
 
             toobusy takes the tasks of a project's tracker one after another and has an AI coding assistant do each of them, in a session of its own and with nobody at the keyboard. This is what such a session meets: what it is told, what is done around it, and what is made of its answer. It is written for the owner of a project and for the assistant that helps them, to fit the instructions of the project to a run and to write the skill a session starts with. Nothing here has to be done for a run to work: a session is told all it needs in its first message.
 
+            An assistant that sets a project up for its owner starts with `toobusy init --assist`: it walks through the setup one step at a time, and points here for how a run works.
+
             ## A run
 
             - The tasks are the open tasks of the milestone the user works on, or all the open ones when the user works without a milestone.

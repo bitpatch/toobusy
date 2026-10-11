@@ -192,6 +192,53 @@ public sealed record Workbench(
         return (recorded is null ? lineup : lineup.Taking(recorded), recorded);
     }
 
+    // How the project stands for a step of `toobusy init --assist`: the settings, the choices of the user, the skill
+    // the settings name and the sign of a run, and from the tracker what the step chooses among, as the setup reads
+    // it. Nothing is changed by it, and nothing is asked of the tracker for a step that chooses among nothing there.
+    // What cannot be read is left out, with the reason when the tracker cannot be asked at all.
+    public async Task<AssistGround> AssistAsync(AssistReading reading, CancellationToken cancellationToken)
+    {
+        var loaded = Settings.Load();
+        var ground = new AssistGround(loaded, Settings.DisplayPath, Repository)
+        {
+            Milestone = Personal.LoadMilestone(),
+            Model = Personal.LoadModel(),
+            Effort = Personal.LoadEffort(),
+            Skill = loaded?.Settings?.Skill is { } skill ? Machine.FindSkill(skill) : null,
+            Going = Going()?.Sign.Told,
+        };
+        if (reading == AssistReading.Nothing)
+            return ground;
+        if (!await Machine.HasAsync(Tool.GitHubCli, cancellationToken))
+            return ground with { Unread = "the GitHub command-line tool `gh` is not installed." };
+        if (!await Machine.TrackerLoggedInAsync(cancellationToken))
+            return ground with { Unread = "`gh` is not logged in to github.com." };
+
+        // The boards are those of the user, whatever the repository is; the labels and the milestones are its own.
+        if (reading == AssistReading.Boards)
+        {
+            var known = (await Boards.ReadAsync(Repository, cancellationToken)).Boards;
+            if (loaded?.Settings?.Tracker.Board is { } kept && known.All(board => !board.Address.Equals(kept, StringComparison.OrdinalIgnoreCase)))
+                known = [new SetupBoard(kept, "", Linked: false), .. known];
+
+            // The statuses of a board are a request each: a few are asked at a time.
+            var boards = new List<AssistBoard>();
+            foreach (var some in known.Chunk(8))
+            {
+                boards.AddRange(await Task.WhenAll(some.Select(async board =>
+                    new AssistBoard(board.Address, board.Title, board.Linked, await Machine.ReadStatusesAsync(board.Address, cancellationToken)))));
+            }
+
+            return ground with { Boards = boards };
+        }
+
+        if (Repository is null)
+            return ground with { Unread = "the `origin` remote is not a GitHub repository." };
+        return reading == AssistReading.Labels
+            ? ground with { Labels = await Machine.ReadLabelsAsync(Repository, cancellationToken) }
+            : ground with { Milestones = await ReadMilestonesAsync(cancellationToken) };
+    }
+
     // The open milestones of the repository; null when they cannot be read.
     public async Task<IReadOnlyList<Milestone>?> ReadMilestonesAsync(CancellationToken cancellationToken) =>
         Repository is null ? null : await Milestones.ReadOpenAsync(Repository, cancellationToken);
