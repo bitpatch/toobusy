@@ -51,6 +51,9 @@ public interface ICheckupMachine
 
     Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken);
 
+    // What the board calls its statuses; none for a board that has none, and null when they cannot be read.
+    Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken);
+
     // The labels of the repository; null when they cannot be read.
     Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken);
 

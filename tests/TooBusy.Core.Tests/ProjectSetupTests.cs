@@ -1097,6 +1097,92 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task ABoardThatLacksAStatusOfARunIsTakenAndSaidOnTheLastPageAndInTheResult()
+    {
+        tracker.Statuses = ["Backlog", "Ready", "Done"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        var result = await RunAsync();
+
+        SetupNote[] said =
+        [
+            new(SetupTone.Warning, "The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done."),
+            new(SetupTone.Muted, "Name its statuses Todo, In Progress and Done before a run: `toobusy doctor` fails until then."),
+        ];
+        Assert.Equal(said, dialog.Shown.Notes.TakeLast(2));
+        Assert.Equal(said, result.Notes);
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(Moon, store.Saved!.Tracker.Board);
+        Assert.Equal([Moon], tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsABoardThatLacksAStatusIsANoteOfTheResultAndTheSettingsAreWritten()
+    {
+        tracker.Statuses = ["Todo", "Doing", "Done"];
+
+        var result = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Existing(Moon)));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(Moon, store.Saved!.Tracker.Board);
+        Assert.Equal(new SetupNote(SetupTone.Warning, "The board has no status “In Progress”: it has Todo, Doing, Done."), result.Notes[0]);
+    }
+
+    [Fact]
+    public async Task ABoardThatHasTheStatusesOfARunIsNotSpokenOf()
+    {
+        tracker.Statuses = ["todo", "in progress", "DONE", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        Assert.Empty((await RunAsync()).Notes);
+        Assert.Equal([Moon], tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task StatusesThatCannotBeReadAreLeftToTheDoctor()
+    {
+        tracker.Statuses = null;
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        var result = await RunAsync();
+
+        Assert.Empty(result.Notes);
+        Assert.Equal(Moon, store.Saved!.Tracker.Board);
+    }
+
+    [Fact]
+    public async Task TheStatusesAreAskedOnlyOfABoardThatIsThereAndWhereSomethingIsVerified()
+    {
+        tracker.Statuses = [];
+
+        // No board and a new one: a new board has the statuses of a run.
+        dialog.Board(new BoardAnswer.None());
+        Assert.Empty((await RunAsync()).Notes);
+        boards.Read = new SetupBoards([], [new("acme", true)]);
+        dialog.Board(new BoardAnswer.Created(new("acme", true), "Rocket"));
+        Assert.Empty((await RunAsync()).Notes);
+
+        // Nothing is verified without GitHub: the board is taken as typed.
+        machine.TrackerReachable = false;
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        var result = await RunAsync();
+
+        Assert.DoesNotContain(result.Notes, note => note.Text.Contains("status", StringComparison.Ordinal));
+        Assert.Empty(tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task ABoardThatIsChangedForAnotherIsNotSpokenOfAnyMore()
+    {
+        tracker.Statuses = [];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Back("Blocking labels");
+        dialog.Board(new BoardAnswer.None());
+
+        Assert.Empty((await RunAsync()).Notes);
+    }
+
+    [Fact]
     public async Task ASkillThatCannotBeLookedForIsNotSpokenOf()
     {
         machine.Skills = null;
@@ -1333,6 +1419,18 @@ public class ProjectSetupTests
         {
             Calls++;
             return Task.FromResult(Unreadable.Contains(board) ? $"{board} cannot be read" : null);
+        }
+
+        // What every board calls its statuses; null is a board whose statuses cannot be read.
+        public IReadOnlyList<string>? Statuses { get; set; } = ["Todo", "In Progress", "Done"];
+
+        // The boards whose statuses were asked for.
+        public List<string> StatusesOf { get; } = [];
+
+        public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken)
+        {
+            StatusesOf.Add(board);
+            return Task.FromResult(Statuses);
         }
 
         public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken)

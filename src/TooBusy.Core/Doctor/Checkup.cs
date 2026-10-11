@@ -1,3 +1,4 @@
+using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Doctor;
@@ -14,6 +15,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
     public const string Settings = "settings";
     public const string Repository = "repository";
     public const string Board = "board";
+    public const string Statuses = "statuses";
     public const string Labels = "labels";
     public const string Skill = "skill";
 
@@ -64,6 +66,25 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
                 BoardAccess.LacksScope => new CheckResult(Board, CheckState.Failed, "Your GitHub login cannot work with projects.", Fixes.ProjectScope),
                 BoardAccess.NoAnswer => new CheckResult(Board, CheckState.Failed, "GitHub did not answer, so the board could not be checked."),
                 _ => new CheckResult(Board, CheckState.Failed, $"{board} cannot be read: it does not exist, or you have no access to it."),
+            });
+        }
+
+        // A run takes a task from one status of the board and moves it to two more: a board that calls them
+        // otherwise would give it no task, and no word of why.
+        if (loaded?.Settings is not { } kept)
+            Tell(Waits(Statuses, "the settings"));
+        else if (kept.Tracker.Board is not { } standing)
+            Tell(new CheckResult(Statuses, CheckState.Skipped, "the project has no board"));
+        else if (!Passed(Board))
+            Tell(Waits(Statuses, "the board"));
+        else
+        {
+            view.Start(Statuses);
+            Tell(await machine.ReadStatusesAsync(standing, cancellationToken) switch
+            {
+                null => new CheckResult(Statuses, CheckState.Failed, "The statuses of the board cannot be read."),
+                var has when BoardStatuses.Lack(has) is { } lack => new CheckResult(Statuses, CheckState.Failed, lack, Fixes.Statuses),
+                var has => new CheckResult(Statuses, CheckState.Passed, string.Join(", ", has)),
             });
         }
 

@@ -8,8 +8,8 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli.Imitation;
 
 // What `init --demo` puts in place of the machine and the tracker: everything is installed and logged in,
-// every board can be read, the repository has made-up labels, the project has whatever skill it names, and nothing
-// is made or linked.
+// every board can be read and has the statuses a run knows, the repository has made-up labels, the project has
+// whatever skill it names, and nothing is made or linked.
 // The repository itself is the one it is given: the real `origin` of the project when it is known.
 public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTracker
 {
@@ -22,6 +22,11 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
     public static SkillLook Skill(string name) => new(true, $".claude/skills/{name}/SKILL.md");
 
     public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
+    // The statuses of every board of a demo: those GitHub gives a new one.
+    public static IReadOnlyList<string> Statuses { get; } = ["Todo", "In Progress", "Done"];
+
+    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>?>(Statuses);
 
     public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<string>>(["bug", "feature", "chore", "docs", "draft", "interrupted", "manual", "question"]);

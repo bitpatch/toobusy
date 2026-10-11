@@ -147,6 +147,9 @@ public interface ISetupTracker
     // Null when the board can be read with the scope it needs; otherwise why it cannot.
     Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken);
 
+    // What the board calls its statuses; none for a board that has none, and null when they cannot be read.
+    Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken);
 
     // Makes a board and gives its address.

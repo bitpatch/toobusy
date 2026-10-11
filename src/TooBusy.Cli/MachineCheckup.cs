@@ -52,6 +52,8 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform, 
 
     public Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken) => tracker.CheckBoardAsync(board, cancellationToken);
 
+    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) => tracker.ReadStatusesAsync(board, cancellationToken);
+
     public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) => tracker.FindLabelsAsync(repository, cancellationToken);
 
     public SkillLook FindSkill(string name) => ClaudeSkills.Find(root, configuration, name);

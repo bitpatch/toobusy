@@ -77,6 +77,57 @@ public class GitHubSetupTests
     }
 
     [Fact]
+    public async Task TheStatusesOfABoardAreTheOptionsOfItsStatusField()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("board\nstatus\tBacklog\r\nstatus\tIn Progress\nstatus\tDone\n"));
+
+        var statuses = await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["Backlog", "In Progress", "Done"], statuses);
+        var (command, arguments) = Assert.Single(processes.Asked);
+        Assert.Equal("gh", command);
+        Assert.Equal(["api", "graphql", "-f", "login=acme", "-F", "number=7", "-f"], arguments.Take(7));
+        Assert.Equal(
+            "query=query($login: String!, $number: Int!) { organization(login: $login) { projectV2(number: $number) { fields(first: 100) { nodes { ... on ProjectV2SingleSelectField { name options { name } } } } } } }",
+            arguments[7]);
+        Assert.Equal(
+            ["--jq", """.data.organization.projectV2 | select(. != null) | "board", (.fields.nodes[]? | select(.name == "Status") | .options[]? | "status\t\(.name)")"""],
+            arguments.Skip(8));
+    }
+
+    [Fact]
+    public async Task TheStatusesOfTheBoardOfAUserAreAskedOfTheUser()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("board\nstatus\tTodo\n"));
+
+        Assert.Equal(["Todo"], await Setup().ReadStatusesAsync("https://github.com/users/ann/projects/2", TestContext.Current.CancellationToken));
+
+        var arguments = Assert.Single(processes.Asked).Arguments;
+        Assert.Contains("user(login: $login)", arguments[7], StringComparison.Ordinal);
+        Assert.StartsWith(".data.user.projectV2 ", arguments[9], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ABoardWithoutTheStatusFieldHasNoStatusesAndOneThatCannotBeReadHasNoAnswer()
+    {
+        // The board is there and has no such field; then a board that is not there, a login without the scope, a
+        // slow answer and an answer that names no board.
+        processes.Answers.Enqueue(FakeProcesses.Answered("board\n"));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+
+        Assert.Equal([], await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync("https://github.com/acme/rocket", TestContext.Current.CancellationToken));
+        Assert.Equal(5, processes.Asked.Count);
+    }
+
+    [Fact]
     public async Task ABoardThatCanBeReadIsNotRefused()
     {
         processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\n"));

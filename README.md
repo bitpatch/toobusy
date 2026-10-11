@@ -88,6 +88,8 @@ Run it in a terminal, in the folder of the project. It asks:
 
 The last page shows what saving will do. Until you choose `Save and exit` nothing is changed anywhere. Saving writes `.toobusy/settings.toml` and does on GitHub what you asked for: it makes a new board, links the board to the repository, and makes the two labels when the repository does not have them. It never touches the working copy or git.
 
+A run knows a board by three statuses, `Todo`, `In Progress` and `Done`, as GitHub names them on a new board, whatever the case of their letters. `init` warns about a board that lacks one and writes the settings all the same; `toobusy doctor` fails and no run starts until the board has them. `toobusy init --no-board` works without a board.
+
 The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 
 Two settings are not asked for: the commands a run runs around every task, for what must not depend on a session remembering it. Options of `init` set them, `toobusy init --before "scripts/dev.sh ports free" --after "scripts/dev.sh server stop"`, and `--no-before` and `--no-after` take them away; the last page shows what changes before it is saved.
@@ -110,7 +112,7 @@ Without questions, as in a script: `toobusy init --yes` takes what the options s
 toobusy doctor
 ```
 
-It checks everything a run needs: `git`, `gh` and Claude Code with their logins, the settings, the repository, the board, the labels and the skill. It prints a line per check and, under a failed one, the command that fixes it. It changes nothing, and exits with 0 when nothing failed. One thing it does not check is that Claude Code trusts the folder: a run says so when it cannot start its first session.
+It checks everything a run needs: `git`, `gh` and Claude Code with their logins, the settings, the repository, the board and its statuses, the labels and the skill. It prints a line per check and, under a failed one, the command that fixes it. It changes nothing, and exits with 0 when nothing failed. One thing it does not check is that Claude Code trusts the folder: a run says so when it cannot start its first session.
 
 ## Starting a run
 

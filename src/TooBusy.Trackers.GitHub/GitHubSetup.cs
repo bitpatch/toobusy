@@ -44,6 +44,28 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
         };
     }
 
+    // What the board calls its statuses, the options of its `Status` field, in their order: none for a board without
+    // the field, and null when the board cannot be read. The field is looked for among all of them: GitHub answers
+    // a request for a field that is not there with an error, as it does for a board that is not.
+    public async Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken)
+    {
+        if (Parts(board) is not var (kind, login, number))
+            return null;
+
+        var result = await AskAsync(
+            [
+                "-f", $"login={login}", "-F", $"number={number}",
+                "-f", $"query=query($login: String!, $number: Int!) {{ {kind}(login: $login) {{ projectV2(number: $number) {{ fields(first: 100) {{ nodes {{ ... on ProjectV2SingleSelectField {{ name options {{ name }} }} }} }} }} }} }}",
+                "--jq", $".data.{kind}.projectV2 | select(. != null) | \"board\", (.fields.nodes[]? | select(.name == \"Status\") | .options[]? | \"status\\t\\(.name)\")",
+            ],
+            cancellationToken);
+        if (result is not { Status: ProcessStatus.Exited, ExitCode: 0 })
+            return null;
+
+        var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).ToList();
+        return lines.Contains("board") ? [.. lines.Select(line => line.Split('\t', 2)).Where(fields => fields is ["status", { Length: > 0 }]).Select(fields => fields[1])] : null;
+    }
+
     // Whether the repository is there for the login to read.
     public async Task<bool> CanReadRepositoryAsync(string repository, CancellationToken cancellationToken) =>
         await processes.RunAsync("gh", ["api", $"repos/{repository}", "--jq", ".full_name"], Patience, cancellationToken)

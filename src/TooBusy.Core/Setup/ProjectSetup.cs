@@ -100,6 +100,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The commands around a task: those of the settings, but for what the options say of them.
     TaskCommands commands = TaskCommands.None;
 
+    // What is said of a board that is chosen and lacks a status a run knows; empty when nothing is.
+    IReadOnlyList<SetupNote> lacking = [];
+
     // What is said of a skill that the settings will name and nobody has written yet; empty when nothing is.
     IReadOnlyList<SetupNote> unwritten = [];
 
@@ -181,7 +184,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                         break;
                     default:
                         if (await ConcludeAsync(cancellationToken) is { } outcome)
-                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. unwritten], Done = done, Commands = CommandChanges() };
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. lacking, .. unwritten], Done = done, Commands = CommandChanges() };
                         answered = false;
                         break;
                 }
@@ -317,9 +320,17 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
             // Nothing is made where nothing is verified, whatever the dialog answers.
             board = answer is BoardAnswer.Created && !verified ? new BoardAnswer.None() : answer;
+            lacking = verified && board is BoardAnswer.Existing taken ? await LackingAsync(taken.Address, cancellationToken) : [];
             return true;
         }
     }
+
+    // A board that lacks a status a run knows is taken all the same, and it is said: a run would take no task of
+    // it. A new board has them all, and one whose statuses cannot be read is left to the doctor.
+    async Task<IReadOnlyList<SetupNote>> LackingAsync(string address, CancellationToken cancellationToken) =>
+        await tracker.ReadStatusesAsync(address, cancellationToken) is { } has && BoardStatuses.Lack(has) is { } lack
+            ? [new SetupNote(SetupTone.Warning, lack), new SetupNote(SetupTone.Muted, "Name its statuses Todo, In Progress and Done before a run: `toobusy doctor` fails until then.")]
+            : [];
 
     async Task<bool> AskBlockingAsync(CancellationToken cancellationToken)
     {
@@ -516,6 +527,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (linking)
             coming.Add(new SetupNote(SetupTone.Plain, $"The project will be linked to {repository}."));
         coming.AddRange(missing.Select(name => new SetupNote(SetupTone.Plain, $"The label “{name}” will be made in {repository}.")));
+        coming.AddRange(lacking);
         coming.AddRange(unwritten);
 
         Show(Steps.Length, coming);

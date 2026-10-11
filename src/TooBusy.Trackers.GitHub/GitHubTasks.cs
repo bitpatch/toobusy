@@ -61,7 +61,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
             {
                 var named = Unescaped(fields[3]);
                 var of = Unescaped(fields[6]);
-                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(7).Select(Unescaped)], StatusOf(named), named, Numbers(fields[4]), Numbers(fields[5]), of.Length == 0 ? null : of));
+                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(7).Select(Unescaped)], BoardStatuses.Of(named), named, Numbers(fields[4]), Numbers(fields[5]), of.Length == 0 ? null : of));
             }
         }
 
@@ -91,7 +91,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
 
         var named = Unescaped(fields[3]);
         var of = Unescaped(fields[4]);
-        return new QueueTask(read, Unescaped(fields[1]), fields[2], [.. fields.Skip(5).Select(Unescaped)], StatusOf(named), named, [], [], of.Length == 0 ? null : of);
+        return new QueueTask(read, Unescaped(fields[1]), fields[2], [.. fields.Skip(5).Select(Unescaped)], BoardStatuses.Of(named), named, [], [], of.Length == 0 ? null : of);
     }
 
     // What the board of the project calls the status of a task, as the filter of the tool reads it from the task:
@@ -112,7 +112,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
             return;
 
         var (owner, name) = Parts();
-        var failed = $"#{number} could not be moved to {NameOf(status)} on the board.";
+        var failed = $"#{number} could not be moved to {BoardStatuses.NameOf(status)} on the board.";
         var read = await AskAsync(
             [
                 "api", "graphql", "-f", $"owner={owner}", "-f", $"name={name}", "-F", $"number={Text(number)}", "-f", $"login={login}", "-F", $"project={Text(project)}",
@@ -126,8 +126,8 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         string? One(string kind) => rows.FirstOrDefault(row => row[0] == kind && row.Length > 1 && row[1] != "null")?[1];
         if (One("issue") is not { } issue || One("project") is not { } projectId || One("field") is not { } field)
             throw new TrackerException(failed);
-        if (rows.FirstOrDefault(row => row is ["option", _, var called] && StatusOf(called) == status)?[1] is not { } option)
-            throw new TrackerException($"{failed} The board has no status “{NameOf(status)}”.");
+        if (rows.FirstOrDefault(row => row is ["option", _, var called] && BoardStatuses.Of(called) == status)?[1] is not { } option)
+            throw new TrackerException($"{failed} The board has no status “{BoardStatuses.NameOf(status)}”.");
 
         var item = rows.FirstOrDefault(row => row is ["item", _, var of] && of == projectId)?[1]
             ?? (await AskAsync(
@@ -195,25 +195,6 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         [.. text.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(number => int.Parse(number, CultureInfo.InvariantCulture))];
 
     static string Text(int number) => number.ToString(CultureInfo.InvariantCulture);
-
-    // A status by what a board calls it: GitHub names the statuses of a new board Todo, In Progress and Done, and
-    // boards differ in the case of the letters and in the space.
-    static BoardStatus StatusOf(string name) => new string([.. name.Where(char.IsLetter).Select(char.ToLowerInvariant)]) switch
-    {
-        "" => BoardStatus.Missing,
-        "todo" => BoardStatus.Todo,
-        "inprogress" => BoardStatus.InProgress,
-        "done" => BoardStatus.Done,
-        _ => BoardStatus.Other,
-    };
-
-    static string NameOf(BoardStatus status) => status switch
-    {
-        BoardStatus.Todo => "Todo",
-        BoardStatus.InProgress => "In Progress",
-        BoardStatus.Done => "Done",
-        _ => status.ToString(),
-    };
 
     // `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>` in its parts.
     static (string Kind, string Login, int Number)? BoardParts(string board) =>

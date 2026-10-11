@@ -27,6 +27,7 @@ public class CheckupTests
                 new CheckResult("settings", CheckState.Passed, ".toobusy/settings.toml"),
                 new CheckResult("repository", CheckState.Passed, "acme/rocket"),
                 new CheckResult("board", CheckState.Passed, Rocket),
+                new CheckResult("statuses", CheckState.Passed, "Todo, In Progress, Done"),
                 new CheckResult("labels", CheckState.Passed),
                 new CheckResult("skill", CheckState.Skipped, "the project names no skill"),
             ],
@@ -153,6 +154,56 @@ public class CheckupTests
 
         Assert.Equal(new CheckResult("board", CheckState.Failed, text, fix), Of(await RunAsync(), "board"));
         Assert.Equal([Rocket], machine.Boards);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfTheBoardAreKnownWhateverTheirCaseAndWhatStandsBetweenTheirLetters()
+    {
+        machine.Statuses = ["Backlog", "to do", "IN-PROGRESS", "✅ Done"];
+
+        Assert.Equal(new CheckResult("statuses", CheckState.Passed, "Backlog, to do, IN-PROGRESS, ✅ Done"), Of(await RunAsync(), "statuses"));
+        Assert.Equal([Rocket], machine.StatusesOf);
+    }
+
+    [Theory]
+    [InlineData("In Progress, Done", "The board has no status “Todo”: it has In Progress, Done.")]
+    [InlineData("Todo, Doing, Done", "The board has no status “In Progress”: it has Todo, Doing, Done.")]
+    [InlineData("Todo, In Progress, Shipped", "The board has no status “Done”: it has Todo, In Progress, Shipped.")]
+    [InlineData("Backlog, Ready, Done", "The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done.")]
+    [InlineData("", "The board has no statuses “Todo”, “In Progress”, “Done”: it has no statuses.")]
+    public async Task ABoardThatLacksAStatusOfARunFailsAndSaysWhichAndWhatItHas(string has, string text)
+    {
+        machine.Statuses = has.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Equal(
+            new CheckResult("statuses", CheckState.Failed, text, "name the statuses of the board Todo, In Progress and Done, or work without a board: toobusy init --no-board"),
+            Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task StatusesThatCannotBeReadFailTheirCheck()
+    {
+        machine.Statuses = null;
+
+        Assert.Equal(new CheckResult("statuses", CheckState.Failed, "The statuses of the board cannot be read."), Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task TheStatusesAreNotReadWithoutABoardThatPassedItsCheck()
+    {
+        machine.Board = BoardAccess.Unreadable;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
+
+        machine.Board = BoardAccess.Readable;
+        machine.TrackerLoggedIn = false;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
+
+        store.Current = Project(board: null);
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "the project has no board"), Of(await RunAsync(), "statuses"));
+
+        store.Current = null;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the settings"), Of(await RunAsync(), "statuses"));
+        Assert.Empty(machine.StatusesOf);
     }
 
     [Fact]
@@ -302,6 +353,12 @@ public class CheckupTests
 
         public List<string> Boards { get; } = [];
 
+        // What the board calls its statuses; null is a board whose statuses cannot be read.
+        public IReadOnlyList<string>? Statuses { get; set; } = ["Todo", "In Progress", "Done"];
+
+        // The boards whose statuses were asked for.
+        public List<string> StatusesOf { get; } = [];
+
         public IReadOnlyList<string>? Labels { get; set; } = ["manual", "feature", "needs-owner", "interrupted"];
 
         public Task<bool> HasAsync(Tool tool, CancellationToken cancellationToken) => Task.FromResult(!Missing.Contains(tool));
@@ -322,6 +379,12 @@ public class CheckupTests
         {
             Boards.Add(board);
             return Task.FromResult(Board);
+        }
+
+        public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken)
+        {
+            StatusesOf.Add(board);
+            return Task.FromResult(Statuses);
         }
 
         public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) => Task.FromResult(Labels);
