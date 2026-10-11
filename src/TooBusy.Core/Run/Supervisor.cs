@@ -476,7 +476,7 @@ public sealed class Supervisor(
         }
 
         Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
-        string?[] taken = [plan.Rules.Board ? "In Progress on the board" : null, unassigned is null ? "assigned to the current user" : null];
+        string?[] taken = [plan.Rules.Board ? $"{plan.Rules.Statuses.InProgress} on the board" : null, unassigned is null ? "assigned to the current user" : null];
         if (taken.Any(how => how is not null))
             Say(RunMark.Note, $"#{number} is {string.Join(" and ", taken.Where(how => how is not null))}; the session is told that toobusy keeps its task");
         if (unassigned is not null)
@@ -496,8 +496,8 @@ public sealed class Supervisor(
                 if (!paused)
                 {
                     await Quietly(() => session.StopAsync(CancellationToken.None));
-                    left = $"#{number} stays In Progress, and the next run goes on with its session · {session.Open}";
-                    Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays In Progress, and the next run goes on with its session · {session.Open}");
+                    left = $"#{number} stays {plan.Rules.Statuses.InProgress}, and the next run goes on with its session · {session.Open}";
+                    Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays {plan.Rules.Statuses.InProgress}, and the next run goes on with its session · {session.Open}");
                 }
 
                 throw;

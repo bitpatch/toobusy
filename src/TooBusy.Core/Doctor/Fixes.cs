@@ -9,9 +9,9 @@ public static class Fixes
     public const string AssistantLogin = "claude, then /login";
     public const string Setup = "toobusy init";
 
-    // A board that lacks a status a run knows: no command puts it right. Its statuses are named on GitHub, or the
+    // A board that lacks a status the settings name: the setup asks which of its statuses is which, or the
     // project works without a board.
-    public const string Statuses = "name the statuses of the board Todo, In Progress and Done, or work without a board: toobusy init --no-board";
+    public const string Statuses = "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board";
 
     // A skill that the settings name and nobody has written: it is written, or the settings name none.
     public static string Skill(string place) => $"write {place}, as `toobusy about` tells, or name no skill: toobusy init --no-skill";

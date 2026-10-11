@@ -591,6 +591,41 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task QueueTakesATaskOnlyFromTheStatusTheSettingsNameAndAboutNamesTheStatusesSo()
+    {
+        GitRepository();
+        WriteSettings(SettingsWithABoard.Replace("[queue.labels]", "[tracker.statuses]\ntodo = \"Ready\"\ndone = \"Shipped\"\n\n[queue.labels]", StringComparison.Ordinal));
+        await RunAsync("milestone", "--none");
+        var processes = Tracker("total\t3\n"
+            + "12\tExport the orders as a file\thttps://github.com/acme/rocket/issues/12\tready\t\t\t\tfeature\n"
+            + "14\tRename the settings page\thttps://github.com/acme/rocket/issues/14\tTodo\t\t\t\tfeature\n"
+            + "15\tFix the rounding of a discount\thttps://github.com/acme/rocket/issues/15\tShipped\t\t\t\tbug\n");
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["queue"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Equal(
+            """
+            Ready
+              #12 Export the orders as a file
+
+            Later
+              no tasks
+
+            Held
+              #14 Rename the settings page        its status is Todo
+              #15 Fix the rounding of a discount  its status is Shipped
+
+            """.ReplaceLineEndings(),
+            output);
+
+        (_, var about, _) = await RunAsync(Context(processes), ["about"]);
+        Assert.Contains("a task is taken only from the status `Ready`. The statuses a run knows are named below as the settings of the project call them, `Ready`, `In Progress` and `Shipped`.", about, StringComparison.Ordinal);
+        Assert.Contains("with the status `Ready`.", about, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task QueueShowsWhatARunTakesNowWhatOpensLaterAndWhatIsHeldWithEveryReason()
     {
         GitRepository();
@@ -957,7 +992,7 @@ public sealed class CliAppTests : IDisposable
         var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tBacklog\nstatus\tReady\nstatus\tDone\n");
         var failure =
             "✘ statuses           The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done." + Environment.NewLine
-            + "  fix: name the statuses of the board Todo, In Progress and Done, or work without a board: toobusy init --no-board" + Environment.NewLine;
+            + "  fix: say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board" + Environment.NewLine;
 
         var (exit, output, _) = await RunAsync(Context(processes), ["doctor"]);
 
@@ -1777,7 +1812,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         terminal.AssertSaw("""
              ✘ statuses           The board has no status “Done”: it has Todo, In Progress, Shipped.
-               fix: name the statuses of the board Todo, In Progress and Done, or work without a board: toobusy init --no-board
+               fix: say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board
              The run did not start. `toobusy doctor` checks all of it again.
              What to do
              ❯ Run        1 task
@@ -2272,7 +2307,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             [
                 "! The board has no status “In Progress”: it has Todo, Doing, Done.",
-                "Name its statuses Todo, In Progress and Done before a run: `toobusy doctor` fails until then.",
+                "Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`, or with `toobusy init`: `toobusy doctor` fails until then.",
                 "✔ Tracker          GitHub",
                 "✔ Project          https://github.com/orgs/acme/projects/3",
             ],
@@ -2285,6 +2320,38 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains("! The board has no status “In Progress”: it has Todo, Doing, Done.", output, StringComparison.Ordinal);
+
+        // An option says which status is which, and it is kept as the board writes it.
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--in-progress-status", "doing"]);
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("The board has no status", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Statuses         Todo, Doing, Done", output, StringComparison.Ordinal);
+        Assert.Contains("[tracker.statuses]\nin-progress = \"Doing\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesAStatusThatTheBoardDoesNotHaveFailsAndNothingIsWritten()
+    {
+        GitRepository();
+        var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tTodo\nstatus\tDoing\nstatus\tDone\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--in-progress-status", "Working", "--owner-label", "manual", "--no-skill"]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith("✘ In Progress status: The board has no status “Working”: it has Todo, Doing, Done. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+    }
+
+    [Fact]
+    public async Task TheOptionsOfTheStatusesDoNotGoWithNoBoard()
+    {
+        GitRepository();
+
+        var (exit, _, error) = await RunAsync(Context(GitHubWithProjects(Labels)), ["init", "--yes", "--no-board", "--done-status", "Shipped"]);
+
+        Assert.Equal(2, exit);
+        Assert.Equal("toobusy: `--todo-status`, `--in-progress-status` and `--done-status` name the statuses of a board, and do not go with `--no-board`" + Environment.NewLine, error);
     }
 
     [Fact]
@@ -2301,10 +2368,35 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task OnTheScreenABoardThatLacksAStatusOfARunIsAWarningOfTheLastPage()
+    public async Task OnTheScreenABoardThatIsNotNamedAsGitHubNamesOneIsAskedWhichOfItsStatusesIsWhich()
     {
         GitRepository();
-        var processes = GitHubWithProjects(labels: "bug\nmanual\ninterrupted\n", statuses: "board\nstatus\tBacklog\nstatus\tIn Progress\nstatus\tDone\n");
+        var processes = GitHubWithProjects(labels: "bug\nmanual\ninterrupted\n", statuses: "board\nstatus\tBacklog\nstatus\tReady\nstatus\tIn Progress\nstatus\tDone\n");
+
+        // The board, then the second of its statuses for a task to do and what is proposed for the other two, then
+        // Enter on every question, the last one included.
+        var keys = new Keys().Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--board", "https://github.com/orgs/acme/projects/3", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted", "--no-skill");
+
+        Assert.Equal(0, exit);
+        var page = output.Split(Screen.Leave)[0];
+        Assert.Contains("Todo status", page, StringComparison.Ordinal);
+        Assert.Contains("A task is taken only from this status of the board.", page, StringComparison.Ordinal);
+        Assert.Contains("A run moves a task to this status before its session.", page, StringComparison.Ordinal);
+        Assert.Contains("A run moves a task to this status when it is done.", page, StringComparison.Ordinal);
+        Assert.Contains("Statuses         Ready, In Progress, Done", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("The board has no status", page, StringComparison.Ordinal);
+        var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
+        Assert.Contains("board = \"https://github.com/orgs/acme/projects/3\"\n\n", written, StringComparison.Ordinal);
+        Assert.Contains("[tracker.statuses]\ntodo = \"Ready\"\n\n", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OnTheScreenABoardWithFewerThanThreeStatusesIsAWarningOfTheLastPage()
+    {
+        GitRepository();
+        var processes = GitHubWithProjects(labels: "bug\nmanual\ninterrupted\n", statuses: "board\nstatus\tOpen\nstatus\tDone\n");
 
         // Enter on every question, the last one included.
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
@@ -2313,8 +2405,8 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         var page = output.Split(Screen.Leave)[0];
-        Assert.Contains("! The board has no status “Todo”: it has Backlog, In Progress, Done.", page, StringComparison.Ordinal);
-        Assert.Contains("Name its statuses Todo, In Progress and Done before a run: `toobusy doctor` fails until then.", page, StringComparison.Ordinal);
+        Assert.Contains("! The board has no statuses “Todo”, “In Progress”: it has Open, Done.", page, StringComparison.Ordinal);
+        Assert.Contains("A run needs three statuses of a board: add them on GitHub and run `toobusy init` again.", page, StringComparison.Ordinal);
         Assert.Contains("Write the settings?", page, StringComparison.Ordinal);
         Assert.Contains("board = \"https://github.com/orgs/acme/projects/3\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
     }
@@ -2602,17 +2694,39 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task ADemoOfTheSetupHasMadeUpBoardsThatCallTheirStatusesOtherwise()
+    {
+        GitRepository();
+        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/bitpatch/toobusy.git\n" : "owner\tuser\tdenis\n", ""));
+
+        // The board of the option, the second of its statuses for a task to do and what is proposed after it, then
+        // Enter on every question, the last one included.
+        var keys = new Keys().Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo", "--board", "https://github.com/users/example/projects/2");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Statuses         Ready, Doing, Shipped", Report(output), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+    }
+
+    [Fact]
     public async Task ADemoOfTheSetupGoesWithMadeUpBoardsWhenTheRealOnesCannotBeRead()
     {
         GitRepository();
         var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
-        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+
+        // Nothing is verified without a repository, so the statuses of the board are typed: three questions more,
+        // each with the name GitHub gives.
+        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
         Assert.Equal(0, exit);
         Assert.Contains("The `origin` remote is not a GitHub repository", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          Moon base (made up)  https://github.com/users/example/projects/2", Report(output), StringComparison.Ordinal);
+        Assert.Contains("A task is taken only from this status of the board. Type what the board calls it.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("✔ Statuses", Report(output), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3024,7 +3138,7 @@ public sealed class CliAppTests : IDisposable
         var (_, boards, _) = await RunAsync(Context(processes), ["init", "--assist", "3"]);
         Assert.Contains(
             "- Rocket, https://github.com/orgs/acme/projects/1, linked to acme/rocket: Todo, In Progress, Done\n"
-            + "- Garden, https://github.com/users/ann/projects/2: Backlog, Done. **It lacks `Todo`, `In Progress`, which a run knows.**\n",
+            + "- Garden, https://github.com/users/ann/projects/2: Backlog, Done. **A run needs three statuses.**\n",
             boards,
             StringComparison.Ordinal);
 

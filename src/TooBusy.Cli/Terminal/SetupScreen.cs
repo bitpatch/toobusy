@@ -12,7 +12,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     // The boards are shown fewer at a time than other lists, because other things share their place.
     const int BoardRows = 5;
 
-    // Whether the step that is asked is the first one: going back from it leaves the setup.
+    // Whether the question that is asked is the first one of the first step: going back from it leaves the setup.
     bool first;
 
     public void Show(SetupProgress progress)
@@ -39,7 +39,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             step < progress.Step ? new Part(step == 0 ? "●" : "──●", Tone.Success)
             : step == progress.Step ? new Part(step == 0 ? "◉" : "──◉", Tone.Accent)
             : new Part(step == 0 ? "○" : "──○", Tone.Muted))]);
-        first = progress.Step == 0 && leavesPage;
+        first = progress.Step == 0 && !progress.Later && leavesPage;
         Leaves(first);
     }
 

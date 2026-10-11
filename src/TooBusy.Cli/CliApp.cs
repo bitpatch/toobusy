@@ -64,6 +64,9 @@ public static class CliApp
         var noBoard = new Option<bool>("--no-board") { Description = "No project: no board keeps the statuses of the tasks." };
         var newBoard = new Option<string?>("--new-board") { Description = "A new GitHub project with this title; it is made when the setup is saved.", HelpName = "title" };
         var boardOwner = new Option<string?>("--board-owner") { Description = "Whose the new project will be: you or one of your organisations. The owner of the repository when it is not given.", HelpName = "login" };
+        var todoStatus = new Option<string?>("--todo-status") { Description = "What the board calls the status a task is taken from; `Todo` when it is not given.", HelpName = "name" };
+        var inProgressStatus = new Option<string?>("--in-progress-status") { Description = "What the board calls the status a run moves a task to before its session; `In Progress` when it is not given.", HelpName = "name" };
+        var doneStatus = new Option<string?>("--done-status") { Description = "What the board calls the status a run moves a task to when it is done; `Done` when it is not given.", HelpName = "name" };
         var blocking = new Option<string[]>("--blocking-label") { Description = "A label that keeps a task out; give it again for every such label.", HelpName = "name" };
         var noBlocking = new Option<bool>("--no-blocking-labels") { Description = "No label keeps a task out." };
         var take = new Option<string[]>("--take-label") { Description = "A label that lets a task in; give it again for every such label.", HelpName = "name" };
@@ -85,7 +88,7 @@ public static class CliApp
         };
         var command = new Command("init", $"Sets the project up: asks what it needs and writes the settings. {ForAnAssistant}")
         {
-            board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes, assist,
+            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes, assist,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -93,7 +96,7 @@ public static class CliApp
             // nothing of it: it changes nothing as it is.
             if (result.GetResult(assist) is { Implicit: false })
             {
-                Option[] others = [board, noBoard, newBoard, boardOwner, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes];
+                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes];
                 if (others.Any(other => result.GetResult(other) is { Implicit: false }))
                 {
                     Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
@@ -109,6 +112,8 @@ public static class CliApp
                 (new[] { result.GetValue(board) is not null, result.GetValue(noBoard), result.GetValue(newBoard) is not null }.Count(given => given) > 1,
                     "toobusy: give one of `--board`, `--new-board` and `--no-board`, not several"),
                 (result.GetValue(boardOwner) is not null && result.GetValue(newBoard) is null, "toobusy: `--board-owner` goes with `--new-board`"),
+                (result.GetValue(noBoard) && new[] { todoStatus, inProgressStatus, doneStatus }.Any(status => result.GetValue(status) is not null),
+                    "toobusy: `--todo-status`, `--in-progress-status` and `--done-status` name the statuses of a board, and do not go with `--no-board`"),
                 (result.GetValue(blocking) is { Length: > 0 } && result.GetValue(noBlocking), "toobusy: give `--blocking-label` or `--no-blocking-labels`, not both"),
                 (result.GetValue(take) is { Length: > 0 } && result.GetValue(noTake), "toobusy: give `--take-label` or `--no-take-labels`, not both"),
                 (result.GetValue(skill) is not null && result.GetValue(noSkill), "toobusy: give `--skill` or `--no-skill`, not both"),
@@ -132,7 +137,12 @@ public static class CliApp
                 result.GetValue(interrupt),
                 result.GetValue(noSkill) ? "" : result.GetValue(skill),
                 result.GetValue(noBefore) ? new CommandProposal(null) : result.GetValue(before) is { } first ? new CommandProposal(first) : null,
-                result.GetValue(noAfter) ? new CommandProposal(null) : result.GetValue(after) is { } last ? new CommandProposal(last) : null);
+                result.GetValue(noAfter) ? new CommandProposal(null) : result.GetValue(after) is { } last ? new CommandProposal(last) : null)
+            {
+                TodoStatus = result.GetValue(todoStatus),
+                InProgressStatus = result.GetValue(inProgressStatus),
+                DoneStatus = result.GetValue(doneStatus),
+            };
 
             if (FindProject(context) is not { } root)
                 return ExitCode.NotReady;

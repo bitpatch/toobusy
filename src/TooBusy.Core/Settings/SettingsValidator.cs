@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Settings;
 
@@ -30,7 +31,7 @@ public static partial class SettingsValidator
 
     sealed class Run(SettingsDocument document)
     {
-        static readonly string[] Sections = ["tracker", "queue", "queue.labels", "assistant", "session", "task"];
+        static readonly string[] Sections = ["tracker", "tracker.statuses", "queue", "queue.labels", "assistant", "session", "task"];
 
         readonly Dictionary<string, SettingsEntry> entries = [];
 
@@ -49,6 +50,7 @@ public static partial class SettingsValidator
                     "must be the address of a GitHub Projects board: `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>`");
             }
 
+            var statuses = ReadStatuses(board is not null);
             var labels = ReadLabels();
             var assistantType = OneOf(SettingsKeys.AssistantType, [SettingsKeys.ClaudeCodeAssistant]);
             var skill = String(SettingsKeys.SessionSkill, required: false);
@@ -56,7 +58,7 @@ public static partial class SettingsValidator
                 Refuse(skill.Value.Entry, reason);
 
             return new ProjectSettings(
-                new TrackerSettings(trackerType ?? "", board?.Text),
+                new TrackerSettings(trackerType ?? "", board?.Text) { Statuses = statuses },
                 new QueueSettings(labels),
                 new AssistantSettings(assistantType ?? ""))
             {
@@ -110,6 +112,40 @@ public static partial class SettingsValidator
                 Refuse(entry, $"the file was made by a newer toobusy: its version is {version}, and this one reads version {ProjectSettings.SchemaVersion}");
             else if (version != ProjectSettings.SchemaVersion)
                 Refuse(entry, $"must be {ProjectSettings.SchemaVersion}");
+        }
+
+        // What the board calls the three statuses a run knows. A name that is not given is the one GitHub gives,
+        // and two of the three must not be one status: a run would take a task from where it moves it to.
+        BoardStatuses ReadStatuses(bool board)
+        {
+            string[] keys = [SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus];
+            var given = BoardStatuses.Default.Names;
+            var names = new string[keys.Length];
+            for (var index = 0; index < keys.Length; index++)
+            {
+                names[index] = given[index];
+                if (String(keys[index], required: false) is not { } value)
+                    continue;
+                if (string.IsNullOrWhiteSpace(value.Text))
+                    Refuse(value.Entry, "the name of a status must not be empty: leave the key out for the name GitHub gives");
+                else if (!board)
+                    Refuse(value.Entry, $"names a status of a board, and `{SettingsKeys.TrackerBoard}` names no board");
+                else
+                    names[index] = value.Text;
+            }
+
+            for (var index = 1; index < keys.Length; index++)
+            {
+                if (Enumerable.Range(0, index).FirstOrDefault(before => BoardStatuses.Same(names[before], names[index]), -1) is >= 0 and var same)
+                {
+                    // The error stands at a key the file has: the later of the two, or the earlier one.
+                    var message = $"`{keys[same]}` and `{keys[index]}` must not name one status: both are `{names[index]}`";
+                    if (entries.TryGetValue(keys[index], out var later) || entries.TryGetValue(keys[same], out later))
+                        Refuse(later, message);
+                }
+            }
+
+            return new BoardStatuses(names[0], names[1], names[2]);
         }
 
         LabelSettings ReadLabels()

@@ -309,6 +309,21 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task TheStatusesAreNamedToTheSessionAndInTheLogAsTheSettingsNameThem()
+    {
+        plan = plan with { Rules = Rules with { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") } };
+        tracker.Add(3);
+
+        await RunAsync();
+
+        var start = Assert.Single(assistant.Started);
+        Assert.Contains("It has already moved the task to Doing, and it assigns the task to the user who runs it.", start.Message, StringComparison.Ordinal);
+        Assert.Contains("  #3 is Doing on the board and assigned to the current user; the session is told that toobusy keeps its task", log.Lines);
+        Assert.DoesNotContain("In Progress", start.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Todo", start.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ATaskIsMovedBeforeItsSessionStartsAndClosedWithItsReportWhenItIsDone()
     {
         tracker.Add(3);

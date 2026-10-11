@@ -260,19 +260,22 @@ public static class Assist
         var settings = Stated(ground);
         var things = new StringBuilder(settings is null
             ? $"{Unstated(ground)}."
-            : settings.Tracker.Board is { } now ? $"the board of the project is {now}." : "the project works without a board.");
+            : settings.Tracker.Board is { } now ? $"the board of the project is {now}, and the settings call its statuses {Statuses(settings.Tracker.Statuses)}." : "the project works without a board.");
         if (ground.Settings is null)
             things.Append(CultureInfo.InvariantCulture, $" Step 2 writes the settings first: `{Command(2)}`.");
         if (ground.Boards is { Count: > 0 } boards)
         {
             things.Append(" The boards you can reach, each with what it calls its statuses:\n\n");
+            bool IsOfSettings(AssistBoard board) => board.Address.Equals(settings?.Tracker.Board, StringComparison.OrdinalIgnoreCase);
             foreach (var board in boards)
             {
                 var statuses = board.Statuses switch
                 {
                     null => "its statuses cannot be read",
-                    [] => "it has no statuses. **It lacks the statuses a run knows.**",
-                    var has when BoardStatuses.Missing(has) is { Count: > 0 } missing => $"{string.Join(", ", has)}. **It lacks {Named(missing, "")}, which a run knows.**",
+                    [] => "it has no statuses. **A run needs three.**",
+                    { Count: < 3 } has => $"{string.Join(", ", has)}. **A run needs three statuses.**",
+                    var has when IsOfSettings(board) && settings!.Tracker.Statuses.Missing(has) is { Count: > 0 } missing => $"{string.Join(", ", has)}. **It lacks {Named(missing, "")}, which the settings name.**",
+                    var has when !IsOfSettings(board) && BoardStatuses.Default.Missing(has) is { Count: > 0 } => $"{string.Join(", ", has)}. **It is not named as GitHub names a board: the command says which status is which.**",
                     var has => string.Join(", ", has),
                 };
                 things.Append(CultureInfo.InvariantCulture, $"- {(board.Title.Length > 0 ? $"{board.Title}, " : "")}{board.Address}{(board.Linked ? $", linked to {ground.Repository}" : "")}: {statuses}\n");
@@ -291,21 +294,23 @@ public static class Assist
         Part(text, "Decide", """
             whether the project has a GitHub Projects board, and which: one of those you can reach, a new one, or none.
 
-            - With a board, a task is taken only from the status `Todo`, and a task that is not on the board is held. A run moves a task to `In Progress` and to `Done`. The token needs the `project` scope.
-            - A run knows a board by the three statuses GitHub gives a new one, `Todo`, `In Progress` and `Done`, whatever the case of their letters. A board that lacks one of them gives a run no task: `toobusy doctor` fails over it until its statuses are named so on GitHub.
+            - With a board, a task is taken only from one status, the one to do, and a task that is not on the board is held. A run moves a task to a second status before its session and to a third when it is done. The token needs the `project` scope.
+            - A run knows the three by what the settings call them, `tracker.statuses` there, whatever the case of their letters. A status the settings do not name is called as GitHub calls it on a new board: `Todo`, `In Progress` and `Done`. Which status of the board is which of the three is decided for a board that calls them otherwise: two of them must not be one status, and a board with fewer than three statuses gets more on GitHub first.
+            - A board that lacks a status the settings name gives a run no task: `toobusy doctor` fails over it.
             - Without a board a task has no status: a run takes the open tasks by their labels alone.
             """);
         Part(text, "Look at", "the boards above, where the open tasks of the project stand now, and what the instructions of the project say of a board.");
-        Part(text, "Ask the owner", "always: a board is seen by everyone who works in the project, a new one is made on GitHub, and a board that is not linked to the repository is linked to it. Whether the open tasks are put on the board, and into `Todo`, is the owner's to decide too: a task that is not there is held.");
+        Part(text, "Ask the owner", "always: a board is seen by everyone who works in the project, a new one is made on GitHub, and a board that is not linked to the repository is linked to it. Which status is which is theirs to say for a board that is not named as GitHub names one. Whether the open tasks are put on the board, and into the status to do, is the owner's to decide too: a task that is not there is held.");
 
         var rest = ground.Settings is null ? " --no-skill" : "";
         Set(text,
         [
             $"toobusy init --yes{rest} --board <URL>",
+            $"toobusy init --yes{rest} --board <URL> --todo-status <name> --in-progress-status <name> --done-status <name>",
             $"toobusy init --yes{rest} --new-board \"<title>\" --board-owner <login>",
             $"toobusy init --yes{rest} --no-board",
         ]);
-        text.Append("One of the three: a board by its address or the address of any page of it, a new board with its title for the user or one of their organisations, or no board. Without `--board-owner` a new board is made for the owner of the repository.");
+        text.Append("One of them: a board by its address or the address of any page of it, the same with what the board calls its statuses, a new board with its title for the user or one of their organisations, or no board. A status that no option names stays as the settings call it, and is called as GitHub calls it where they do not; the three options go without `--board` too, for the board the project has. Without `--board-owner` a new board is made for the owner of the repository.");
         text.Append(ground.Settings is null
             ? " `--no-skill` stands there only because nothing is set yet: step 6 sets it. The labels are then those a first setup proposes, which step 2 decides.\n\n"
             : " What the command does not name stays as it is.\n\n");
@@ -489,6 +494,8 @@ public static class Assist
 
     // The settings when the file has them and they validate.
     static ProjectSettings? Stated(AssistGround ground) => ground.Settings?.Settings;
+
+    static string Statuses(BoardStatuses statuses) => string.Join(", ", statuses.Names.Select(name => $"`{name}`"));
 
     // What is said of a setting where there are no settings to read.
     static string Unstated(AssistGround ground) => ground.Settings is null ? "not set: there are no settings yet" : "not read: the settings do not validate";

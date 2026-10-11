@@ -6,7 +6,7 @@ using TooBusy.Core.Settings;
 namespace TooBusy.Cli.Imitation;
 
 // What `doctor --demo` puts in place of the machine: everything is installed and logged in, the repository and
-// the board can be read, the board has the statuses a run knows, and the repository has every label and the skill
+// the board can be read, the board has the statuses the settings name, and the repository has every label and the skill
 // the settings name. Each answer takes a moment, so that the check that waits for it can be looked at.
 public sealed class ImitatedCheckup(IClock clock, ISettingsStore settings) : ICheckupMachine
 {
@@ -26,7 +26,7 @@ public sealed class ImitatedCheckup(IClock clock, ISettingsStore settings) : ICh
 
     public Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken) => AfterAsync(BoardAccess.Readable, cancellationToken);
 
-    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) => AfterAsync<IReadOnlyList<string>?>(ImitatedSetup.Statuses, cancellationToken);
+    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) => AfterAsync<IReadOnlyList<string>?>(settings.Load()?.Settings?.Tracker.Statuses.Names ?? ImitatedSetup.Statuses, cancellationToken);
 
     public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
         AfterAsync<IReadOnlyList<string>?>(

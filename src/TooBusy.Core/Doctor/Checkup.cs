@@ -1,4 +1,3 @@
-using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Doctor;
@@ -69,8 +68,8 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
             });
         }
 
-        // A run takes a task from one status of the board and moves it to two more: a board that calls them
-        // otherwise would give it no task, and no word of why.
+        // A run takes a task from one status of the board and moves it to two more, by the names of the settings:
+        // a board that calls them otherwise would give it no task, and no word of why.
         if (loaded?.Settings is not { } kept)
             Tell(Waits(Statuses, "the settings"));
         else if (kept.Tracker.Board is not { } standing)
@@ -83,7 +82,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
             Tell(await machine.ReadStatusesAsync(standing, cancellationToken) switch
             {
                 null => new CheckResult(Statuses, CheckState.Failed, "The statuses of the board cannot be read."),
-                var has when BoardStatuses.Lack(has) is { } lack => new CheckResult(Statuses, CheckState.Failed, lack, Fixes.Statuses),
+                var has when kept.Tracker.Statuses.Lack(has) is { } lack => new CheckResult(Statuses, CheckState.Failed, lack, Fixes.Statuses),
                 var has => new CheckResult(Statuses, CheckState.Passed, string.Join(", ", has)),
             });
         }

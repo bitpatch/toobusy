@@ -94,15 +94,17 @@ public sealed class ImitatedTasks : ITaskTracker
 
     readonly List<QueueTask> open = [];
     readonly string owner;
+    readonly BoardStatuses statuses;
 
     public ImitatedTasks(QueueRules rules, bool killed)
     {
         owner = rules.Owner;
+        statuses = rules.Statuses;
         string Type(int kind) => rules.Take.Count > 0 ? rules.Take[kind % rules.Take.Count] : Types[kind];
         void Add(int number, string title, string[] labels, BoardStatus status = BoardStatus.Todo, int[]? after = null)
         {
             var stands = rules.Board ? status : BoardStatus.Missing;
-            open.Add(new QueueTask(number, title, Address(number), labels, stands, stands == BoardStatus.InProgress ? "In Progress" : "Todo", after ?? [], []));
+            open.Add(new QueueTask(number, title, Address(number), labels, stands, statuses.NameOf(stands == BoardStatus.InProgress ? stands : BoardStatus.Todo), after ?? [], []));
         }
 
         if (killed)
@@ -123,7 +125,7 @@ public sealed class ImitatedTasks : ITaskTracker
     public void Leave(int number, string title, int from)
     {
         if (open.Find(task => task.Number == from) is { } first && open.TrueForAll(task => task.Number != number))
-            open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [owner, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = "Todo", BlockedBy = [], Parts = [] });
+            open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [owner, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = statuses.Todo, BlockedBy = [], Parts = [] });
     }
 
     // Whether a task carries the label that a run puts on one it had to stop.
@@ -137,7 +139,7 @@ public sealed class ImitatedTasks : ITaskTracker
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {
-        Change(number, task => task.Status == BoardStatus.Missing ? task : task with { Status = status, StatusName = status == BoardStatus.InProgress ? "In Progress" : status.ToString() });
+        Change(number, task => task.Status == BoardStatus.Missing ? task : task with { Status = status, StatusName = statuses.NameOf(status) });
         return Task.CompletedTask;
     }
 

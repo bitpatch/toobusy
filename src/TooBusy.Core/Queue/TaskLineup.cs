@@ -3,11 +3,16 @@ using TooBusy.Core.Settings;
 namespace TooBusy.Core.Queue;
 
 // The rules a task is taken by: the labels of the settings, and whether the project has a board, on which a task
-// must stand as one to do.
+// must stand as one to do. Statuses are what that board calls the statuses a run knows.
 public sealed record QueueRules(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Owner, string Interrupted, bool Board)
 {
+    public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
+
     public static QueueRules Of(ProjectSettings settings) => new(
-        settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Owner, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null);
+        settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Owner, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null)
+    {
+        Statuses = settings.Tracker.Statuses,
+    };
 }
 
 // A task that opens once the tasks before it are closed.

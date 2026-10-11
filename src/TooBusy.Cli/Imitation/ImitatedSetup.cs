@@ -8,8 +8,8 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli.Imitation;
 
 // What `init --demo` puts in place of the machine and the tracker: everything is installed and logged in,
-// every board can be read and has the statuses a run knows, the repository has made-up labels, the project has
-// whatever skill it names, and nothing is made or linked.
+// every board can be read and has statuses, the repository has made-up labels, the project has whatever skill it
+// names, and nothing is made or linked.
 // The repository itself is the one it is given: the real `origin` of the project when it is known.
 public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTracker
 {
@@ -23,10 +23,14 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
 
     public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 
-    // The statuses of every board of a demo: those GitHub gives a new one.
-    public static IReadOnlyList<string> Statuses { get; } = ["Todo", "In Progress", "Done"];
+    // The statuses of a board of a demo: those GitHub gives a new one.
+    public static IReadOnlyList<string> Statuses { get; } = BoardStatuses.Default.Names;
 
-    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>?>(Statuses);
+    // What every other made-up board calls its statuses, so that the questions about them can be tried.
+    public static IReadOnlyList<string> OtherStatuses { get; } = ["Backlog", "Ready", "Doing", "Review", "Shipped"];
+
+    public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<string>?>(ImitatedBoards.NamesOtherwise(board) ? OtherStatuses : Statuses);
 
     public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<string>>(["bug", "feature", "chore", "docs", "draft", "interrupted", "manual", "question"]);
@@ -46,6 +50,9 @@ public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watche
 {
     const int Enough = 10;
 
+    // The address of a made-up board, before its number.
+    const string MadeUp = "https://github.com/users/example/projects/";
+
     static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     static readonly string[] Titles =
@@ -57,6 +64,11 @@ public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watche
         "example-tools", "example-garden", "example-harbour", "example-atlas", "example-north",
     ];
 
+    // Whether a board is one of the made-up ones that call their statuses otherwise than GitHub does: every
+    // other of them.
+    public static bool NamesOtherwise(string board) =>
+        board.StartsWith(MadeUp, StringComparison.OrdinalIgnoreCase) && int.TryParse(board[MadeUp.Length..], out var number) && number % 2 == 0;
+
     // The same boards for a setup that has no screen: there is no wait to look at.
     public ImitatedBoards Unwatched => new(real, clock, watched: false);
 
@@ -66,7 +78,7 @@ public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watche
         var read = real is null ? SetupBoards.None : await real.ReadAsync(repository, cancellationToken);
         await waited;
         var boards = Titles.Take(Math.Max(0, Enough - read.Boards.Count))
-            .Select((title, index) => new SetupBoard($"https://github.com/users/example/projects/{index + 1}", $"{title} (made up)", Linked: false));
+            .Select((title, index) => new SetupBoard($"{MadeUp}{index + 1}", $"{title} (made up)", Linked: false));
         var owners = Logins.Take(Math.Max(0, Enough - read.Owners.Count))
             .Select((login, index) => new SetupOwner(login, Organisation: index > 0));
         return new SetupBoards([.. read.Boards, .. boards], [.. read.Owners, .. owners]);

@@ -26,10 +26,12 @@ public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Mo
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
 // one of to be taken, the milestone the user works on, null for none, and the address of the board, null in a
-// project without one.
+// project without one. Statuses are what that board calls the statuses a run knows.
 public sealed record NewTasks(string Owner, IReadOnlyList<string> Take, string? Milestone, string? Board)
 {
-    public static NewTasks Of(RunPlan plan) => new(plan.Rules.Owner, plan.Rules.Take, plan.Milestone, plan.Rules.Board ? plan.Board : null);
+    public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
+
+    public static NewTasks Of(RunPlan plan) => new(plan.Rules.Owner, plan.Rules.Take, plan.Milestone, plan.Rules.Board ? plan.Board : null) { Statuses = plan.Rules.Statuses };
 }
 
 // The times and the counts of a run.

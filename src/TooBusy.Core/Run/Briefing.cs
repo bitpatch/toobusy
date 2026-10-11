@@ -27,7 +27,7 @@ public static class Briefing
         var milestone = ground.Milestone is { } works ? $"Put it into the milestone `{works}`, the one the owner works on."
             : task.Milestone is { } own ? $"Put it into the milestone `{own}`, the one of task #{task.Number}."
             : $"Put it into no milestone, as task #{task.Number} is in none.";
-        var board = ground.Board is null ? "" : $"\n- Put it on the board {ground.Board} with the status `Todo`.";
+        var board = ground.Board is null ? "" : $"\n- Put it on the board {ground.Board} with the status `{ground.Statuses.Todo}`.";
         var message = new StringBuilder();
         if (skill is not null)
             message.Append(CultureInfo.InvariantCulture, $"{Command(skill, task)}\n\n");
@@ -44,7 +44,7 @@ public static class Briefing
 
             - Nobody will answer. Ask no questions, wait for no approval and do not enter plan mode: decide yourself and go on. Where the instructions of the project (CLAUDE.md, AGENTS.md, its skills and the like) tell you to ask the owner or to wait for a confirmation, do not: the owner started this run to have the task done.
             - Follow the instructions of the project in everything else: how the work is done, how it is checked, how it is committed and pushed. Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.
-            - Your task is kept by toobusy. It has already moved the task to In Progress, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
+            - Your task is kept by toobusy. It has already moved the task to {ground.Statuses.InProgress}, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it: toobusy does all of that from your last reply.
             - You may make new tasks in the tracker. What cannot be done without the owner becomes one, as said below. Which other tasks a session makes and when, and their labels, their wording and their relations, is said by the instructions of the project.
             - Work in this working copy: make no worktree and do not move to another one. It was clean when you started and it must be clean when you end: everything of yours is committed and pushed, or undone.
             - Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done, and change the list when the plan changes. toobusy shows the list to the owner as the progress of the task.

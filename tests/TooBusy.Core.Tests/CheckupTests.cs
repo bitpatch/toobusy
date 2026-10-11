@@ -1,5 +1,6 @@
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
+using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
@@ -176,7 +177,21 @@ public class CheckupTests
         machine.Statuses = has.Split(", ", StringSplitOptions.RemoveEmptyEntries);
 
         Assert.Equal(
-            new CheckResult("statuses", CheckState.Failed, text, "name the statuses of the board Todo, In Progress and Done, or work without a board: toobusy init --no-board"),
+            new CheckResult("statuses", CheckState.Failed, text, "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board"),
+            Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task TheStatusesAreCheckedByTheNamesOfTheSettings()
+    {
+        store.Current = Project(Rocket) with { Tracker = new TrackerSettings("github", Rocket) { Statuses = new BoardStatuses("Ready", "Doing", "Done") } };
+
+        machine.Statuses = ["Backlog", "READY", "doing", "Done"];
+        Assert.Equal(new CheckResult("statuses", CheckState.Passed, "Backlog, READY, doing, Done"), Of(await RunAsync(), "statuses"));
+
+        machine.Statuses = ["Todo", "In Progress", "Done"];
+        Assert.Equal(
+            new CheckResult("statuses", CheckState.Failed, "The board has no statuses “Ready”, “Doing”: it has Todo, In Progress, Done.", "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board"),
             Of(await RunAsync(), "statuses"));
     }
 

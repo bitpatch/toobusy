@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
+using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Infrastructure.Settings;
@@ -13,6 +14,9 @@ public static class SettingsToml
     static readonly (string Name, string Comment)[] Sections =
     [
         ("tracker", "Where the tasks are."),
+        ("tracker.statuses",
+            "What the board calls the statuses a run knows: the one it takes a task from, and the two it moves a task to.\n"
+            + "One that is not named here is called as GitHub calls it on a new board: Todo, In Progress, Done."),
         ("queue.labels",
             "A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.\n"
             + "A run puts `owner` on a task that waits for the owner, which is not taken while it has it,\n"
@@ -40,7 +44,7 @@ public static class SettingsToml
         if (parsed.Errors.Count > 0)
             throw new FormatException("The existing settings are not valid TOML: " + parsed.Errors[0].Describe(SettingsFile.DisplayPath));
 
-        var wanted = Values(settings);
+        var wanted = Values(settings, [.. parsed.Document.Entries.Select(entry => entry.Key)]);
         var edits = new List<Edit>();
         var additions = new Dictionary<string, StringBuilder>();
         foreach (var (key, value) in wanted)
@@ -82,11 +86,15 @@ public static class SettingsToml
     }
 
     // The values in the order a new file lists them; null is a key that the file must not have.
-    static List<(string Key, object? Value)> Values(ProjectSettings settings) =>
+    // `has` are the keys of the text that is edited.
+    static List<(string Key, object? Value)> Values(ProjectSettings settings, IReadOnlyList<string> has) =>
     [
         (SettingsKeys.Version, (long)ProjectSettings.SchemaVersion),
         (SettingsKeys.TrackerType, settings.Tracker.Type),
         (SettingsKeys.TrackerBoard, settings.Tracker.Board),
+        (SettingsKeys.TodoStatus, Status(settings, SettingsKeys.TodoStatus, has, statuses => statuses.Todo)),
+        (SettingsKeys.InProgressStatus, Status(settings, SettingsKeys.InProgressStatus, has, statuses => statuses.InProgress)),
+        (SettingsKeys.DoneStatus, Status(settings, SettingsKeys.DoneStatus, has, statuses => statuses.Done)),
         (SettingsKeys.BlockingLabels, settings.Queue.Labels.Blocking),
         (SettingsKeys.TakeLabels, settings.Queue.Labels.Take),
         (SettingsKeys.OwnerLabel, settings.Queue.Labels.Owner),
@@ -96,6 +104,11 @@ public static class SettingsToml
         (SettingsKeys.TaskBefore, settings.Commands.Before),
         (SettingsKeys.TaskAfter, settings.Commands.After),
     ];
+
+    // The name of a status as the file keeps it: not at all in a project without a board, and not when it is the
+    // name GitHub gives, unless the text names it already, which stays as it is.
+    static string? Status(ProjectSettings settings, string key, IReadOnlyList<string> has, Func<BoardStatuses, string> name) =>
+        settings.Tracker.Board is null || (name(settings.Tracker.Statuses) == name(BoardStatuses.Default) && !has.Contains(key)) ? null : name(settings.Tracker.Statuses);
 
     static void Add(Dictionary<string, StringBuilder> additions, string key, object value)
     {

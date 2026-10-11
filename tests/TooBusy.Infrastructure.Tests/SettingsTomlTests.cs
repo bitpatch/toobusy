@@ -1,3 +1,4 @@
+using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 using TooBusy.Infrastructure.Settings;
 
@@ -400,6 +401,59 @@ public class SettingsTomlTests
     public void ARewriteRefusesTextItCannotEdit(string existing)
     {
         Assert.Throws<FormatException>(() => SettingsToml.Write(Settings with { Tracker = Settings.Tracker with { Board = null } }, existing));
+    }
+
+    static readonly ProjectSettings Named = Settings with { Tracker = Settings.Tracker with { Statuses = new BoardStatuses("Ready", "In Progress", "Shipped") } };
+
+    [Fact]
+    public void TheStatusesOfABoardAreReadFromTheirSection()
+    {
+        var result = SettingsToml.Read(Example + "\n[tracker.statuses]\ntodo = \"Ready\"\nin-progress = \"Doing\"\ndone = \"Shipped\"\n");
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), result.Settings!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public void ANewFileNamesOnlyTheStatusesThatGitHubNamesOtherwise()
+    {
+        var text = SettingsToml.Write(Named);
+
+        Assert.Contains(
+            "board = \"https://github.com/orgs/bitpatch/projects/3\"\n\n"
+            + "# What the board calls the statuses a run knows: the one it takes a task from, and the two it moves a task to.\n"
+            + "# One that is not named here is called as GitHub calls it on a new board: Todo, In Progress, Done.\n"
+            + "[tracker.statuses]\ntodo = \"Ready\"\ndone = \"Shipped\"\n\n",
+            text,
+            StringComparison.Ordinal);
+        Assert.Equal(Named.Tracker, SettingsToml.Read(text).Settings!.Tracker);
+        Assert.DoesNotContain("statuses", SettingsToml.Write(Settings), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheStatusesAreAddedChangedAndTakenAwayInPlace()
+    {
+        var added = SettingsToml.Write(Named, Example);
+        Assert.StartsWith(Example, added, StringComparison.Ordinal);
+        Assert.EndsWith("[tracker.statuses]\ntodo = \"Ready\"\ndone = \"Shipped\"\n", added, StringComparison.Ordinal);
+
+        var changed = SettingsToml.Write(Named with { Tracker = Named.Tracker with { Statuses = new BoardStatuses("Ready", "Doing", "Done") } }, added);
+
+        // A status the text names stays named there, with the name GitHub gives it too.
+        Assert.EndsWith("[tracker.statuses]\ntodo = \"Ready\"\ndone = \"Done\"\nin-progress = \"Doing\"\n", changed, StringComparison.Ordinal);
+
+        // A project that leaves its board has no statuses to name.
+        var left = SettingsToml.Write(Named with { Tracker = new TrackerSettings("github", null) }, added);
+        Assert.DoesNotContain("Ready", left, StringComparison.Ordinal);
+        Assert.Empty(SettingsToml.Read(left).Errors);
+    }
+
+    [Fact]
+    public void AStatusThatTheFileNamesAsGitHubDoesStaysThere()
+    {
+        var text = Example + "\n[tracker.statuses]\ntodo = \"Todo\"   # as it is\n";
+
+        Assert.Equal(text, SettingsToml.Write(Settings, text));
     }
 
     static void AssertSame(ProjectSettings expected, ProjectSettings actual)

@@ -10,6 +10,15 @@ public class BriefingTests
     static readonly NewTasks Ground = new("needs-owner", ["bug", "Feature"], "v0.2.0", "https://github.com/orgs/acme/projects/4");
 
     [Fact]
+    public void TheFirstMessageNamesTheStatusesAsTheSettingsDo()
+    {
+        var message = Briefing.Task(Export, Ground with { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") }, interrupted: false);
+
+        Assert.Contains("It has already moved the task to Doing, and it assigns the task to the user who runs it.", message, StringComparison.Ordinal);
+        Assert.Contains("- Put it on the board https://github.com/orgs/acme/projects/4 with the status `Ready`.", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheFirstMessageNamesTheTaskAndGivesTheRulesAndTheLastLine()
     {
         var message = Briefing.Task(Export, Ground, interrupted: false);

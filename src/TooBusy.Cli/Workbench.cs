@@ -114,7 +114,7 @@ public sealed record Workbench(
 
         var local = LocalFolder.Ensure(Root);
         return new Supervisor(
-            new GitHubTasks(Processes, Repository, settings.Tracker.Board),
+            new GitHubTasks(Processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
             new ClaudeCode(Processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, Home, System.Environment.GetEnvironmentVariable), Root),
             new GitWorkspace(Processes, Root),
             new RunStateFile(local),
@@ -181,7 +181,7 @@ public sealed record Workbench(
     public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
     {
         var rules = QueueRules.Of(settings);
-        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board);
+        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses);
         if (tasks is null)
             return null;
 

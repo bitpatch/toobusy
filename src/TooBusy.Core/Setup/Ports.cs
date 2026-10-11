@@ -35,7 +35,12 @@ public sealed record SetupOption(string Name, string Detail);
 
 // Steps are the names of the steps of the setup in their order; Step is the index of the one that is asked now,
 // and their number when they are all done and only the confirmation is left.
-public sealed record SetupProgress(IReadOnlyList<SetupNote> Notes, IReadOnlyList<SetupAnswer> Answers, IReadOnlyList<string> Steps, int Step);
+public sealed record SetupProgress(IReadOnlyList<SetupNote> Notes, IReadOnlyList<SetupAnswer> Answers, IReadOnlyList<string> Steps, int Step)
+{
+    // A question of the step that is not its first one: going back from it comes to the question before it, so it
+    // never leaves the setup, in the first step either.
+    public bool Later { get; init; }
+}
 
 public sealed record SetupNote(SetupTone Tone, string Text);
 
@@ -89,7 +94,8 @@ public abstract record BoardAnswer
 // What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
 // leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an
 // empty name of the skill: no skill. The commands around a task have no question: null leaves a command as the
-// settings have it.
+// settings have it. The three statuses are what the board calls them: each is the proposed answer of its question,
+// which a board that is named as GitHub names one is not asked.
 public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
@@ -101,6 +107,12 @@ public sealed record SetupProposals(
     CommandProposal? After = null)
 {
     public static SetupProposals None { get; } = new();
+
+    public string? TodoStatus { get; init; }
+
+    public string? InProgressStatus { get; init; }
+
+    public string? DoneStatus { get; init; }
 }
 
 // A command around a task as an option names it: the line for the shell, or null for no command.

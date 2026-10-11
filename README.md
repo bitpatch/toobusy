@@ -22,7 +22,7 @@ What does not, yet:
 - No installer and no released binaries.
 - GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
 - Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The settings hold the board, the labels, the skill a session starts with and the commands a run runs around a task, and nothing else to choose: the tracker and the assistant are named there, with one value each. The messages a session gets, the permissions of the assistant, the names of the board's statuses and the checks of the branch around a task are not settings yet: a run knows the statuses `Todo`, `In Progress` and `Done`, and takes one task at a time.
+- The settings hold the board, the labels, the skill a session starts with and the commands a run runs around a task, and nothing else to choose: the tracker and the assistant are named there, with one value each. What the board calls its statuses is named there too, where it is not what GitHub calls them. The messages a session gets, the permissions of the assistant and the checks of the branch around a task are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
 
 ## The idea
 
@@ -81,6 +81,7 @@ Run it in a terminal, in the folder of the project. It asks:
 | Question | What it is |
 |---|---|
 | Project | the GitHub Projects board that keeps the statuses of the tasks: one of yours, one by its address, a new one, or none |
+| Todo status, In Progress status, Done status | which status of the board is which; asked only of a board that does not call them as GitHub does |
 | Blocking labels | a task with any of these labels is never taken |
 | Labels to take | a task needs one of these labels; none chosen means any task |
 | Owner's label | the label a run puts on a task that waits for you; such a task is not taken while it has it. `needs-owner` is proposed |
@@ -89,7 +90,16 @@ Run it in a terminal, in the folder of the project. It asks:
 
 The last page shows what saving will do. Until you choose `Save and exit` nothing is changed anywhere. Saving writes `.toobusy/settings.toml` and does on GitHub what you asked for: it makes a new board, links the board to the repository, and makes the two labels when the repository does not have them. It never touches the working copy or git.
 
-A run knows a board by three statuses, `Todo`, `In Progress` and `Done`, as GitHub names them on a new board, whatever the case of their letters. `init` warns about a board that lacks one and writes the settings all the same; `toobusy doctor` fails and no run starts until the board has them. `toobusy init --no-board` works without a board.
+A run knows a board by three statuses: it takes a task only from the first, moves it to the second before its session and to the third when it is done. GitHub names them `Todo`, `In Progress` and `Done` on a new board, and a board that keeps those names is asked nothing about. For a board that calls them otherwise, `Ready`, `Doing`, `Shipped`, `init` asks which of its statuses is which and writes the names to the settings:
+
+```toml
+[tracker.statuses]
+todo = "Ready"
+in-progress = "Doing"
+done = "Shipped"
+```
+
+A status that is not named there is called as GitHub calls it, and a name is the same whatever the case of its letters. With `--yes` the options `--todo-status`, `--in-progress-status` and `--done-status` name them. While the board lacks a status the settings name, `toobusy doctor` fails and no run starts. `toobusy init --no-board` works without a board.
 
 The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 

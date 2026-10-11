@@ -37,7 +37,7 @@ public class AboutTests
         Assert.Contains(
             "- A task with one of the labels `manual`, `draft` is not taken.\n"
             + "- Only a task with one of the labels `feature`, `bug` is taken.\n"
-            + "- The project has a board: a task is taken only from the status `Todo`.\n"
+            + "- The project has a board: a task is taken only from the status `Todo`. The statuses a run knows are named below as the settings of the project call them, `Todo`, `In Progress` and `Done`.\n"
             + "- A task that has the `needs-owner` label waits for the owner and is not taken.\n",
             text,
             StringComparison.Ordinal);
@@ -58,6 +58,22 @@ public class AboutTests
     }
 
     [Fact]
+    public void TheStatusesAreNamedAsTheSettingsNameThem()
+    {
+        var text = About.Text(Rules with { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") }, RunPolicy.Default);
+
+        Assert.Contains("- The project has a board: a task is taken only from the status `Ready`. The statuses a run knows are named below as the settings of the project call them, `Ready`, `Doing` and `Shipped`.\n", text, StringComparison.Ordinal);
+        Assert.Contains("Before a session starts, toobusy moves the task to `Doing`;", text, StringComparison.Ordinal);
+        Assert.Contains("It has already moved the task to Doing, and", text, StringComparison.Ordinal);
+        Assert.Contains("with the status `Ready`.", text, StringComparison.Ordinal);
+        Assert.Contains("closes the task and moves it to `Shipped` |", text, StringComparison.Ordinal);
+        Assert.Contains("and moves it back to `Ready`;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("`Todo`", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("In Progress", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("`Done`", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AProjectWithoutABoardAndWithoutLabelsToTakeIsToldAsItIs()
     {
         var text = About.Text(new QueueRules(["manual"], [], "manual", "interrupted", Board: false), RunPolicy.Default);
@@ -73,7 +89,7 @@ public class AboutTests
     {
         var text = About.Text(null, RunPolicy.Default);
 
-        Assert.Contains("No settings are read here, so its labels are not named below: `toobusy init` sets a project up.", text, StringComparison.Ordinal);
+        Assert.Contains("No settings are read here, so its labels are not named below, and the statuses of a board are named as GitHub names them on a new one, where the settings of a project may call them otherwise: `toobusy init` sets a project up.", text, StringComparison.Ordinal);
         Assert.Contains("- A task that has the label of the owner waits for the owner and is not taken.", text, StringComparison.Ordinal);
         Assert.Contains("takes the label of interrupted tasks off a task that had it", text, StringComparison.Ordinal);
         Assert.Contains("- Put the label `<the label of the owner>` on it", text, StringComparison.Ordinal);

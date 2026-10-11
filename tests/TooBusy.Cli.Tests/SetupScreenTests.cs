@@ -143,6 +143,17 @@ public sealed class SetupScreenTests : IDisposable
     }
 
     [Fact]
+    public void FromALaterQuestionOfTheFirstStepEscapeGoesBackAtOnce()
+    {
+        screen.Show(new SetupProgress([], [], ["Project", "Write"], 0) { Later = true });
+        terminal.Keys.Press(Keys.Escape);
+
+        Assert.Null(screen.Choose("Todo status", "", [new SetupOption("Ready", ""), new SetupOption("Doing", "")], 0));
+        terminal.AssertSaw("   Doing\n   Back  esc\n");
+        Assert.DoesNotContain("esc exit", terminal.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FromTheWaysToNameABoardEscapeComesBackWithoutAsking()
     {
         screen.Show(new SetupProgress([], [], ["Project", "Write"], 0));

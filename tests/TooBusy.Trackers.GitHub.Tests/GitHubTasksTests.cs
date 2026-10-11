@@ -224,6 +224,37 @@ public class GitHubTasksTests
     }
 
     [Fact]
+    public async Task ATaskIsMovedToTheStatusTheSettingsName()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tReady\noption\tO_2\tDone\noption\tO_3\tSHIPPED\nitem\tPVTI_1\tPVT_1\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_1\n"));
+
+        await Named().SetStatusAsync(12, BoardStatus.Done, TestContext.Current.CancellationToken);
+
+        Assert.Contains("option=O_3", processes.Asked[1].Arguments);
+    }
+
+    [Fact]
+    public async Task ABoardWithoutTheStatusOfTheSettingsSaysSoByItsName()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn Progress\n"));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Named().SetStatusAsync(12, BoardStatus.InProgress, TestContext.Current.CancellationToken));
+
+        Assert.Equal("#12 could not be moved to Doing on the board. The board has no status “Doing”.", refused.Message);
+    }
+
+    [Fact]
+    public async Task TheQueueKnowsAStatusByTheNameOfTheSettings()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("total\t3\n1\tOne\thttps://x/1\tready\t\t\t\n2\tTwo\thttps://x/2\tTodo\t\t\t\n3\tThree\thttps://x/3\tDoing\t\t\t\n"));
+
+        var tasks = await Named().ReadOpenAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal([(BoardStatus.Todo, "ready"), (BoardStatus.Other, "Todo"), (BoardStatus.InProgress, "Doing")], tasks.Select(task => (task.Status, task.StatusName)));
+    }
+
+    [Fact]
     public async Task ATaskThatIsNotOnTheBoardIsPutThereFirst()
     {
         processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\n"));
@@ -338,4 +369,7 @@ public class GitHubTasksTests
     }
 
     GitHubTasks Tasks(string? board = Board) => new(processes, "acme/rocket", board);
+
+    // The tasks of a project whose settings call the statuses of its board otherwise than GitHub does.
+    GitHubTasks Named() => new(processes, "acme/rocket", Board, new BoardStatuses("Ready", "Doing", "Shipped"));
 }

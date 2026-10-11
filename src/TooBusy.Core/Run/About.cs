@@ -23,7 +23,7 @@ public static class About
         // What the messages name of a project: its label of the owner where the settings are read, and the milestone
         // of the user and the address of the board, which are not read here.
         var label = rules?.Owner ?? "<the label of the owner>";
-        var ground = new NewTasks(label, [], "<the milestone the user works on>", rules is null or { Board: true } ? "<the address of the board>" : null);
+        var ground = new NewTasks(label, [], "<the milestone the user works on>", rules is null or { Board: true } ? "<the address of the board>" : null) { Statuses = rules?.Statuses ?? BoardStatuses.Default };
         var interrupted = rules is null ? "the label of interrupted tasks" : $"the `{rules.Interrupted}` label";
         var again = Briefing.Task(Sample, ground, interrupted: true).Split('\n').First(line => line.StartsWith("- This task was interrupted before.", StringComparison.Ordinal));
         var lost = Briefing.Task(Sample, ground, interrupted: false, lost: true).Split('\n').First(line => line.StartsWith("- A session worked on this task before", StringComparison.Ordinal));
@@ -45,6 +45,11 @@ public static class About
             _ => "This project has none: `toobusy init --before <command>` and `toobusy init --after <command>` set them.",
         };
 
+        // What the board calls the statuses a run knows: as the settings name them, and as GitHub does where none
+        // are read.
+        var statuses = rules?.Statuses ?? BoardStatuses.Default;
+        var (todo, progress, done) = ($"`{statuses.Todo}`", $"`{statuses.InProgress}`", $"`{statuses.Done}`");
+
         var text = new StringBuilder();
         text.Append("""
             # How toobusy works
@@ -61,7 +66,7 @@ public static class About
         if (rules is null)
         {
             text.Append("""
-                - The settings of a project say which tasks a run takes: the labels that keep a task out, the labels a task must have one of, and whether the project has a board, where a task is taken only from the status `Todo`. No settings are read here, so its labels are not named below: `toobusy init` sets a project up.
+                - The settings of a project say which tasks a run takes: the labels that keep a task out, the labels a task must have one of, and whether the project has a board, where a task is taken only from the status `Todo`. No settings are read here, so its labels are not named below, and the statuses of a board are named as GitHub names them on a new one, where the settings of a project may call them otherwise: `toobusy init` sets a project up.
 
                 """);
         }
@@ -72,7 +77,7 @@ public static class About
             if (rules.Take.Count > 0)
                 text.Append(CultureInfo.InvariantCulture, $"- Only a task with {Labels(rules.Take, "the label", "one of the labels")} is taken.\n");
             text.Append(rules.Board
-                ? "- The project has a board: a task is taken only from the status `Todo`.\n"
+                ? $"- The project has a board: a task is taken only from the status {todo}. The statuses a run knows are named below as the settings of the project call them, {todo}, {progress} and {done}.\n"
                 : "- The project has no board: a task has no status, and where a status is named below, nothing is moved.\n");
         }
 
@@ -89,7 +94,7 @@ public static class About
 
             ## The task of a session is kept by toobusy
 
-            A session changes nothing of its own task: not its status, not its assignee and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to `In Progress`; once the session has started, it assigns the task to the user who runs it, with a board and without one, and takes {interrupted} off a task that had it. A tracker that refuses the assignment does not stop the run. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
+            A session changes nothing of its own task: not its status, not its assignee and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to {progress}; once the session has started, it assigns the task to the user who runs it, with a board and without one, and takes {interrupted} off a task that had it. A tracker that refuses the assignment does not stop the run. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
 
             ## A session makes new tasks itself
 
@@ -123,7 +128,7 @@ public static class About
             A project may have the run itself run a command before a task and one after it, `task.before` and `task.after` of its settings: what is to be so around every task, such as that the ports of its development server are free before one and that the server is stopped after it. It does not depend on a session remembering it then. {around}
 
             - A command is a line for the shell, `sh -c` and on Windows `cmd /c`. It runs at the root of the working copy, and the run knows of it only whether it exited with 0. It learns the task from its environment: `TOOBUSY_TASK` is the number of the task, `TOOBUSY_TASK_TITLE` its title and `TOOBUSY_TASK_URL` its address.
-            - `before` runs when the working tree and the queue are read, before the task is moved to `In Progress` and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
+            - `before` runs when the working tree and the queue are read, before the task is moved to {progress} and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
             - `after` runs when the run has done with the task, however it went: done, done in part, left to the owner, interrupted, failed, paused by a usage limit, and when the run was killed over it. The working copy is checked and the tracker is told before it. When it fails, the task stays as it ended, and the run stops.
             - A command is given up after {Spoken.Time(policy.CommandTime)}, and counts as failed then. After a kill of the run, `after` has {Spoken.Time(policy.KilledCommandTime)}.
             - Neither runs around the wait for a usage limit inside a task, and a demo runs none.
@@ -158,7 +163,7 @@ public static class About
 
             ### After a usage limit
 
-            No limit holds a task back: a task is started however much of a limit is used. A session that runs into a usage limit is stopped with its uncommitted changes left in the working copy. A run waits for a limit that resets soon. For one that does not, it leaves the task to the next run: the task gets {interrupted} and a comment that starts with `**Stopped by a usage limit**`, and goes back to `Todo`. When the limit has reset, in the same run or in the next one, the same session is told:
+            No limit holds a task back: a task is started however much of a limit is used. A session that runs into a usage limit is stopped with its uncommitted changes left in the working copy. A run waits for a limit that resets soon. For one that does not, it leaves the task to the next run: the task gets {interrupted} and a comment that starts with `**Stopped by a usage limit**`, and goes back to {todo}. When the limit has reset, in the same run or in the next one, the same session is told:
 
             ```text
             {Briefing.AfterLimit(Sample.Number)}
@@ -206,17 +211,17 @@ public static class About
 
             | Last line | toobusy checks | toobusy does |
             |---|---|---|
-            | `{Outcome.Mark} done` | the working copy is clean and every commit is pushed | puts the report into the task as a comment, closes the task and moves it to `Done` |
-            | `{Outcome.Mark} partial` | the same, and the report names another task, as `#34` or by its address: the task of what is left, which the session made | puts the report into the task as a comment, closes the task and moves it to `Done`; it makes no task |
-            | `{Outcome.Mark} owner` | the working copy is clean | puts {owner} on the task and the report into it as a comment, and moves it back to `Todo`; no run takes it while it has the label |
-            | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
-            | `{Outcome.Mark} failed <the reason>` | nothing | puts {owner} on the task and a comment that says what went wrong, moves it back to `Todo` and stops the run; the working copy is left as it is, for the owner to look at, and no run takes the task while it has the label |
+            | `{Outcome.Mark} done` | the working copy is clean and every commit is pushed | puts the report into the task as a comment, closes the task and moves it to {done} |
+            | `{Outcome.Mark} partial` | the same, and the report names another task, as `#34` or by its address: the task of what is left, which the session made | puts the report into the task as a comment, closes the task and moves it to {done}; it makes no task |
+            | `{Outcome.Mark} owner` | the working copy is clean | puts {owner} on the task and the report into it as a comment, and moves it back to {todo}; no run takes it while it has the label |
+            | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to {todo}; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
+            | `{Outcome.Mark} failed <the reason>` | nothing | puts {owner} on the task and a comment that says what went wrong, moves it back to {todo} and stops the run; the working copy is left as it is, for the owner to look at, and no run takes the task while it has the label |
 
-            The assignee stays however the task ends: on a task that is done or done in part it says who did it, and on one that goes back to `Todo` whose task it is.
+            The assignee stays however the task ends: on a task that is done or done in part it says who did it, and on one that goes back to {todo} whose task it is.
 
             The run stops in the same way, with {owner} and such a comment on the task, when a check does not pass, as after `partial` with a report that names no other task, and when a session ended its turn without such a line and telling it to go on brought none. The owner looks at the task and takes the label off, and a run takes it as any other. The next task is never started on a doubt.
 
-            A commit may close its task, as one with `Closes #12` in its message does when it is pushed: the instructions of a project may call for that. toobusy settles the task all the same: it checks what the session said, puts the report into the closed task as a comment and moves it to `Done`. A run that was stopped between that push and the end of the task does so when it runs next, for a session that ended with its line. A closed task is never opened again and gets neither label: where the table says that a task goes back to `Todo`, a task that is closed already gets the comment only, which says that it is left closed.
+            A commit may close its task, as one with `Closes #12` in its message does when it is pushed: the instructions of a project may call for that. toobusy settles the task all the same: it checks what the session said, puts the report into the closed task as a comment and moves it to {done}. A run that was stopped between that push and the end of the task does so when it runs next, for a session that ended with its line. A closed task is never opened again and gets neither label: where the table says that a task goes back to {todo}, a task that is closed already gets the comment only, which says that it is left closed.
 
             A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**`, `**Interrupted.**` or `**Failed.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
 

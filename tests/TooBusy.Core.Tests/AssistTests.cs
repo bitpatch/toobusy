@@ -252,28 +252,48 @@ public class AssistTests
                 new AssistBoard("https://github.com/users/ann/projects/2", "Garden", false, ["Backlog", "Ready", "Done"]),
                 new AssistBoard("https://github.com/users/ann/projects/3", "", false, []),
                 new AssistBoard("https://github.com/users/ann/projects/4", "Attic", false, null),
+                new AssistBoard("https://github.com/users/ann/projects/5", "Cellar", false, ["Open", "Closed"]),
             ],
         });
 
         Assert.Contains(
             """
-            As things are: the board of the project is https://github.com/orgs/acme/projects/1. The boards you can reach, each with what it calls its statuses:
+            As things are: the board of the project is https://github.com/orgs/acme/projects/1, and the settings call its statuses `Todo`, `In Progress`, `Done`. The boards you can reach, each with what it calls its statuses:
 
             - Rocket, https://github.com/orgs/acme/projects/1, linked to acme/rocket: Todo, In progress, Done
-            - Garden, https://github.com/users/ann/projects/2: Backlog, Ready, Done. **It lacks `Todo`, `In Progress`, which a run knows.**
-            - https://github.com/users/ann/projects/3: it has no statuses. **It lacks the statuses a run knows.**
+            - Garden, https://github.com/users/ann/projects/2: Backlog, Ready, Done. **It is not named as GitHub names a board: the command says which status is which.**
+            - https://github.com/users/ann/projects/3: it has no statuses. **A run needs three.**
             - Attic, https://github.com/users/ann/projects/4: its statuses cannot be read
+            - Cellar, https://github.com/users/ann/projects/5: Open, Closed. **A run needs three statuses.**
 
             Decide: whether the project has a GitHub Projects board, and which: one of those you can reach, a new one, or none.
             """.ReplaceLineEndings("\n"),
             text,
             StringComparison.Ordinal);
-        Assert.Contains("- With a board, a task is taken only from the status `Todo`, and a task that is not on the board is held.", text, StringComparison.Ordinal);
+        Assert.Contains("- With a board, a task is taken only from one status, the one to do, and a task that is not on the board is held.", text, StringComparison.Ordinal);
+        Assert.Contains("- A run knows the three by what the settings call them, `tracker.statuses` there, whatever the case of their letters. A status the settings do not name is called as GitHub calls it on a new board: `Todo`, `In Progress` and `Done`.", text, StringComparison.Ordinal);
         Assert.Contains("The token needs the `project` scope.", text, StringComparison.Ordinal);
         Assert.Contains("Ask the owner: always: a board is seen by everyone who works in the project, a new one is made on GitHub", text, StringComparison.Ordinal);
-        Assert.Contains("Whether the open tasks are put on the board, and into `Todo`, is the owner's to decide too", text, StringComparison.Ordinal);
-        Assert.Contains("Set it:\n\n    toobusy init --yes --board <URL>\n    toobusy init --yes --new-board \"<title>\" --board-owner <login>\n    toobusy init --yes --no-board\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("Which status is which is theirs to say for a board that is not named as GitHub names one. Whether the open tasks are put on the board, and into the status to do, is the owner's to decide too", text, StringComparison.Ordinal);
+        Assert.Contains("Set it:\n\n    toobusy init --yes --board <URL>\n    toobusy init --yes --board <URL> --todo-status <name> --in-progress-status <name> --done-status <name>\n    toobusy init --yes --new-board \"<title>\" --board-owner <login>\n    toobusy init --yes --no-board\n\n", text, StringComparison.Ordinal);
         Assert.Contains("Check: `toobusy doctor` passes `board` and `statuses`, or skips both for a project without a board.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheStepOfTheBoardGoesByTheStatusesTheSettingsName()
+    {
+        var set = Set(Rocket);
+        var named = set with
+        {
+            Settings = new SettingsValidation(set.Settings!.Settings! with { Tracker = new TrackerSettings("github", Rocket) { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") } }, []),
+        };
+
+        var has = Assist.Step(3, named with { Boards = [new AssistBoard(Rocket, "Rocket", true, ["Backlog", "ready", "Doing", "Shipped"])] });
+        Assert.Contains("the settings call its statuses `Ready`, `Doing`, `Shipped`.", has, StringComparison.Ordinal);
+        Assert.Contains("- Rocket, https://github.com/orgs/acme/projects/1, linked to acme/rocket: Backlog, ready, Doing, Shipped\n", has, StringComparison.Ordinal);
+
+        var lacks = Assist.Step(3, named with { Boards = [new AssistBoard(Rocket, "Rocket", true, ["Todo", "In Progress", "Done", "Shipped"])] });
+        Assert.Contains("Todo, In Progress, Done, Shipped. **It lacks `Ready`, `Doing`, which the settings name.**", lacks, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -284,7 +304,7 @@ public class AssistTests
 
         var unset = Assist.Step(3, Unset with { Boards = [new AssistBoard(Rocket, "Rocket", false, ["Todo", "In Progress", "Done"])] });
         Assert.Contains("As things are: not set: there are no settings yet. Step 2 writes the settings first: `toobusy init --assist 2`. The boards you can reach", unset, StringComparison.Ordinal);
-        Assert.Contains("    toobusy init --yes --no-skill --board <URL>\n    toobusy init --yes --no-skill --new-board \"<title>\" --board-owner <login>\n    toobusy init --yes --no-skill --no-board\n", unset, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --no-skill --board <URL>\n    toobusy init --yes --no-skill --board <URL> --todo-status <name> --in-progress-status <name> --done-status <name>\n    toobusy init --yes --no-skill --new-board \"<title>\" --board-owner <login>\n    toobusy init --yes --no-skill --no-board\n", unset, StringComparison.Ordinal);
         Assert.Contains("`--no-skill` stands there only because nothing is set yet: step 6 sets it.", unset, StringComparison.Ordinal);
     }
 

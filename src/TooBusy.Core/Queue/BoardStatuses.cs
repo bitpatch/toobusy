@@ -1,40 +1,49 @@
 namespace TooBusy.Core.Queue;
 
-// The statuses of a board as a run knows them: by the names GitHub gives the statuses of a new board, Todo,
-// In Progress and Done, whatever the case of the letters and whatever stands between them.
-public static class BoardStatuses
+// What the board of a project calls the three statuses a run knows: the one it takes a task from, and the two it
+// moves a task to. The settings name them; a name they do not give is the one GitHub gives the status of a new
+// board. A name is the same as one of the board whatever the case of its letters and whatever stands between its
+// letters and digits.
+public sealed record BoardStatuses(string Todo, string InProgress, string Done)
 {
-    // The statuses a run takes a task from and moves it to, in the order a task goes through them.
-    static readonly BoardStatus[] Known = [BoardStatus.Todo, BoardStatus.InProgress, BoardStatus.Done];
+    // The names GitHub gives the statuses of a new board.
+    public static BoardStatuses Default { get; } = new("Todo", "In Progress", "Done");
+
+    // The three names, in the order a task goes through them.
+    public IReadOnlyList<string> Names => [Todo, InProgress, Done];
 
     // A status by what a board calls it; an empty name is that of a task that has none.
-    public static BoardStatus Of(string name) => new string([.. name.Where(char.IsLetter).Select(char.ToLowerInvariant)]) switch
-    {
-        "" => BoardStatus.Missing,
-        "todo" => BoardStatus.Todo,
-        "inprogress" => BoardStatus.InProgress,
-        "done" => BoardStatus.Done,
-        _ => BoardStatus.Other,
-    };
+    public BoardStatus Of(string name) =>
+        name.Length == 0 ? BoardStatus.Missing
+        : Same(name, Todo) ? BoardStatus.Todo
+        : Same(name, InProgress) ? BoardStatus.InProgress
+        : Same(name, Done) ? BoardStatus.Done
+        : BoardStatus.Other;
 
-    public static string NameOf(BoardStatus status) => status switch
+    public string NameOf(BoardStatus status) => status switch
     {
-        BoardStatus.Todo => "Todo",
-        BoardStatus.InProgress => "In Progress",
-        BoardStatus.Done => "Done",
+        BoardStatus.Todo => Todo,
+        BoardStatus.InProgress => InProgress,
+        BoardStatus.Done => Done,
         _ => status.ToString(),
     };
 
-    // The statuses a run knows that are not among those of a board, by their names.
-    public static IReadOnlyList<string> Missing(IReadOnlyList<string> has) =>
-        [.. Known.Where(status => has.All(name => Of(name) != status)).Select(NameOf)];
+    // The names of the three that are not among the statuses of a board.
+    public IReadOnlyList<string> Missing(IReadOnlyList<string> has) => [.. Names.Where(name => !has.Any(one => Same(one, name)))];
 
     // What is wrong with a board that has these statuses, with what it has instead; null for a board that has
     // the three.
-    public static string? Lack(IReadOnlyList<string> has) => Missing(has) switch
+    public string? Lack(IReadOnlyList<string> has) => Missing(has) switch
     {
         [] => null,
         var missing => $"The board has no {(missing.Count == 1 ? "status" : "statuses")} {string.Join(", ", missing.Select(name => $"“{name}”"))}: "
             + (has.Count == 0 ? "it has no statuses." : $"it has {string.Join(", ", has)}."),
     };
+
+    // Whether two names are of one status.
+    public static bool Same(string one, string other) => Key(one) == Key(other);
+
+    // A name without what does not tell it from another: its letters and digits, in lower case. A name that has
+    // neither is told by all of it.
+    static string Key(string name) => new string([.. name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)]) is { Length: > 0 } key ? key : name.Trim();
 }

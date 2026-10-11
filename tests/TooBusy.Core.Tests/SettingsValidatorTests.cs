@@ -1,9 +1,12 @@
+using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
 
 public class SettingsValidatorTests
 {
+    const string Board = "https://github.com/orgs/bitpatch/projects/3";
+
     [Fact]
     public void ACompleteDocumentGivesTheSettings()
     {
@@ -336,6 +339,55 @@ public class SettingsValidatorTests
     }
 
     [Fact]
+    public void TheStatusesOfABoardAreThoseOfGitHubUnlessTheyAreNamed()
+    {
+        var usual = SettingsValidator.Validate(Document((SettingsKeys.TrackerBoard, Board)));
+        Assert.Equal(BoardStatuses.Default, usual.Settings!.Tracker.Statuses);
+
+        var one = SettingsValidator.Validate(Document((SettingsKeys.TrackerBoard, Board), (SettingsKeys.DoneStatus, "Shipped")));
+        Assert.Empty(one.Errors);
+        Assert.Equal(new BoardStatuses("Todo", "In Progress", "Shipped"), one.Settings!.Tracker.Statuses);
+
+        var all = SettingsValidator.Validate(Document(
+            (SettingsKeys.TrackerBoard, Board), (SettingsKeys.TodoStatus, "Ready"), (SettingsKeys.InProgressStatus, "Doing"), (SettingsKeys.DoneStatus, "Shipped")));
+        Assert.Empty(all.Errors);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), all.Settings!.Tracker.Statuses);
+    }
+
+    [Theory]
+    [InlineData(SettingsKeys.TodoStatus)]
+    [InlineData(SettingsKeys.InProgressStatus)]
+    [InlineData(SettingsKeys.DoneStatus)]
+    public void AStatusIsAStringThatIsNotEmpty(string key)
+    {
+        var empty = OnlyError(Document((SettingsKeys.TrackerBoard, Board), (key, "  ")));
+        Assert.Equal((key, "the name of a status must not be empty: leave the key out for the name GitHub gives"), (empty.Key, empty.Message));
+
+        var number = OnlyError(Document((SettingsKeys.TrackerBoard, Board), (key, 3L)));
+        Assert.Equal((key, "must be a string"), (number.Key, number.Message));
+    }
+
+    [Fact]
+    public void AStatusMeansSomethingOnlyWithABoard()
+    {
+        var error = OnlyError(Document((SettingsKeys.TodoStatus, "Ready")));
+
+        Assert.Equal((SettingsKeys.TodoStatus, "names a status of a board, and `tracker.board` names no board"), (error.Key, error.Message));
+    }
+
+    [Fact]
+    public void TwoOfTheThreeMustNotNameOneStatus()
+    {
+        var named = OnlyError(Document((SettingsKeys.TrackerBoard, Board), (SettingsKeys.TodoStatus, "Ready"), (SettingsKeys.DoneStatus, "ready")));
+        Assert.Equal((SettingsKeys.DoneStatus, "`tracker.statuses.todo` and `tracker.statuses.done` must not name one status: both are `ready`"), (named.Key, named.Message));
+
+        // One of the two is the name GitHub gives: the error stands at the key the file has.
+        var given = OnlyError(Document((SettingsKeys.TrackerBoard, Board), (SettingsKeys.TodoStatus, "in progress")));
+        Assert.Equal((SettingsKeys.TodoStatus, LineOf(SettingsKeys.TodoStatus)), (given.Key, given.Line));
+        Assert.Equal("`tracker.statuses.todo` and `tracker.statuses.in-progress` must not name one status: both are `In Progress`", given.Message);
+    }
+
+    [Fact]
     public void AnErrorNamesTheFileTheLineAndTheKey()
     {
         Assert.Equal(".toobusy/settings.toml:5: tracker.type: is missing", new SettingsError("tracker.type", 5, "is missing").Describe(".toobusy/settings.toml"));
@@ -357,7 +409,7 @@ public class SettingsValidatorTests
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

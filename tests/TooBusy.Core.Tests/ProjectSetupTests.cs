@@ -13,6 +13,9 @@ public class ProjectSetupTests
     const string OwnerLabel = "Owner's label";
     const string InterruptLabel = "Interrupt label";
     const string NewLabel = "New label…";
+    const string TodoStatus = "Todo status";
+    const string InProgressStatus = "In Progress status";
+    const string DoneStatus = "Done status";
 
     static readonly ProjectSettings Existing = new(
         new TrackerSettings("github", Rocket),
@@ -1097,23 +1100,244 @@ public class ProjectSetupTests
     }
 
     [Fact]
-    public async Task ABoardThatLacksAStatusOfARunIsTakenAndSaidOnTheLastPageAndInTheResult()
+    public async Task ABoardThatIsNotNamedAsGitHubNamesOneIsAskedWhichOfItsStatusesIsWhich()
     {
-        tracker.Statuses = ["Backlog", "Ready", "Done"];
+        tracker.Statuses = ["Backlog", "Ready", "Doing", "Review", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Answer(TodoStatus, "Ready");
+        dialog.Answer(InProgressStatus, "Doing");
+        dialog.Answer(DoneStatus, "Shipped");
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new TrackerSettings("github", Moon) { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") }, store.Saved!.Tracker);
+        Assert.Equal(["Project", TodoStatus, InProgressStatus, DoneStatus, "Blocking labels"], dialog.Asked.Take(5));
+
+        // A status that is one of the three already is not among the choices of the next.
+        Assert.Equal(["Backlog", "Ready", "Doing", "Review", "Shipped"], dialog.Offered[TodoStatus]);
+        Assert.Equal(["Backlog", "Doing", "Review", "Shipped"], dialog.Offered[InProgressStatus]);
+        Assert.Equal(["Backlog", "Review", "Shipped"], dialog.Offered[DoneStatus]);
+        Assert.Contains(new SetupAnswer("Statuses", "Ready, Doing, Shipped"), result.Answers);
+        Assert.Empty(result.Notes);
+        Assert.Equal([Moon], tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task WhileTheStatusesAreAskedForTheBoardIsAmongTheAnswers()
+    {
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        await RunAsync();
+
+        var first = dialog.Seen.First(progress => progress.Answers.Count == 2);
+        Assert.Equal(0, first.Step);
+        Assert.Equal(new SetupAnswer("Project", Moon), first.Answers[1]);
+
+        // Going back from a status stays in the setup, so the screen is told that it is not the first question.
+        Assert.True(first.Later);
+        Assert.False(dialog.Seen[0].Later);
+    }
+
+    [Fact]
+    public async Task AStatusThatTheBoardDoesNotNameAsGitHubDoesIsProposedByItsPlace()
+    {
+        tracker.Statuses = ["Ready", "In progress", "Review", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        await RunAsync();
+
+        // The first that is left for a task to do, the name of GitHub where the board has it, and the last one
+        // for a task that is done.
+        Assert.Equal(new BoardStatuses("Ready", "In progress", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public async Task GoingBackFromAStatusComesBackToTheOneBeforeAndFromTheFirstToTheBoard()
+    {
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Answer(TodoStatus, "Doing");
+        dialog.Back(InProgressStatus);
+        dialog.Back(TodoStatus);
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Answer(TodoStatus, "Ready");
+
+        await RunAsync();
+
+        Assert.Equal(["Project", TodoStatus, InProgressStatus, TodoStatus, "Project", TodoStatus, InProgressStatus, DoneStatus], dialog.Asked.Take(8));
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public async Task ABoardThatWasAskedAboutIsAskedAboutAgainWithWhatWasAnswered()
+    {
+        tracker.Statuses = ["Todo", "In Progress", "Done", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Back("Blocking labels");
+
+        await RunAsync(new SetupProposals { DoneStatus = "shipped" });
+
+        Assert.Equal(["Project", TodoStatus, InProgressStatus, DoneStatus, "Blocking labels", "Project", TodoStatus, InProgressStatus, DoneStatus, "Blocking labels"], dialog.Asked.Take(10));
+        Assert.Equal(new BoardStatuses("Todo", "In Progress", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfTheSettingsAreProposedAndAcceptingThemChangesNothing()
+    {
+        store.Current = Existing with { Tracker = Existing.Tracker with { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") } };
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        tracker.Statuses = ["Backlog", "Ready", "Doing", "Shipped"];
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Equal(["Project", TodoStatus, InProgressStatus, DoneStatus], dialog.Asked.Take(4));
+    }
+
+    [Fact]
+    public async Task AChangeOfTheStatusesIsALineOfTheLastPage()
+    {
+        store.Current = Existing;
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+
+        await RunAsync();
+
+        Assert.Contains(new SetupNote(SetupTone.Change, "Statuses: Todo, In Progress, Done → Ready, Doing, Shipped"), dialog.Shown.Notes);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public async Task ABoardWithFewerThanThreeStatusesIsTakenAndSaidOnTheLastPageAndInTheResult()
+    {
+        tracker.Statuses = ["Ready", "Done"];
         dialog.Board(new BoardAnswer.Existing(Moon));
 
         var result = await RunAsync();
 
         SetupNote[] said =
         [
-            new(SetupTone.Warning, "The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done."),
-            new(SetupTone.Muted, "Name its statuses Todo, In Progress and Done before a run: `toobusy doctor` fails until then."),
+            new(SetupTone.Warning, "The board has no statuses “Todo”, “In Progress”: it has Ready, Done."),
+            new(SetupTone.Muted, "A run needs three statuses of a board: add them on GitHub and run `toobusy init` again. `toobusy doctor` fails until then."),
         ];
         Assert.Equal(said, dialog.Shown.Notes.TakeLast(2));
         Assert.Equal(said, result.Notes);
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal(Moon, store.Saved!.Tracker.Board);
-        Assert.Equal([Moon], tracker.StatusesOf);
+        Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
+        Assert.DoesNotContain(TodoStatus, dialog.Asked);
+    }
+
+    [Fact]
+    public async Task AnOptionOfAStatusIsProposedAndAStatusTheBoardDoesNotHaveIsSaid()
+    {
+        tracker.Statuses = ["Todo", "In Progress", "Done", "Shipped"];
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        var result = await RunAsync(new SetupProposals { TodoStatus = "Ready", DoneStatus = " shipped " });
+
+        Assert.Equal(new SetupNote(SetupTone.Warning, "Todo status: The board has no status “Ready”: it has Todo, In Progress, Done, Shipped."), result.Notes[0]);
+        Assert.Equal(new BoardStatuses("Todo", "In Progress", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Fact]
+    public async Task WhereNothingIsVerifiedTheStatusesAreTyped()
+    {
+        machine.TrackerReachable = false;
+        dialog.Board(new BoardAnswer.Existing(Moon));
+        dialog.Answer(TodoStatus, " Ready ");
+        dialog.Answer(InProgressStatus, "ready");
+        dialog.Answer(InProgressStatus, " ");
+        dialog.Answer(InProgressStatus, "Doing");
+
+        await RunAsync();
+
+        Assert.Equal(["ready", " "], dialog.Refused);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Done"), store.Saved!.Tracker.Statuses);
+        Assert.Empty(tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task AProjectWithoutABoardAndANewOneAreAskedNothingOfStatuses()
+    {
+        boards.Read = new SetupBoards([], [new SetupOwner("acme", true)]);
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
+
+        await RunAsync();
+
+        Assert.DoesNotContain(TodoStatus, dialog.Asked);
+        Assert.Equal(BoardStatuses.Default, store.Saved!.Tracker.Statuses);
+        Assert.Empty(tracker.StatusesOf);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsTheOptionsNameTheStatusesAsTheBoardWritesThem()
+    {
+        tracker.Statuses = ["Backlog", "Ready", "Doing", "Shipped"];
+
+        var result = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Existing(Moon)) { TodoStatus = "ready", InProgressStatus = "DOING", DoneStatus = "Shipped" });
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
+        Assert.Contains(new SetupAnswer("Statuses", "Ready, Doing, Shipped"), result.Answers);
+        Assert.Empty(result.Notes);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAStatusThatIsNotNamedStaysAsTheSettingsCallIt()
+    {
+        store.Current = Existing with { Tracker = Existing.Tracker with { Statuses = new BoardStatuses("Ready", "Doing", "Done") } };
+        tracker.Statuses = ["Ready", "Doing", "Done", "Shipped"];
+
+        await RunUnaskedAsync(new SetupProposals { DoneStatus = "Shipped" });
+
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
+    }
+
+    [Theory]
+    [InlineData("Ready", "Doing", "Closed", "Done status: The board has no status “Closed”: it has Backlog, Ready, Doing, Shipped.")]
+    [InlineData("Ready", "ready", "Shipped", "In Progress status: ready is the Todo status too.")]
+    [InlineData("Ready", " ", "Shipped", "In Progress status: A status needs a name.")]
+    [InlineData("Done", null, null, "Done status: Done is the Todo status too.")]
+    public async Task WithoutQuestionsAStatusThatCannotBeFailsBeforeAnythingIsChanged(string? todo, string? progress, string? done, string failure)
+    {
+        tracker.Statuses = ["Backlog", "Ready", "Doing", "Shipped"];
+
+        var result = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Existing(Moon)) { TodoStatus = todo, InProgressStatus = progress, DoneStatus = done });
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal(failure, result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsAStatusIsNotNamedForAProjectWithoutABoardNorOtherwiseForANewOne()
+    {
+        var none = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.None()) { TodoStatus = "Ready" });
+        Assert.Equal("Todo status: A status is named for a project, and there is none.", none.Failure);
+
+        boards.Read = new SetupBoards([], [new SetupOwner("acme", true)]);
+        var made = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Created("Rocket", null)) { TodoStatus = "Ready" });
+        Assert.Equal("Todo status: A new project has the statuses GitHub gives it: Todo, In Progress, Done.", made.Failure);
+        Assert.Empty(tracker.Made);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsABoardThatIsNotNamedAsGitHubNamesOneIsTakenAndItIsSaidWhatToName()
+    {
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+
+        var result = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Existing(Moon)));
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
+        Assert.Equal(
+            [
+                new SetupNote(SetupTone.Warning, "The board has no statuses “Todo”, “In Progress”, “Done”: it has Ready, Doing, Shipped."),
+                new SetupNote(SetupTone.Muted, "Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`, or with `toobusy init`: `toobusy doctor` fails until then."),
+            ],
+            result.Notes);
     }
 
     [Fact]
@@ -1485,6 +1709,7 @@ public class ProjectSetupTests
 
         public static string Render(ProjectSettings settings) => string.Join('\n',
             $"board = {settings.Tracker.Board}",
+            $"statuses = {string.Join(", ", settings.Tracker.Statuses.Names)}",
             $"blocking = {string.Join(", ", settings.Queue.Labels.Blocking)}",
             $"take = {string.Join(", ", settings.Queue.Labels.Take)}",
             $"owner = {settings.Queue.Labels.Owner}",

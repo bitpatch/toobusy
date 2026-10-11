@@ -1,3 +1,5 @@
+using TooBusy.Core.Queue;
+
 namespace TooBusy.Core.Settings;
 
 // The settings of a project as `.toobusy/settings.toml` holds them. An instance is always valid:
@@ -21,7 +23,11 @@ public sealed record TaskCommands(string? Before, string? After)
     public static TaskCommands None { get; } = new(null, null);
 }
 
-public sealed record TrackerSettings(string Type, string? Board);
+// Statuses are what the board calls the statuses a run knows; they mean something only where there is a board.
+public sealed record TrackerSettings(string Type, string? Board)
+{
+    public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
+}
 
 public sealed record QueueSettings(LabelSettings Labels);
 
