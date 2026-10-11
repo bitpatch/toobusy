@@ -1168,6 +1168,96 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ATrackerThatRefusesAfterASessionWasStartedStopsItAndTheNextRunGoesOnWithIt()
+    {
+        tracker.Add(5, labels: ["bug", "interrupted"]);
+        tracker.Refused.Add("label 5 -interrupted");
+        var session = assistant.Session(5).Lost("I was about to").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        var why = "The tracker refused: label 5 -interrupted. · the session of #5 is stopped, and the next run goes on with it · fake attach 5";
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
+        Assert.Equal(1, session.Stopped);
+        Assert.Equal(0, session.Looks);
+        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Equal(Record(5), state.Record);
+
+        tracker.Refused.Clear();
+        run = null;
+        result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Single(assistant.Started);
+        Assert.Equal([Briefing.AfterStop(5)], session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session was stopped, and goes on · fake attach 5", log.Lines);
+        Assert.Equal(["status 5 InProgress", "status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Null(state.Record);
+    }
+
+    // Whatever the record said of the session, it was told to go on and stopped after that: its changes are its
+    // own, and the next run tells it so.
+    [Theory]
+    [InlineData(RecordState.Working)]
+    [InlineData(RecordState.Paused)]
+    [InlineData(RecordState.WrappedUp)]
+    public async Task ATrackerThatRefusesAfterASessionWasToldToGoOnStopsItAndTheNextRunGoesOnWithIt(RecordState left)
+    {
+        state.Record = Record(5, left);
+        tracker.Add(5, labels: ["feature", "interrupted"]);
+        tracker.Refused.Add("status 5 InProgress");
+        var session = assistant.Session(5).Lost("I was about to").Then().Works().Ends(Done);
+        var first = left switch
+        {
+            RecordState.Paused => Briefing.AfterLimit(5),
+            RecordState.WrappedUp => Briefing.AfterAbort(5),
+            _ => Briefing.AfterStop(5),
+        };
+
+        var result = await RunAsync();
+
+        var why = "The tracker refused: status 5 InProgress. · the session of #5 is stopped, and the next run goes on with it · fake attach 5";
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
+        Assert.Equal([first], session.Told);
+        Assert.Equal(1, session.Stopped);
+        Assert.Empty(tracker.Did);
+        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Equal(Record(5), state.Record);
+
+        tracker.Refused.Clear();
+        workspace.Next.Enqueue(new WorkspaceState(2, 0));
+        run = null;
+        result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Empty(assistant.Started);
+        Assert.Equal([first, Briefing.AfterStop(5)], session.Told);
+        Assert.Equal(["status 5 InProgress", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
+    public async Task AKillWhileATaskIsTakenStopsItsSessionToo()
+    {
+        tracker.Add(5, labels: ["bug", "interrupted"]);
+        tracker.Doing = what =>
+        {
+            if (what == "label 5 -interrupted")
+            {
+                kill.Cancel();
+                kill.Token.ThrowIfCancellationRequested();
+            }
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#5 was being taken, and the next run goes on with its session · fake attach 5"), result);
+        Assert.Equal(1, assistant.Session(5).Stopped);
+        Assert.Contains("■ Killed the session of #5 while the task was taken: the next run goes on with its session · fake attach 5", log.Lines);
+        Assert.Equal(Record(5), state.Record);
+    }
+
+    [Fact]
     public async Task WhileTheSessionsCannotBeReadTheSessionOfTheRecordIsLeftAsItIs()
     {
         state.Record = Record(5);

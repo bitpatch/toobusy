@@ -52,6 +52,9 @@ sealed class FakeTracker : ITaskTracker
     // What the tracker refuses, by the first word of what is done: `status`, `close`, `read`, or `status 12 Done`.
     public HashSet<string> Refused { get; } = [];
 
+    // What happens as something is done, before it is: a kill that comes in the middle of it, for one.
+    public Action<string>? Doing { get; set; }
+
     public int Next { get; set; } = 100;
 
     // A tracker that says a task is closed and goes on listing it among the open ones.
@@ -128,6 +131,7 @@ sealed class FakeTracker : ITaskTracker
 
     void Do(string what, bool remember = true)
     {
+        Doing?.Invoke(what);
         if (Refused.Contains(what) || Refused.Contains(what.Split(' ')[0]))
             throw new TrackerException($"The tracker refused: {what}.");
         if (remember && what != "read")

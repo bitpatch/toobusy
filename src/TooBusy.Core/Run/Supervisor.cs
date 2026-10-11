@@ -204,9 +204,10 @@ public sealed class Supervisor(
                 return Stop($"the session of #{number} did not go on · {found.Open} · the next run tries again");
 
             session = found;
-            await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
         }
 
+        // A session that is gone on with was told so before the tracker is: its task is moved after it.
+        var goesOn = session is not null;
         if (session is null)
         {
             // A record whose session and conversation are gone gives a new session, which is told what it finds.
@@ -228,9 +229,28 @@ public sealed class Supervisor(
                 : "a new session";
         }
 
+        // The session works from here on, so it is written down before the tracker is told anything more: a
+        // tracker that refuses, or a kill, stops the session as it stops the run, and the next run goes on with it.
         state.Save(record = new TaskRecord(number, session.Trace));
-        if (again)
-            await tracker.RemoveLabelAsync(number, plan.Rules.Interrupted, kill);
+        try
+        {
+            if (goesOn)
+                await tracker.SetStatusAsync(number, BoardStatus.InProgress, kill);
+            if (again)
+                await tracker.RemoveLabelAsync(number, plan.Rules.Interrupted, kill);
+        }
+        catch (TrackerException refused)
+        {
+            await Quietly(() => session.StopAsync(CancellationToken.None));
+            return Stop($"{refused.Message} · the session of #{number} is stopped, and the next run goes on with it · {session.Open}");
+        }
+        catch (OperationCanceledException) when (kill.IsCancellationRequested)
+        {
+            await Quietly(() => session.StopAsync(CancellationToken.None));
+            left = $"#{number} was being taken, and the next run goes on with its session · {session.Open}";
+            Say(RunMark.Interrupted, $"Killed the session of #{number} while the task was taken: the next run goes on with its session · {session.Open}");
+            throw;
+        }
 
         Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
         if (plan.Rules.Board)

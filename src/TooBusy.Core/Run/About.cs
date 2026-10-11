@@ -102,7 +102,7 @@ public static class About
 
             - A session that still works, because only toobusy was stopped, is watched again and told nothing.
             - A session that ended with a line for toobusy while nobody watched is settled as any other, as told under “How a task ends”.
-            - A session that was stopped, as a kill of the run stops it, goes on over the changes it left in the working copy, and is told:
+            - A session that was stopped, as a kill of the run stops it, or a tracker that refuses while the task is being taken, goes on over the changes it left in the working copy, and is told:
 
             ```text
             {Briefing.AfterStop(Sample.Number)}
