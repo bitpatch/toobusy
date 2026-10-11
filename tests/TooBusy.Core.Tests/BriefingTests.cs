@@ -92,6 +92,9 @@ public class BriefingTests
         Assert.Equal(
             "**Stopped by a usage limit** (the weekly limit is spent). The uncommitted changes are left in the working copy, and the next run goes on with the same session.\n\n_Session: `claude attach 1a2b`_",
             Briefing.Paused("the weekly limit is spent", "claude attach 1a2b"));
+        Assert.Equal(
+            "**Failed.** The run stopped over this task: its session failed: the tests do not pass. Look at what went wrong, take the label `manual` off, and a run takes the task again.\n\nI tried twice.\n\n_Session: `claude attach 1a2b`_",
+            Briefing.Stopped("its session failed: the tests do not pass", "I tried twice.", "claude attach 1a2b", "manual"));
     }
 
     [Fact]

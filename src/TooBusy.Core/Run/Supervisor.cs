@@ -541,19 +541,23 @@ public sealed class Supervisor(
         await Quietly(() => session.StopAsync(kill));
         kill.ThrowIfCancellationRequested();
 
-        // A failure is for the owner: the record is forgotten, and no run goes on with the task by itself.
+        // A failure is for the owner: the record is forgotten, the task is left to them, and no run goes on with
+        // it by itself.
         if (Outcome.Read(look.Reply) is not { } outcome)
         {
             state.Clear();
             Say(RunMark.Failed, $"#{number} {task.Title} — ended after {took} without saying how the task went");
+            await LeaveAsync(number, session, "its session ended without saying how the task went", string.Join('\n', Said(look.Reply)), kill);
             return (RunMark.Failed, Stop($"the session of #{number} did not say how the task went · {session.Open}"));
         }
 
         if (outcome.Kind == OutcomeKind.Failed)
         {
             state.Clear();
-            Say(RunMark.Failed, $"#{number} {task.Title} — failed after {took}: {outcome.Reason ?? "no reason is given"}");
+            var reason = outcome.Reason ?? "no reason is given";
+            Say(RunMark.Failed, $"#{number} {task.Title} — failed after {took}: {reason}");
             Quote(outcome.Report, session);
+            await LeaveAsync(number, session, $"its session failed: {reason}", outcome.Report, kill);
             return (RunMark.Failed, Stop($"#{number} failed · {session.Open}"));
         }
 
@@ -566,13 +570,34 @@ public sealed class Supervisor(
         else
             state.Clear();
 
-        if (tree is null)
-            return (RunMark.Failed, Stop($"the working tree cannot be read after #{number} · {session.Open}"));
-        if (tree.Changes > 0)
-            return (RunMark.Failed, Stop($"#{number} left changes in the working tree · {session.Open}"));
-        if (outcome.Kind is OutcomeKind.Done or OutcomeKind.Partial && tree.Unpushed > 0)
-            return (RunMark.Failed, Stop($"#{number} left {(tree.Unpushed == 1 ? "a commit that is" : $"{tree.Unpushed} commits that are")} not pushed · {session.Open}"));
+        // A check that does not pass leaves the task to the owner as a failure does, with what the session said.
+        var wrong = tree is null ? "the working tree cannot be read after"
+            : tree.Changes > 0 ? "left changes in the working tree"
+            : outcome.Kind is OutcomeKind.Done or OutcomeKind.Partial && tree.Unpushed > 0 ? $"left {(tree.Unpushed == 1 ? "a commit that is" : $"{tree.Unpushed} commits that are")} not pushed"
+            : null;
+        if (wrong is not null)
+        {
+            await LeaveAsync(number, session, tree is null ? "the working tree could not be read after its session" : $"its session {wrong}", outcome.Report, kill);
+            return (RunMark.Failed, Stop(tree is null ? $"{wrong} #{number} · {session.Open}" : $"#{number} {wrong} · {session.Open}"));
+        }
 
+        try
+        {
+            return await TellAsync(task, session, outcome, took, kill);
+        }
+        catch (TrackerException refused) when (outcome.Kind != OutcomeKind.Interrupted)
+        {
+            // The record is forgotten, so nothing but the label of the owner keeps the next run from the task. A
+            // task that was wrapped up has its record, and the next run goes on with its session.
+            await LeaveAsync(number, session, $"the tracker refused something after its session: {refused.Message}", outcome.Report, kill);
+            throw;
+        }
+    }
+
+    // Tells the tracker how a task went whose session said so and passed the checks.
+    async Task<(RunMark Mark, RunResult? Ended)> TellAsync(QueueTask task, IAssistantSession session, Outcome outcome, string took, CancellationToken kill)
+    {
+        var number = task.Number;
         var rules = plan.Rules;
         switch (outcome.Kind)
         {
@@ -613,6 +638,40 @@ public sealed class Supervisor(
                 Quote(outcome.Report, session);
                 return (RunMark.Interrupted, aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}"));
         }
+    }
+
+    // Leaves a task that the run stops over to the owner: it gets the label of the owner and a comment that says
+    // what went wrong, and goes back among those to do, where the label holds it in a project with a board as in
+    // one without. A tracker that refuses any of it is said, and changes nothing of why the run stops.
+    async Task LeaveAsync(int number, IAssistantSession session, string why, string report, CancellationToken kill)
+    {
+        var owner = plan.Rules.Owner;
+        var missing = new List<string>();
+        async Task<bool> Try(Func<Task> change)
+        {
+            try
+            {
+                await change();
+                return true;
+            }
+            catch (TrackerException refused)
+            {
+                missing.Add(refused.Message);
+                return false;
+            }
+        }
+
+        // Without the label the status is all that holds the task, so it is moved only when the label is put.
+        var labelled = await Try(() => tracker.AddLabelAsync(number, owner, kill));
+        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, owner), kill));
+        if (labelled)
+        {
+            await Try(() => tracker.SetStatusAsync(number, BoardStatus.Todo, kill));
+            Say(RunMark.Note, $"#{number} has the {owner} label{(missing.Count == 0 ? " and a comment that says what went wrong" : "")}; no run takes it while it has the label");
+        }
+
+        if (missing.Count > 0)
+            Say(RunMark.Attention, $"#{number} is not left to the owner as it should be: {string.Join(" · ", missing)} · set it right by hand before the next run");
     }
 
     // A task that is done is closed. Moving it on the board follows, and a board that cannot take it there does not

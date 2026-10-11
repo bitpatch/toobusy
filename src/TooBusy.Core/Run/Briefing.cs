@@ -100,11 +100,14 @@ public static class Briefing
             OutcomeKind.Done => "**Done.**",
             OutcomeKind.Partial => string.Create(CultureInfo.InvariantCulture, $"**Done in part.** What is left is #{rest}, which waits for the owner."),
             OutcomeKind.Owner => $"**Waits for the owner.** Nothing could be done without you. Take the label `{label}` off when this is answered, and a run takes the task again.",
-            OutcomeKind.Interrupted => "**Interrupted.** Nothing is committed; a run takes the task again.",
-            _ => "**Failed.**",
+            _ => "**Interrupted.** Nothing is committed; a run takes the task again.",
         };
         return Joined(head, report, $"_Session: `{session}`_");
     }
+
+    // The comment of a task that a run stopped over: what went wrong, what its session said last, and the session.
+    public static string Stopped(string why, string report, string session, string label) =>
+        Joined($"**Failed.** The run stopped over this task: {why}. Look at what went wrong, take the label `{label}` off, and a run takes the task again.", report, $"_Session: `{session}`_");
 
     // The comment of a task that a usage limit stopped.
     public static string Paused(string why, string session) =>

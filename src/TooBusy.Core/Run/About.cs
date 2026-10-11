@@ -120,7 +120,7 @@ public static class About
             {lost}
             ```
 
-            A session that failed, or whose task did not pass the checks, is not gone on with: that is for the owner.
+            A session that failed, or whose task did not pass the checks, is not gone on with: its task gets {owner} and waits for the owner, as told under “How a task ends”.
 
             ### When the owner stops the run at once
 
@@ -142,11 +142,11 @@ public static class About
             | `{Outcome.Mark} partial` | the same | makes a new task of what the reply says after `{Outcome.RestMark}`, its title on that line and its description under it, with {owner}, the labels of the first task that let a task in, and the same milestone; puts the report into the first task as a comment that names the new one, closes it and moves it to `Done` |
             | `{Outcome.Mark} owner` | the working copy is clean | puts {owner} on the task and the report into it as a comment, and moves it back to `Todo`; no run takes it while it has the label |
             | `{Outcome.Mark} interrupted` | the working copy is clean | puts {interrupted} on the task and the report into it as a comment, and moves it back to `Todo`; the next run takes it first and goes on with the same session, or with a new one where the conversation is gone |
-            | `{Outcome.Mark} failed <the reason>` | nothing | stops the run; the task stays in `In Progress` and the working copy as it is, for the owner to look at |
+            | `{Outcome.Mark} failed <the reason>` | nothing | puts {owner} on the task and a comment that says what went wrong, moves it back to `Todo` and stops the run; the working copy is left as it is, for the owner to look at, and no run takes the task while it has the label |
 
-            The run stops as well, with the task left as it is, when a check does not pass, and when a session ended its turn without such a line and telling it to go on brought none. The next task is never started on a doubt.
+            The run stops in the same way, with {owner} and such a comment on the task, when a check does not pass, and when a session ended its turn without such a line and telling it to go on brought none. The owner looks at the task and takes the label off, and a run takes it as any other. The next task is never started on a doubt.
 
-            A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**` or `**Interrupted.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
+            A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**`, `**Interrupted.**` or `**Failed.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
 
             ## What holds over the instructions of a project
 

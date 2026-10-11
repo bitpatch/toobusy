@@ -158,7 +158,7 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangesLeftAfterATaskStopTheRunAndTheTaskStaysAsItIs()
+    public async Task ChangesLeftAfterATaskStopTheRunAndTheTaskIsLeftToTheOwner()
     {
         tracker.Add(3);
         tracker.Add(5);
@@ -169,7 +169,11 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
         Assert.Null(state.Record);
-        Assert.Equal(["status 3 InProgress"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(
+            (3, "**Failed.** The run stopped over this task: its session left changes in the working tree. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nDid it.\n\n_Session: `fake attach 3`_"),
+            Assert.Single(tracker.Comments));
+        Assert.Contains("  #3 has the needs-owner label and a comment that says what went wrong; no run takes it while it has the label", log.Lines);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
         Assert.Equal([(3, RunMark.Failed)], Ended);
     }
@@ -183,7 +187,22 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal("#3 left 2 commits that are not pushed · fake attach 3", result.Why);
-        Assert.Equal(["status 3 InProgress"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.StartsWith("**Failed.** The run stopped over this task: its session left 2 commits that are not pushed.", tracker.Comments[0].Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ATreeThatCannotBeReadAfterATaskLeavesItToTheOwner()
+    {
+        tracker.Add(3);
+        workspace.Next.Enqueue(new WorkspaceState(0, 0));
+        workspace.State = null;
+
+        var result = await RunAsync();
+
+        Assert.Equal("the working tree cannot be read after #3 · fake attach 3", result.Why);
+        Assert.Contains("label 3 +needs-owner", tracker.Did);
+        Assert.StartsWith("**Failed.** The run stopped over this task: the working tree could not be read after its session.", tracker.Comments[0].Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -253,7 +272,10 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
         Assert.Contains("✖ #3 Task 3 — failed after 3 s: the tests do not pass", log.Lines);
         Assert.Contains("  │ I tried twice.", log.Lines);
-        Assert.Equal(["status 3 InProgress"], tracker.Did);
+        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(
+            (3, "**Failed.** The run stopped over this task: its session failed: the tests do not pass. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI tried twice.\n\n_Session: `fake attach 3`_"),
+            Assert.Single(tracker.Comments));
         Assert.Single(assistant.Started);
         Assert.Equal([(3, RunMark.Failed, 3)], log.Ends);
 
@@ -272,6 +294,62 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
         Assert.Contains("✖ #3 Task 3 — ended after 3 s without saying how the task went", log.Lines);
         Assert.Null(state.Record);
+        Assert.Equal(["status 3 InProgress", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Equal(
+            (3, "**Failed.** The run stopped over this task: its session ended without saying how the task went. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI was about to\n\n_Session: `fake attach 3`_"),
+            Assert.Single(tracker.Comments));
+    }
+
+    [Theory]
+    [InlineData("I tried twice.\nTOOBUSY: failed the tests do not pass", 0)]
+    [InlineData("What now?", 0)]
+    [InlineData(Done, 1)]
+    public async Task ATaskThatARunStoppedOverIsNotTakenByTheNextRunInAProjectWithoutABoard(string reply, int changes)
+    {
+        plan = plan with { Rules = Rules with { Board = false } };
+        policy = policy with { Messages = 0 };
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works().Ends(reply);
+        workspace.Next.Enqueue(new WorkspaceState(0, 0));
+        workspace.Next.Enqueue(new WorkspaceState(changes, 0));
+
+        Assert.Equal(RunEnd.Problem, (await RunAsync()).End);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+
+        // The next run, once the owner has put the working copy right: the label holds the task, and the next one
+        // is taken.
+        run = null;
+        log.Lines.Clear();
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([3, 5], assistant.Started.Select(start => start.Task));
+        Assert.Contains("  Held: #3 it waits for the owner: it has the needs-owner label", log.Lines);
+
+        // The owner takes the label off, and a run takes the task as any other.
+        await tracker.RemoveLabelAsync(3, "needs-owner", CancellationToken.None);
+        run = null;
+        await RunAsync();
+
+        Assert.Equal([3, 5, 3], assistant.Started.Select(start => start.Task));
+    }
+
+    [Theory]
+    [InlineData("label", "▲ #3 is not left to the owner as it should be: The tracker refused: label 3 +needs-owner. · set it right by hand before the next run", "status 3 InProgress|comment 3")]
+    [InlineData("comment", "▲ #3 is not left to the owner as it should be: The tracker refused: comment 3. · set it right by hand before the next run", "status 3 InProgress|label 3 +needs-owner|status 3 Todo")]
+    public async Task ATrackerThatRefusesToLeaveATaskToTheOwnerDoesNotHideWhyTheRunStopped(string refused, string said, string did)
+    {
+        tracker.Add(3);
+        tracker.Refused.Add(refused);
+        assistant.Session(3).Works().Ends("I tried twice.\nTOOBUSY: failed the tests do not pass");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
+        Assert.Contains(said, log.Lines);
+        Assert.Contains("✖ Stopped: #3 failed · fake attach 3 · the next task did not start · 0 done", log.Lines);
+        Assert.Equal(did.Split('|'), tracker.Did);
     }
 
     [Fact]
@@ -304,6 +382,10 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker refused: close 3."), result);
         Assert.Single(assistant.Started);
         Assert.Equal([(3, RunMark.Failed)], Ended);
+
+        // The record is forgotten, so the task is left to the owner: nothing else keeps the next run from it.
+        Assert.Equal(["status 3 InProgress", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.StartsWith("**Failed.** The run stopped over this task: the tracker refused something after its session: The tracker refused: close 3.", tracker.Comments[^1].Text, StringComparison.Ordinal);
     }
 
     [Fact]
