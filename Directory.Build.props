@@ -14,8 +14,12 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>1.0.0</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
+    <!-- The version toobusy prints: the suffix after a dot, and no commit hash. -->
+    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+    <InformationalVersion Condition="'$(VersionSuffix)' != ''">$(VersionPrefix).$(VersionSuffix)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>Bitpatch</Authors>
     <Copyright>Copyright (c) Bitpatch</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

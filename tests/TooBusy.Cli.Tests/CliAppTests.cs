@@ -47,7 +47,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("--version");
 
         Assert.Equal(0, exit);
-        Assert.Matches(@"^\d+\.\d+\.\d+", output.Trim());
+        Assert.Matches(@"^\d+\.\d+\.\d+(\.dev)?$", output.Trim());
     }
 
     [Fact]
