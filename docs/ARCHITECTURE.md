@@ -36,7 +36,7 @@ A test project is added together with the first code of the project it tests.
 
 | Port | What it hides | Implementations |
 |---|---|---|
-| `ITaskTracker` | reading the open tasks, and changing one: its status on the board, its assignee, its labels, a comment, closing. It makes no task: a session does that itself | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
+| `ITaskTracker` | reading the open tasks, and a closed one by its number, and changing one: its status on the board, its assignee, its labels, a comment, closing. It makes no task: a session does that itself | `GitHubTasks` in `TooBusy.Trackers.GitHub`; `ImitatedTasks` in a demo |
 | `IAssistant`, `IAssistantSession` | starting a session with a message, looking at it, telling it something more, asking it something without cutting its turn, stopping it; finding the session of an earlier run by what was kept of it, a `SessionTrace`; the limits of usage | `ClaudeCode` in `TooBusy.Assistants.ClaudeCode`; `ImitatedAssistant` in a demo |
 | `IWorkspace` | the working copy: how many files differ from what is committed, how many commits are not pushed | `GitWorkspace` in `TooBusy.Infrastructure`; in a demo one that is always clean, inside `ImitatedRun` |
 | `IProcessRunner` | running a command with a timeout and cancellation, in a folder | `ProcessRunner` in `TooBusy.Infrastructure` |

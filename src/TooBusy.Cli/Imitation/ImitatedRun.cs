@@ -132,6 +132,9 @@ public sealed class ImitatedTasks : ITaskTracker
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);
 
+    // No commit of a made-up session closes its task.
+    public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken) => Task.FromResult<QueueTask?>(null);
+
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {
         Change(number, task => task.Status == BoardStatus.Missing ? task : task with { Status = status, StatusName = status == BoardStatus.InProgress ? "In Progress" : status.ToString() });

@@ -9,6 +9,10 @@ public interface ITaskTracker
     // The open tasks of the milestone, or of the whole project when the milestone is null.
     Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken);
 
+    // The task with this number when it is closed, which the queue does not read; null when it is open, and when the
+    // tracker has no such task. What it waited for is not read.
+    Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken);
+
     // Moves the task on the board, putting it there when it is not; does nothing in a project without a board.
     Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken);
 

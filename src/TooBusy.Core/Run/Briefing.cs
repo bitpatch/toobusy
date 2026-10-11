@@ -121,11 +121,18 @@ public static class Briefing
         The owner asked toobusy to stop: wrap task #{task} up as soon as possible. Let the command that is running finish, and start no new step. Commit nothing and push nothing. Undo your uncommitted changes, so that the working copy is as clean as it was when you started: restore the files you changed and delete the ones you made. Then reply with a report for the session that will go on with the task: what was found out and decided, what was undone, file by file, so that it can be done again from the description, and what is left. End the reply with the line `{Outcome.Mark} interrupted`. A subagent that reads this does none of it: it stops its work and returns what it has to the session that started it.
         """);
 
+    // What is said of a task that was closed before its session ended, as by a commit of the session: the run does
+    // not open it again.
+    const string Shut = "The task was closed before its session ended, and it is left closed:";
+
     // The comment a task gets when its session ends: what became of it, the report of the session, and the session.
-    public static string Comment(OutcomeKind kind, string report, string session, string? label = null)
+    // `closed` is a task that is closed already and is not put back among those to do.
+    public static string Comment(OutcomeKind kind, string report, string session, string? label = null, bool closed = false)
     {
         var head = kind switch
         {
+            OutcomeKind.Owner when closed => $"**Waits for the owner.** Nothing could be done without you. {Shut} open it again when this is answered, and a run takes it.",
+            OutcomeKind.Interrupted when closed => $"**Interrupted.** Nothing is committed. {Shut} open it again, and a run takes it.",
             OutcomeKind.Done => "**Done.**",
             OutcomeKind.Partial => "**Done in part.** What is left is a task that the session made: the report names it.",
             OutcomeKind.Owner => $"**Waits for the owner.** Nothing could be done without you. Take the label `{label}` off when this is answered, and a run takes the task again.",
@@ -135,8 +142,13 @@ public static class Briefing
     }
 
     // The comment of a task that a run stopped over: what went wrong, what its session said last, and the session.
-    public static string Stopped(string why, string report, string session, string label) =>
-        Joined($"**Failed.** The run stopped over this task: {why}. Look at what went wrong, take the label `{label}` off, and a run takes the task again.", report, $"_Session: `{session}`_");
+    // A task that is closed already gets no label, and is not opened again.
+    public static string Stopped(string why, string report, string session, string label, bool closed = false) =>
+        Joined(
+            $"**Failed.** The run stopped over this task: {why}. "
+                + (closed ? $"{Shut} look at what went wrong, open it again, and a run takes it." : $"Look at what went wrong, take the label `{label}` off, and a run takes the task again."),
+            report,
+            $"_Session: `{session}`_");
 
     // The comment of a task that a usage limit stopped.
     public static string Paused(string why, string session) =>

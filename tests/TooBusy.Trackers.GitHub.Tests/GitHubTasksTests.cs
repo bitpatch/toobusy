@@ -150,6 +150,63 @@ public class GitHubTasksTests
     }
 
     [Fact]
+    public async Task AClosedTaskIsAskedForByItsNumber()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("12\tAdd\\tthe thing\thttps://github.com/acme/rocket/issues/12\tDone\tv0.2.0\tfeature\tgood first issue\n"));
+
+        var task = await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken);
+
+        Assert.Equal((12, "Add\tthe thing", "https://github.com/acme/rocket/issues/12"), (task!.Number, task.Title, task.Url));
+        Assert.Equal((BoardStatus.Done, "Done", "v0.2.0"), (task.Status, task.StatusName, task.Milestone));
+        Assert.Equal(["feature", "good first issue"], task.Labels);
+        Assert.Empty(task.BlockedBy);
+        Assert.Empty(task.Parts);
+        Assert.Equal(
+            [
+                "api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-F", "number=12",
+                "-f", "query=query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { state number title url milestone { title } labels(first: 50) { nodes { name } } projectItems(first: 20) { nodes { project { url } fieldValueByName(name: \"Status\") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } }",
+                "--jq", ".data.repository.issue | select(.state == \"CLOSED\") | [.number, .title, .url, ([.projectItems.nodes[] | select((.project.url | ascii_downcase) == \"https://github.com/orgs/acme/projects/7\")] | if length == 0 then \"\" else (.[0].fieldValueByName.name // \"No status\") end), (.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv",
+            ],
+            Assert.Single(processes.Asked).Arguments);
+    }
+
+    [Fact]
+    public async Task WithoutABoardNoBoardOfAClosedTaskIsAskedFor()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("12\tAdd the thing\thttps://github.com/acme/rocket/issues/12\t\t\n"));
+
+        var task = await Tasks(board: null).ReadClosedAsync(12, TestContext.Current.CancellationToken);
+
+        Assert.Equal((BoardStatus.Missing, null), (task!.Status, task.Milestone));
+        Assert.Empty(task.Labels);
+        Assert.DoesNotContain("project", string.Join(' ', processes.Asked[0].Arguments), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ATaskThatIsOpenOrIsNoTaskIsNotAClosedOne()
+    {
+        // The filter gives no line for an issue that is open, and GitHub refuses a number that is not of an issue.
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to an Issue with the number of 12."));
+
+        Assert.Null(await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
+        Assert.Null(await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AClosedTaskThatCannotBeReadSaysWhy()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Bad credentials (HTTP 401)"));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
+        var silent = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
+
+        Assert.Equal("#12 cannot be read. gh: Bad credentials (HTTP 401)", refused.Message);
+        Assert.Equal("#12 cannot be read. GitHub did not answer.", silent.Message);
+    }
+
+    [Fact]
     public async Task ATaskIsMovedOnTheBoardByTheNameOfTheStatus()
     {
         processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn progress\nitem\tPVTI_9\tPVT_other\nitem\tPVTI_1\tPVT_1\n"));

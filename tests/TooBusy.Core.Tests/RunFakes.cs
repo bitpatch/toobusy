@@ -45,6 +45,11 @@ sealed class FakeTracker : ITaskTracker
 
     public List<string?> Read { get; } = [];
 
+    // The tasks that are closed, and the numbers of those that were asked for as closed ones.
+    public List<QueueTask> Closed { get; } = [];
+
+    public List<int> Looked { get; } = [];
+
     // What the tracker refuses, by the first word of what is done: `status`, `assign`, `close`, `read`, or `status 12 Done`.
     public HashSet<string> Refused { get; } = [];
 
@@ -66,6 +71,21 @@ sealed class FakeTracker : ITaskTracker
         Read.Add(milestone);
         Do("read");
         return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
+    }
+
+    public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken)
+    {
+        Looked.Add(number);
+        if (Refused.Contains("look"))
+            throw new TrackerException($"The tracker refused: look {number}.");
+        return Task.FromResult(Closed.Find(task => task.Number == number));
+    }
+
+    // Closes a task as something else than the run does: a commit of its session, or its owner.
+    public void Shut(int number)
+    {
+        Closed.AddRange(Open.Where(task => task.Number == number));
+        Open.RemoveAll(task => task.Number == number);
     }
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
@@ -108,7 +128,7 @@ sealed class FakeTracker : ITaskTracker
         if (ForgetsClosing)
             return Task.CompletedTask;
 
-        Open.RemoveAll(task => task.Number == number);
+        Shut(number);
         foreach (var task in Open.ToList())
             Change(task.Number, waiting => waiting with { BlockedBy = [.. waiting.BlockedBy.Where(blocker => blocker != number)] });
         return Task.CompletedTask;
@@ -125,9 +145,12 @@ sealed class FakeTracker : ITaskTracker
 
     void Change(int number, Func<QueueTask, QueueTask> change)
     {
-        var index = Open.FindIndex(task => task.Number == number);
-        if (index >= 0)
-            Open[index] = change(Open[index]);
+        foreach (var tasks in (List<QueueTask>[])[Open, Closed])
+        {
+            var index = tasks.FindIndex(task => task.Number == number);
+            if (index >= 0)
+                tasks[index] = change(tasks[index]);
+        }
     }
 }
 

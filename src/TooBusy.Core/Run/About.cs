@@ -164,7 +164,7 @@ public static class About
 
             ### When a run goes on with a session
 
-            A run writes down the task and its session on the machine as soon as the session is started, and forgets them when the task comes to an outcome. The next run looks at what is written before it reads the queue, and takes that task first, whatever its status. A task that was closed since, or got {owner} or a label that keeps a task out, is not taken.
+            A run writes down the task and its session on the machine as soon as the session is started, and forgets them when the task comes to an outcome. The next run looks at what is written before it reads the queue, and takes that task first, whatever its status. A task that got {owner} or a label that keeps a task out since is not taken. One that was closed since is settled when its session ended with a line for toobusy, as told under “How a task ends”, and is not taken otherwise.
 
             - A session that still works, because only toobusy was stopped, is watched again and told nothing.
             - A session that ended with a line for toobusy while nobody watched is settled as any other, as told under “How a task ends”.
@@ -213,6 +213,8 @@ public static class About
             The assignee stays however the task ends: on a task that is done or done in part it says who did it, and on one that goes back to `Todo` whose task it is.
 
             The run stops in the same way, with {owner} and such a comment on the task, when a check does not pass, as after `partial` with a report that names no other task, and when a session ended its turn without such a line and telling it to go on brought none. The owner looks at the task and takes the label off, and a run takes it as any other. The next task is never started on a doubt.
+
+            A commit may close its task, as one with `Closes #12` in its message does when it is pushed: the instructions of a project may call for that. toobusy settles the task all the same: it checks what the session said, puts the report into the closed task as a comment and moves it to `Done`. A run that was stopped between that push and the end of the task does so when it runs next, for a session that ended with its line. A closed task is never opened again and gets neither label: where the table says that a task goes back to `Todo`, a task that is closed already gets the comment only, which says that it is left closed.
 
             A comment starts with what became of the task, `**Done.**`, `**Done in part.**`, `**Waits for the owner.**`, `**Interrupted.**` or `**Failed.**`, and ends with the session. The report between them is put in as the session wrote it, in the language the instructions of the project call for; the words of toobusy around it are in English.
 

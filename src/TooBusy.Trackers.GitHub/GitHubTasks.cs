@@ -40,10 +40,7 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         // A task is on the board when one of its project items is of that board; what the board calls its status
         // is the fourth field, empty for a task that is not there. The seventh is the title of its milestone, empty
         // for a task without one, and the labels follow it.
-        var status = board is null
-            ? "\"\""
-            : $"([.projectItems.nodes[] | select((.project.url | ascii_downcase) == {Quoted(board.ToLowerInvariant())})] | if length == 0 then \"\" else (.[0].fieldValueByName.name // \"No status\") end)";
-        var lines = $".data.repository.issues | \"total\\t\\(.totalCount)\", (.nodes[] | [.number, .title, .url, {status}, "
+        var lines = $".data.repository.issues | \"total\\t\\(.totalCount)\", (.nodes[] | [.number, .title, .url, {Status()}, "
             + "([.blockedBy.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\")), "
             + "([.subIssues.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\")), "
             + "(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv)";
@@ -70,6 +67,38 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
 
         return tasks;
     }
+
+    // A closed task is asked for by its number. The fields of its line are those of a task of the queue, without what
+    // it waits for; a task that is open gives no line, and GitHub refuses a number that is not of an issue.
+    public async Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken)
+    {
+        var (owner, name) = Parts();
+        var result = await processes.RunAsync(
+            "gh",
+            [
+                "api", "graphql", "-f", $"owner={owner}", "-f", $"name={name}", "-F", $"number={Text(number)}",
+                "-f", $"query=query($owner: String!, $name: String!, $number: Int!) {{ repository(owner: $owner, name: $name) {{ issue(number: $number) {{ state number title url milestone {{ title }} labels(first: 50) {{ nodes {{ name }} }}{(board is null ? "" : " " + Statuses.Trim())} }} }} }}",
+                "--jq", $".data.repository.issue | select(.state == \"CLOSED\") | [.number, .title, .url, {Status()}, (.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv",
+            ],
+            Patience,
+            cancellationToken);
+        if (result is { Status: ProcessStatus.Exited, ExitCode: not 0 } && result.Error.Contains("Could not resolve to an Issue", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var fields = Lines(Answer(result, $"#{number} cannot be read.")).FirstOrDefault()?.Split('\t');
+        if (fields is not { Length: >= 5 } || !int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var read))
+            return null;
+
+        var named = Unescaped(fields[3]);
+        var of = Unescaped(fields[4]);
+        return new QueueTask(read, Unescaped(fields[1]), fields[2], [.. fields.Skip(5).Select(Unescaped)], StatusOf(named), named, [], [], of.Length == 0 ? null : of);
+    }
+
+    // What the board of the project calls the status of a task, as the filter of the tool reads it from the task:
+    // empty for a task that is not there, and in a project without a board.
+    string Status() => board is null
+        ? "\"\""
+        : $"([.projectItems.nodes[] | select((.project.url | ascii_downcase) == {Quoted(board.ToLowerInvariant())})] | if length == 0 then \"\" else (.[0].fieldValueByName.name // \"No status\") end)";
 
     // The query of the queue, which asks for the boards of a task only when the project has one.
     string Issues() =>
@@ -139,9 +168,11 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
         AskAsync(["issue", "close", Text(number), "--repo", repository], $"#{number} could not be closed.", cancellationToken);
 
     // What the tool prints when it does what it is asked; otherwise the tracker says that it did not.
-    async Task<string> AskAsync(string[] arguments, string failed, CancellationToken cancellationToken)
+    async Task<string> AskAsync(string[] arguments, string failed, CancellationToken cancellationToken) =>
+        Answer(await processes.RunAsync("gh", arguments, Patience, cancellationToken), failed);
+
+    static string Answer(ProcessResult result, string failed)
     {
-        var result = await processes.RunAsync("gh", arguments, Patience, cancellationToken);
         if (result is { Status: ProcessStatus.Exited, ExitCode: 0 })
             return result.Output;
 
