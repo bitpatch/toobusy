@@ -34,6 +34,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 - Keep the code Native AOT compatible: no reflection-based serialisation, no dependency that is not trim-safe. Check a new package by publishing the native binary.
 - Nothing project-specific in the code. The repository is the one of the `origin` remote, and the board and the labels come from the settings in `.toobusy/`. What a project will choose later, such as the statuses of its board, branches, prompts and commands, goes into the settings too, never into the code.
 - A change of what a screen looks like is looked at before it is shown: take pictures with `tools/screenshot.py` and read them. The tests see the text of a screen, not its colours.
+- The code and the documentation say the same thing. Before a task is finished, check whether its change calls for one in the documentation: docs/SPEC.md, docs/IDEA.md, docs/ARCHITECTURE.md, the README, the text of `toobusy about`, the help of a command and this file. Change what it does, in the same commit.
 - New behaviour comes with tests. Core is tested with hand-written fakes of its ports.
 - Package versions go into `Directory.Packages.props`, not into project files.
 - Do not add placeholder code for features that are not being built yet.
