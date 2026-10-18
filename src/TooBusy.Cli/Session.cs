@@ -42,7 +42,9 @@ public sealed class Session(Page page, Workbench bench)
     // menu comes back to it when it is over, with how it went said above the menu. No run is opened while one goes on in the working copy. Before it is opened the checks
     // of `doctor` are made, as `toobusy run` makes them: while one fails no run is opened, and the failures stand
     // above the menu with their fixes. A demo has it all and checks nothing. The labels to skip that are chosen in
-    // the menu hold for every run it opens, until the page is closed.
+    // the menu hold for every run it opens, until the page is closed. A row that is chosen while another one waits
+    // under the menu is gone on with as if it was chosen there, and one that waits is stopped by Escape: the menu is
+    // asked again then.
     public async Task HomeAsync(CancellationToken cancellationToken)
     {
         if (bench.Settings.Load()?.Settings is null)
@@ -68,11 +70,17 @@ public sealed class Session(Page page, Workbench bench)
             : null);
         string? note = null;
         IReadOnlyList<CheckResult> failed = [];
+        HomeAction? chosen = null;
         while (true)
         {
-            Clear("", note, failed);
-            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, skipped, tasks);
-            failed = [];
+            if (chosen is not { } action)
+            {
+                Clear("", note, failed);
+                action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, skipped, tasks);
+                failed = [];
+            }
+
+            chosen = null;
             if (action == HomeAction.Run && bench.Going() is { } going)
             {
                 note = $"A run is going on here already: {going.Sign.Told}";
@@ -81,7 +89,13 @@ public sealed class Session(Page page, Workbench bench)
 
             if (action == HomeAction.Run && !bench.Demo)
             {
-                (action, failed) = await CheckAsync(tasks, cancellationToken);
+                (var checkedFor, failed) = await CheckAsync(tasks, cancellationToken);
+                if (checkedFor != HomeAction.Run)
+                {
+                    (chosen, note) = (checkedFor, null);
+                    continue;
+                }
+
                 if (failed.Count > 0)
                 {
                     note = "The run did not start. `toobusy doctor` checks all of it again.";
@@ -106,8 +120,7 @@ public sealed class Session(Page page, Workbench bench)
                     tasks.Forget();
                     break;
                 case HomeAction.Settings:
-                    note = await ChangeSettingsAsync(cancellationToken);
-                    tasks.Forget();
+                    (chosen, note) = await ChangeSettingsAsync(tasks, cancellationToken);
                     break;
                 case HomeAction.SkipLabels:
                     note = await ChooseSkippedAsync(cancellationToken) ? null : "The labels to skip are left as they were.";
@@ -121,24 +134,13 @@ public sealed class Session(Page page, Workbench bench)
 
     // Makes the checks of `doctor` under the menu, which shows the one that is running at `Run` and stays what
     // it is: gives `Run` with the checks that failed once they are over, or what was chosen meanwhile, which stops
-    // them.
-    async Task<(HomeAction Action, IReadOnlyList<CheckResult> Failed)> CheckAsync(TaskCount tasks, CancellationToken cancellationToken)
+    // them; null when Escape stopped them.
+    async Task<(HomeAction? Action, IReadOnlyList<CheckResult> Failed)> CheckAsync(TaskCount tasks, CancellationToken cancellationToken)
     {
         var checks = new RunChecks();
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var checking = MakeAsync();
-        try
-        {
-            Clear("", null);
-            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, skipped, tasks, checks);
-            return (action, action == HomeAction.Run ? checks.Failed : []);
-        }
-        finally
-        {
-            // Checks that were not waited for are told to stop and left to it.
-            if (!checking.IsCompleted)
-                await stopping.CancelAsync();
-        }
+        var action = await WaitAsync(checks, MakeAsync(), stopping, tasks);
+        return (action, action == HomeAction.Run ? checks.Failed : []);
 
         async Task MakeAsync()
         {
@@ -156,6 +158,26 @@ public sealed class Session(Page page, Workbench bench)
         }
     }
 
+    // Waits under the menu for the work a row needs before it opens: gives the row once the work is over, another
+    // row that was chosen meanwhile, or null when Escape stopped the wait. Work that was not waited for is told to
+    // stop and left to it, and what it fails with is nobody's any more.
+    async Task<HomeAction?> WaitAsync(IHomeWait wait, Task work, CancellationTokenSource stopping, TaskCount tasks)
+    {
+        try
+        {
+            Clear("", null);
+            return await HomeScreen.WaitAsync(page, Assistant(), standing.Name, skipped, tasks, wait);
+        }
+        finally
+        {
+            if (!work.IsCompleted)
+            {
+                await stopping.CancelAsync();
+                _ = work.ContinueWith(static left => _ = left.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            }
+        }
+    }
+
     // `leavesPage` tells that there is nowhere to go back to from the first question. The proposals are what the
     // options of `init` answer.
     public async Task<SetupResult> SetupAsync(bool leavesPage, CancellationToken cancellationToken, SetupProposals? proposals = null)
@@ -166,32 +188,50 @@ public sealed class Session(Page page, Workbench bench)
     }
 
     // What `Settings` of the menu opens: the settings one under another with their values, until Escape goes back to
-    // the menu. Each opens its questions, and a change is saved when the user says so; what became of it is said
-    // above the list, and the pointer stays on the setting that was opened. What was changed is remembered for the
-    // report as the change is made. Settings that do not validate have nothing to show there: the steps of `init`
-    // set them, as for a project that is set up anew, and the line that says how that ended is given for the menu.
-    async Task<string?> ChangeSettingsAsync(CancellationToken cancellationToken)
+    // the menu. The machine is looked at and the settings are read under the menu, which gives what was chosen there
+    // meanwhile instead, or null when Escape stopped it. Settings that do not validate have nothing to show in the
+    // list: the steps of `init` set them, as for a project that is set up anew, and the line that says how that
+    // ended is given for the menu. The tasks are counted anew once the settings were open.
+    async Task<(HomeAction? Chosen, string? Note)> ChangeSettingsAsync(TaskCount tasks, CancellationToken cancellationToken)
     {
-        const string status = "Changing the settings";
-        if (bench.Settings.Load()?.Settings is null)
-            return Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+        if (bench.Settings.Load()?.Settings is not null)
+        {
+            var setup = new ProjectSetup(new SetupScreen(page, leavesPage: false), bench.Environment, bench.Tracker, bench.Boards, bench.Settings);
+            using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var opening = setup.OpenAsync(stopping.Token);
+            var chosen = await WaitAsync(new HomeWork(HomeAction.Settings, opening), opening, stopping, tasks);
+            if (chosen != HomeAction.Settings)
+                return (chosen, null);
 
-        Clear(status, null);
-        var setup = new ProjectSetup(new SetupScreen(page, leavesPage: false), bench.Environment, bench.Tracker, bench.Boards, bench.Settings);
-        if (!await setup.OpenAsync(cancellationToken))
-            return Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+            if (await opening)
+            {
+                await ListSettingsAsync(setup, cancellationToken);
+                tasks.Forget();
+                return (null, null);
+            }
+        }
 
+        var ended = Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+        tasks.Forget();
+        return (null, ended);
+    }
+
+    // The list of the settings that are open, until Escape goes back. Each opens its questions, and a change is saved
+    // when the user says so; what became of it is said above the list, and the pointer stays on the setting that was
+    // opened. What was changed is remembered for the report as the change is made.
+    async Task ListSettingsAsync(ProjectSetup setup, CancellationToken cancellationToken)
+    {
         var at = SetupSetting.Project;
         IReadOnlyList<Line> said = [];
         while (true)
         {
             // The values are in the list: over it stand what the setup says of the machine and what became of the
             // last change.
-            Clear(status, null);
+            Clear("Changing the settings", null);
             var told = setup.Notes.Select(SetupScreen.Told).ToList();
             page.Body = said.Count == 0 ? told : [.. told, .. told.Count > 0 ? [Line.Empty] : (Line[])[], .. said];
             if (SettingsScreen.Ask(page, setup.Values, at) is not { } setting)
-                return null;
+                return;
 
             at = setting;
             var result = await setup.ChangeAsync(setting, cancellationToken);

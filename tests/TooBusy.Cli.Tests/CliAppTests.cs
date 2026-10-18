@@ -1959,6 +1959,43 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task EscapeStopsTheChecksBeforeARunOfTheMenuAndOpensNoRun()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // A task for the menu to count; the login of Claude Code takes until it is told to stop.
+        var processes = new FakeProcesses(
+            (command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+            {
+                "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+                "gh" when arguments is ["api", "graphql", ..] => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+                "gh" => "total\t0\n",
+                _ => "",
+            }, ""),
+            (command, arguments) => command == "claude" && arguments[0] == "auth");
+
+        // `Run`; Escape while the checks are made; the menu stays as it was, and Escape twice leaves it.
+        var keys = new Keys()
+            .Hold(() => Shown("1 task"))
+            .Press(Keys.Enter)
+            .Hold(() => Shown("checking: Claude Code login"))
+            .Press(Keys.Escape)
+            .Hold(() => Shown("enter choose · ctrl+c exit", 2))
+            .Press(Keys.Escape)
+            .Hold(() => Shown("press esc again to exit"))
+            .Press(Keys.Escape);
+        var (exit, output, error) = await RunLiveAsync(keys, processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        await processes.Stopped.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("Running the queue", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("The run did not start.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunOfTheMenuOpensNoRunWhileACheckFailsAndSaysTheFailuresWithTheirFixesAboveTheMenu()
     {
         GitRepository();
@@ -2132,6 +2169,42 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("❯ Back             esc", output, StringComparison.Ordinal);
         Assert.DoesNotContain("The setup was left", output, StringComparison.Ordinal);
         Assert.DoesNotContain("press esc again to exit", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EscapeStopsTheSettingsOfTheMenuWhileTheyAreOpenedAndTheMenuStays()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Once the menu is there, the login of `gh` takes until it is told to stop, as when GitHub does not answer.
+        var processes = new FakeProcesses(
+            (command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+            {
+                "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+                "gh" => "total\t0\n",
+                _ => "",
+            }, ""),
+            (command, arguments) => command == "gh" && arguments[0] == "auth" && Shown("What to do"));
+
+        // Settings; Escape while they are opened; the menu stays as it was, and Escape twice leaves it.
+        var keys = new Keys()
+            .Hold(() => Shown("What to do"))
+            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter)
+            .Hold(() => Shown("esc stop"))
+            .Press(Keys.Escape)
+            .Hold(() => Shown("enter choose · ctrl+c exit", 2))
+            .Press(Keys.Escape)
+            .Hold(() => Shown("press esc again to exit"))
+            .Press(Keys.Escape);
+        var (exit, output, error) = await RunLiveAsync(keys, processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        await processes.Stopped.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("Changing the settings", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Choose a setting to change it", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3996,8 +4069,11 @@ public sealed class CliAppTests : IDisposable
     }
 
     // Answers every command as it is told to and remembers what it was asked.
-    sealed class FakeProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer) : IProcessRunner
+    // `hangs` tells the commands that go on until they are told to stop, as one that GitHub does not answer.
+    sealed class FakeProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer, Func<string, IReadOnlyList<string>, bool>? hangs = null) : IProcessRunner
     {
+        readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public FakeProcesses(Func<string, ProcessResult> answer)
             : this((command, _) => answer(command))
         {
@@ -4005,10 +4081,25 @@ public sealed class CliAppTests : IDisposable
 
         public List<(string Command, IReadOnlyList<string> Arguments)> Asked { get; } = [];
 
-        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+        // Done once a command that hangs was told to stop.
+        public Task Stopped => stopped.Task;
+
+        public async Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
         {
             Asked.Add((command, arguments));
-            return Task.FromResult(answer(command, arguments));
+            if (hangs?.Invoke(command, arguments) == true)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                finally
+                {
+                    stopped.TrySetResult();
+                }
+            }
+
+            return answer(command, arguments);
         }
 
         public IProcessRunner Inside(string folder) => this;

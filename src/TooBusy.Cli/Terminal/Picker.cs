@@ -47,10 +47,11 @@ public static class Picker
     // The same list on a page where something goes on meanwhile: the choices are asked for again, and the list is
     // drawn anew, whenever what `changed` gives is done. `off` is told when Enter is pressed on a choice that is off.
     // `settled` is asked whenever something has changed, and what it gives is chosen without a key: what went on
-    // has chosen it.
-    public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null, Func<int?>? settled = null)
+    // has chosen it. `back` says whether the list ends with `Back` where the page would say otherwise: the menu
+    // ends with `Exit`, also while Escape does not leave it.
+    public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null, Func<int?>? settled = null, int at = 0, bool? back = null)
     {
-        var list = new Listed(page, question, "", 0, Rows);
+        var list = new Listed(page, question, "", at, Rows, back);
         while (true)
         {
             // Whether anything still goes on is looked at before the choices are asked for: what is done between the
@@ -179,7 +180,7 @@ public static class Picker
     static bool Followed(Choice choice) => choice.Detail.Length + choice.Note.Length > 0 || choice.Waits;
 
     // A list on a page: where its pointer is and what of it is in the window, from one drawing to the next.
-    sealed class Listed(Page page, IReadOnlyList<Line> question, string keys, int at, int rows)
+    sealed class Listed(Page page, IReadOnlyList<Line> question, string keys, int at, int rows, bool? ends = null)
     {
         IReadOnlyList<Choice> choices = [];
         bool back;
@@ -189,7 +190,7 @@ public static class Picker
 
         public void Draw(IReadOnlyList<Choice> offered)
         {
-            back = GoesBack(page);
+            back = ends ?? GoesBack(page);
             choices = back ? [.. offered, new Choice(Back, BackKey)] : offered;
             At = Math.Clamp(At, 0, choices.Count - 1);
 

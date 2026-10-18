@@ -142,7 +142,7 @@ public sealed class HomeScreenTests : IDisposable
             return false;
         });
 
-        Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.Equal(HomeAction.Run, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
         terminal.AssertSaw("""
              What to do
              ❯ Run          checking: git  •••••••••••
@@ -150,8 +150,8 @@ public sealed class HomeScreenTests : IDisposable
                Milestone    v0.3.0
                Settings
                Skip labels  none
-               Exit         esc
-             ↑↓ move · enter choose · ctrl+c exit
+               Exit
+             ↑↓ move · enter choose · esc stop · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
         terminal.AssertSaw(" ❯ Run          checking: GitHub login  •••••••••••\n");
     }
@@ -167,7 +167,7 @@ public sealed class HomeScreenTests : IDisposable
         checks.End();
 
         // No key is pressed and nothing is drawn.
-        Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.Equal(HomeAction.Run, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
         Assert.Equal(0, terminal.Frames);
         Assert.Equal([Checkup.AssistantLogin], checks.Failed.Select(check => check.Name));
     }
@@ -180,8 +180,100 @@ public sealed class HomeScreenTests : IDisposable
         checks.Start(Checkup.Git);
         terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
 
-        Assert.Equal(HomeAction.Milestone, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.Equal(HomeAction.Milestone, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
         Assert.False(checks.Over);
+    }
+
+    [Fact]
+    public async Task EscapeStopsTheChecksAtOnceAndDoesNotAskToExit()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        var checks = new RunChecks();
+        checks.Start(Checkup.Git);
+        terminal.Keys.Press(Keys.Escape);
+
+        Assert.Null(await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
+        Assert.False(checks.Over);
+        Assert.False(terminal.Saw("press esc again"));
+    }
+
+    [Fact]
+    public async Task WhileTheSettingsAreOpenedTheDotsRunAtSettingsAndTheMenuGivesSettingsWhenTheyAreOpen()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        var opened = new TaskCompletionSource();
+
+        // The pointer stays on `Settings`, where Enter does nothing; no key ends the wait: the menu gives `Settings`
+        // by itself.
+        terminal.Keys.Press(Keys.Enter).Hold(() =>
+        {
+            opened.TrySetResult();
+            return false;
+        });
+
+        Assert.Equal(HomeAction.Settings, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), new HomeWork(HomeAction.Settings, opened.Task)));
+        terminal.AssertSaw("""
+             What to do
+               Run          5 tasks
+               Assistant    own model · high
+               Milestone    v0.3.0
+             ❯ Settings     •••••••••••
+               Skip labels  none
+               Exit
+             ↑↓ move · enter choose · esc stop · ctrl+c exit
+            """.ReplaceLineEndings("\n").TrimEnd(' '));
+    }
+
+    [Fact]
+    public async Task SettingsThatAreOpenAlreadyAreGivenAtOnce()
+    {
+        Assert.Equal(HomeAction.Settings, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), new HomeWork(HomeAction.Settings, Task.CompletedTask)));
+        Assert.Equal(0, terminal.Frames);
+    }
+
+    [Fact]
+    public async Task EscapeStopsTheOpeningOfTheSettingsAtOnceAndDoesNotAskToExit()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        terminal.Keys.Press(Keys.Escape);
+
+        Assert.Null(await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), new HomeWork(HomeAction.Settings, new TaskCompletionSource().Task)));
+        Assert.False(terminal.Saw("press esc again"));
+    }
+
+    [Fact]
+    public async Task AnotherRowIsChosenWhileTheSettingsAreOpened()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        terminal.Keys.Press(Keys.Up, Keys.Enter);
+
+        Assert.Equal(HomeAction.Milestone, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), new HomeWork(HomeAction.Settings, new TaskCompletionSource().Task)));
+    }
+
+    [Fact]
+    public async Task TheTasksAreCountedAtRunWhileTheSettingsAreOpened()
+    {
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+        var counted = new TaskCompletionSource<QueueOutlook?>();
+        var opened = new TaskCompletionSource();
+
+        // The count is drawn when it is done, and the settings are opened after it.
+        terminal.Keys.Hold(() =>
+        {
+            if (!terminal.Saw(" ❯ Settings     •"))
+                return false;
+
+            counted.TrySetResult(Outlook(4));
+            if (!terminal.Saw("4 tasks"))
+                return false;
+
+            opened.TrySetResult();
+            return false;
+        });
+
+        Assert.Equal(HomeAction.Settings, await WaitAsync(new TaskCount(() => counted.Task), new HomeWork(HomeAction.Settings, opened.Task)));
+        terminal.AssertSaw("   Run          •••••••••••\n");
+        terminal.AssertSaw("   Run          4 tasks\n");
     }
 
     [Theory]
@@ -226,9 +318,15 @@ public sealed class HomeScreenTests : IDisposable
     static QueueOutlook Interrupted(string title) =>
         new(3, new QueueTask(12, title, "https://github.com/acme/rocket/issues/12", ["interrupted"], BoardStatus.Todo, "Todo", [], []));
 
-    async Task<HomeAction> AskAsync(TaskCount tasks, RunChecks? checks = null, IReadOnlyList<string>? skipped = null)
+    async Task<HomeAction> AskAsync(TaskCount tasks, IReadOnlyList<string>? skipped = null)
     {
         using var page = terminal.Open();
-        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", skipped ?? [], tasks, checks);
+        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", skipped ?? [], tasks);
+    }
+
+    async Task<HomeAction?> WaitAsync(TaskCount tasks, IHomeWait wait)
+    {
+        using var page = terminal.Open();
+        return await HomeScreen.WaitAsync(page, "own model · high", "v0.3.0", [], tasks, wait);
     }
 }
