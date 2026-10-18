@@ -18,9 +18,27 @@ namespace TooBusy.Cli;
 
 public static class CliApp
 {
-    // The version of the tool, the one place it is read from: `--version` prints it and the menu shows it.
-    public static string Version { get; } =
-        typeof(CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+    // The version of the tool, the one place it is read from: the menu shows it, and `--version` prints it with the
+    // commit of a build in development after a plus, `1.0.0.dev+c56f6c2`. A release has no commit.
+    static readonly (string Version, string? Commit) Build =
+        SplitVersion(typeof(CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "");
+
+    public static string Version => Build.Version;
+
+    public static string? Commit => Build.Commit;
+
+    // As git and GitHub shorten a commit.
+    const int CommitLength = 7;
+
+    // The informational version of the assembly, split into the version and the commit after its plus, which the
+    // SDK puts there whole.
+    public static (string Version, string? Commit) SplitVersion(string informational)
+    {
+        var parts = informational.Split('+', 2);
+        if (parts.Length < 2 || parts[1].Length == 0)
+            return (parts[0], null);
+        return (parts[0], parts[1][..Math.Min(parts[1].Length, CommitLength)]);
+    }
 
     public static RootCommand CreateRootCommand(CliContext context)
     {
@@ -69,12 +87,12 @@ public static class CliApp
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
     }
 
-    // What `--version` does: prints the version of the tool.
+    // What `--version` does: prints the version of the tool, and the commit of a build in development after it.
     sealed class PrintVersion : SynchronousCommandLineAction
     {
         public override int Invoke(ParseResult parseResult)
         {
-            parseResult.InvocationConfiguration.Output.WriteLine(Version);
+            parseResult.InvocationConfiguration.Output.WriteLine(Commit is null ? Version : $"{Version}+{Commit}");
             return ExitCode.Done;
         }
     }

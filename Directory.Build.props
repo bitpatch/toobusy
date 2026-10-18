@@ -16,10 +16,12 @@
   <PropertyGroup>
     <VersionPrefix>1.0.0</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
-    <!-- The version toobusy prints: the suffix after a dot, and no commit hash. -->
+    <!-- The version toobusy prints: the suffix after a dot, and in a build with a suffix the commit after a plus,
+         which the SDK adds whole and toobusy shortens. A release has no suffix and no commit. -->
     <InformationalVersion>$(VersionPrefix)</InformationalVersion>
     <InformationalVersion Condition="'$(VersionSuffix)' != ''">$(VersionPrefix).$(VersionSuffix)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion Condition="'$(VersionSuffix)' != ''">true</IncludeSourceRevisionInInformationalVersion>
     <Authors>Bitpatch</Authors>
     <Copyright>Copyright (c) Bitpatch</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

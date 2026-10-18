@@ -82,8 +82,20 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("--version");
 
         Assert.Equal(0, exit);
-        Assert.Equal(CliApp.Version + Environment.NewLine, output);
-        Assert.Matches(@"^\d+\.\d+\.\d+(\.dev)?$", CliApp.Version);
+        Assert.Matches(@"^\d+\.\d+\.\d+(\.dev(\+[0-9a-f]{7})?)?" + Environment.NewLine + "$", output);
+        Assert.Equal(CliApp.Commit is null ? CliApp.Version : $"{CliApp.Version}+{CliApp.Commit}", output.TrimEnd());
+    }
+
+    [Theory]
+    [InlineData("1.0.0.dev+c56f6c2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c", "1.0.0.dev", "c56f6c2")]
+    [InlineData("1.0.0.dev+c56f6c2", "1.0.0.dev", "c56f6c2")]
+    [InlineData("1.0.0.dev+c56f", "1.0.0.dev", "c56f")]
+    [InlineData("1.0.0.dev+", "1.0.0.dev", null)]
+    [InlineData("1.0.0", "1.0.0", null)]
+    [InlineData("", "", null)]
+    public void TheVersionIsSplitFromTheCommitWhichIsShortened(string informational, string version, string? commit)
+    {
+        Assert.Equal((version, commit), CliApp.SplitVersion(informational));
     }
 
     [Fact]
