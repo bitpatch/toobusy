@@ -448,12 +448,13 @@ In a terminal `toobusy` without a command opens its page and goes on from wherev
 1. **A project that is not set up** is set up: the steps of `init`, on the same page. Leaving them, or declining at the end, leaves the page.
 2. **A user without a milestone to work on**, one who has not chosen or whose milestone is not open any more, chooses one from the list. Leaving the list leaves the page.
 3. **A user who has not chosen the model or the effort** chooses them, the model first. Leaving either list leaves the page.
-4. **The menu.** Above it stand the settings, the milestone, the model and the effort as they are, and the labels to skip when some are chosen; the milestone stands again, in the colour of success, after the choice that changes it. The bar of the page says the version of the tool at its right, as [the screen](#the-screen) describes.
+4. **The menu.** Above it stand the settings, with which status of the board is which in a project with a board, as the settings of the menu tell it, the milestone, the model and the effort as they are, and the labels to skip when some are chosen; the milestone stands again, in the colour of success, after the choice that changes it. The bar of the page says the version of the tool at its right, as [the screen](#the-screen) describes.
 
 ```
   toobusy · ~/Projects/toobusy                         v1.0.0
 
  ✔ Project          https://github.com/orgs/bitpatch/projects/4
+ ✔ Statuses         Todo: Todo · In Progress: In Progress · Done: Done
  ✔ Blocking labels  manual, draft
  ✔ Labels to take   any task
  ✔ Manual label     manual
@@ -516,6 +517,7 @@ After `Settings` stands nothing. It opens the settings of the project one under 
  Choose a setting to change it: a change is saved when you say so.
  ────────────────────────────────────────────────────────────
  ❯ Project          https://github.com/orgs/bitpatch/projects/4
+   Statuses         Todo: Todo · In Progress: In Progress · Done: Done
    Blocking labels  manual, draft
    Labels to take   any task
    Manual label     manual
@@ -530,9 +532,9 @@ After `Settings` stands nothing. It opens the settings of the project one under 
  ↑↓ move · enter choose · ctrl+c exit
 ```
 
-A value stands in the colour of success, as what is chosen does in every list; the blocking labels stand in the colour of an error, as they keep tasks out of a run; and a value that says nothing is set, `none`, is muted. A board is named by its address, and by its title too once the boards are read. Over the list stand what the setup says of the machine, as `init` says it, and how the last change went. The bar says `Changing the settings`, and there are no steps at the foot. The pointer stays on the setting that was opened last.
+Under the project, in a project with a board, stand its statuses: which status of the board is which of the three a run knows, each of them by the name GitHub gives it and after it what the board calls it, as `Todo: Ready · In Progress: Doing · Done: Shipped`. A value stands in the colour of success, as what is chosen does in every list; the blocking labels stand in the colour of an error, as they keep tasks out of a run; and a value that says nothing is set, `none`, is muted. A board is named by its address, and by its title too once the boards are read. Over the list stand what the setup says of the machine, as `init` says it, and how the last change went. The bar says `Changing the settings`, and there are no steps at the foot. The pointer stays on the setting that was opened last.
 
-Enter on a setting opens its questions with what the settings say proposed. The project, with the statuses of its board, the blocking labels, the labels to take, the manual label, the interrupt label and the skill are asked as the steps of `init` ask them; the boards are read the first time the project is opened, and the labels the first time a label is. The four that `init` asks no question for are asked here:
+Enter on a setting opens its questions with what the settings say proposed. The project, with the statuses of its board, the blocking labels, the labels to take, the manual label, the interrupt label and the skill are asked as the steps of `init` ask them; the boards are read the first time the project is opened, and the labels the first time a label is. `Statuses` asks the three questions about the statuses of the board, under the board, whatever the board calls them, and the board is not asked for again: a board that has `Todo`, `In Progress` and `Done` and a `Ready` beside them can take its tasks from there. A board with fewer than three statuses, or whose statuses cannot be read, is asked nothing, and that is said above the list. The four that `init` asks no question for are asked here:
 
 | Setting | Question |
 |---|---|

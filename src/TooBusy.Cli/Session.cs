@@ -181,26 +181,29 @@ public sealed class Session(Page page, Workbench bench)
         if (!await setup.OpenAsync(cancellationToken))
             return Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
 
-        var at = 0;
-        string? note = null;
+        var at = SetupSetting.Project;
+        IReadOnlyList<Line> said = [];
         while (true)
         {
             // The values are in the list: over it stand what the setup says of the machine and what became of the
             // last change.
             Clear(status, null);
             var told = setup.Notes.Select(SetupScreen.Told).ToList();
-            page.Body = note is null ? told : [.. told, .. told.Count > 0 ? [Line.Empty] : (Line[])[], Line.Of(note, Tone.Muted)];
+            page.Body = said.Count == 0 ? told : [.. told, .. told.Count > 0 ? [Line.Empty] : (Line[])[], .. said];
             if (SettingsScreen.Ask(page, setup.Values, at) is not { } setting)
                 return null;
 
-            at = (int)setting;
+            at = setting;
             var result = await setup.ChangeAsync(setting, cancellationToken);
             Setup = setup.Changed ?? Setup;
-            note = result.Outcome switch
+
+            // A setting that changed nothing may still have something said of it, as a board without the
+            // statuses a run needs.
+            said = result.Outcome switch
             {
-                SetupOutcome.Written or SetupOutcome.Failed => Ending(result, bench.Demo).Text,
-                SetupOutcome.Declined => "The change was not saved.",
-                _ => null,
+                SetupOutcome.Written or SetupOutcome.Failed => [Line.Of(Ending(result, bench.Demo).Text, Tone.Muted)],
+                SetupOutcome.Declined => [Line.Of("The change was not saved.", Tone.Muted)],
+                _ => [.. result.Notes.Select(SetupScreen.Told)],
             };
         }
     }
@@ -354,6 +357,8 @@ public sealed class Session(Page page, Workbench bench)
         if (bench.Settings.Load()?.Settings is { } settings)
         {
             body.Add(Picker.Answer("Project", settings.Tracker.Board ?? "none"));
+            if (settings.Tracker.Board is not null)
+                body.Add(Picker.Answer("Statuses", settings.Tracker.Statuses.Told));
             body.Add(Picker.Answer("Blocking labels", settings.Queue.Labels.Blocking.Count == 0 ? "none" : string.Join(", ", settings.Queue.Labels.Blocking)));
             body.Add(Picker.Answer("Labels to take", settings.Queue.Labels.Take.Count == 0 ? "any task" : string.Join(", ", settings.Queue.Labels.Take)));
             body.Add(Picker.Answer("Manual label", settings.Queue.Labels.Manual));

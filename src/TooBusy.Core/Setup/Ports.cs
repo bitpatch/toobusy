@@ -51,6 +51,7 @@ public sealed record SetupProgress(IReadOnlyList<SetupNote> Notes, IReadOnlyList
 public enum SetupSetting
 {
     Project,
+    Statuses,
     Blocking,
     Take,
     Manual,

@@ -2152,6 +2152,9 @@ public sealed class CliAppTests : IDisposable
         {
             Assert.Contains(row, output, StringComparison.Ordinal);
         }
+
+        // A project without a board has no statuses to tell.
+        Assert.DoesNotContain("Statuses", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2236,6 +2239,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.DoesNotContain("Write the settings?", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          https://github.com/users/example/projects/1", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Statuses         Todo: Todo · In Progress: In Progress · Done: Done", output, StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  draft", output, StringComparison.Ordinal);
         Assert.Contains("✔ Manual label     manual", output, StringComparison.Ordinal);
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);

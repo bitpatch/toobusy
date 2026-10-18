@@ -70,4 +70,11 @@ public class BoardStatusesTests
         Assert.Equal(BoardStatus.Other, signs.Of("🚀"));
         Assert.False(BoardStatuses.Same("📥", "✅"));
     }
+
+    [Fact]
+    public void TheStatusesAreToldEachByTheNameGitHubGivesIt()
+    {
+        Assert.Equal("Todo: Ready · In Progress: Doing · Done: Shipped", new BoardStatuses("Ready", "Doing", "Shipped").Told);
+        Assert.Equal("Todo: Todo · In Progress: In Progress · Done: Done", BoardStatuses.Default.Told);
+    }
 }

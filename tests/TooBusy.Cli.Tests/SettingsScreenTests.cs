@@ -8,6 +8,7 @@ public sealed class SettingsScreenTests : IDisposable
     static readonly SetupValue[] Values =
     [
         new(SetupSetting.Project, "Project", "https://github.com/orgs/acme/projects/1", SetupLook.Set),
+        new(SetupSetting.Statuses, "Statuses", "Todo: Ready · In Progress: Doing · Done: Shipped", SetupLook.Set),
         new(SetupSetting.Blocking, "Blocking labels", "manual, draft", SetupLook.KeepsOut),
         new(SetupSetting.Take, "Labels to take", "any task", SetupLook.Set),
         new(SetupSetting.Manual, "Manual label", "manual", SetupLook.Set),
@@ -19,14 +20,14 @@ public sealed class SettingsScreenTests : IDisposable
         new(SetupSetting.PermissionMode, "Permission mode", "auto by default", SetupLook.Set),
     ];
 
-    readonly TestTerminal terminal = new(width: 80, height: 24);
+    readonly TestTerminal terminal = new(width: 80, height: 26);
 
     public void Dispose() => terminal.Dispose();
 
     [Fact]
     public void EverySettingStandsWithItsValueAndNoneScrolls()
     {
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
+        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter);
 
         Assert.Equal(SetupSetting.Take, Ask());
         terminal.AssertSaw("""
@@ -35,6 +36,7 @@ public sealed class SettingsScreenTests : IDisposable
             """.ReplaceLineEndings("\n"));
         terminal.AssertSaw("""
                Project          https://github.com/orgs/acme/projects/1
+               Statuses         Todo: Ready · In Progress: Doing · Done: Shipped
                Blocking labels  manual, draft
              ❯ Labels to take   any task
                Manual label     manual
@@ -70,7 +72,8 @@ public sealed class SettingsScreenTests : IDisposable
     {
         terminal.Keys.Press(Keys.Enter);
 
-        Assert.Equal(SetupSetting.Branch, Ask(at: 8));
+        Assert.Equal(SetupSetting.Branch, Ask(at: SetupSetting.Branch));
+        terminal.AssertSaw(" ❯ Branch           develop");
     }
 
     [Theory]
@@ -83,7 +86,7 @@ public sealed class SettingsScreenTests : IDisposable
         Assert.Null(Ask());
     }
 
-    SetupSetting? Ask(int at = 0)
+    SetupSetting? Ask(SetupSetting at = SetupSetting.Project)
     {
         using var page = terminal.Open();
         return SettingsScreen.Ask(page, Values, at);

@@ -1609,6 +1609,7 @@ public class ProjectSetupTests
         Assert.Equal(
             [
                 new SetupValue(SetupSetting.Project, "Project", Rocket, SetupLook.Set),
+                new SetupValue(SetupSetting.Statuses, "Statuses", "Todo: Todo · In Progress: In Progress · Done: Done", SetupLook.Set),
                 new SetupValue(SetupSetting.Blocking, "Blocking labels", "manual", SetupLook.KeepsOut),
                 new SetupValue(SetupSetting.Take, "Labels to take", "bug, retired", SetupLook.Set),
                 new SetupValue(SetupSetting.Manual, ManualLabel, "manual", SetupLook.Set),
@@ -1631,8 +1632,8 @@ public class ProjectSetupTests
 
         var values = (await OpenAsync()).Values;
 
-        Assert.Equal(new SetupValue(SetupSetting.Blocking, "Blocking labels", "none", SetupLook.Unset), values[1]);
-        Assert.Equal(new SetupValue(SetupSetting.Take, "Labels to take", "any task", SetupLook.Set), values[2]);
+        Assert.Equal(new SetupValue(SetupSetting.Blocking, "Blocking labels", "none", SetupLook.Unset), Value(values, SetupSetting.Blocking));
+        Assert.Equal(new SetupValue(SetupSetting.Take, "Labels to take", "any task", SetupLook.Set), Value(values, SetupSetting.Take));
     }
 
     [Fact]
@@ -1660,7 +1661,7 @@ public class ProjectSetupTests
         Assert.Empty(dialog.Shown.Steps);
         Assert.Empty(dialog.Shown.Answers);
         Assert.Equal([new SetupAnswer("Blocking labels", "draft, manual")], result.Answers);
-        Assert.Equal("draft, manual", setup.Values[1].Value);
+        Assert.Equal("draft, manual", Value(setup.Values, SetupSetting.Blocking).Value);
         Assert.Empty(tracker.Labelled);
         Assert.Empty(tracker.Linked);
     }
@@ -1917,7 +1918,69 @@ public class ProjectSetupTests
         Assert.Equal("GitHub said no", result.Failure);
         Assert.Null(store.Saved);
         Assert.Equal(SetupOutcome.Failed, setup.Changed!.Outcome);
-        Assert.Equal("manual", setup.Values[3].Value);
+        Assert.Equal("manual", Value(setup.Values, SetupSetting.Manual).Value);
+    }
+
+    [Fact]
+    public async Task AProjectWithoutABoardHasNoRowOfItsStatuses()
+    {
+        store.Current = Existing with { Tracker = new TrackerSettings("github", null) };
+
+        var values = (await OpenAsync()).Values;
+
+        Assert.DoesNotContain(values, value => value.Setting == SetupSetting.Statuses);
+        Assert.Equal(new SetupValue(SetupSetting.Project, "Project", "none", SetupLook.Unset), values[0]);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfTheMenuAreAskedWhateverTheBoardCallsThem()
+    {
+        tracker.Statuses = ["Todo", "Ready", "In Progress", "Done"];
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer(TodoStatus, "Ready");
+
+        var result = await setup.ChangeAsync(SetupSetting.Statuses, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal([TodoStatus, InProgressStatus, DoneStatus, "Save the change?"], dialog.Asked);
+        Assert.Equal(new BoardStatuses("Ready", "In Progress", "Done"), store.Saved!.Tracker.Statuses);
+        Assert.Equal(Rocket, store.Saved.Tracker.Board);
+        Assert.Equal([new SetupAnswer("Statuses", "Todo: Ready · In Progress: In Progress · Done: Done")], result.Answers);
+        Assert.Empty(dialog.Waited);
+    }
+
+    [Fact]
+    public async Task StatusesThatAreKeptAskNothingMore()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        var result = await setup.ChangeAsync(SetupSetting.Statuses, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Equal([TodoStatus, InProgressStatus, DoneStatus], dialog.Asked);
+        Assert.Empty(result.Notes);
+        Assert.Null(store.Saved);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhatKeepsTheStatusesOfABoardFromBeingAskedIsSaid(bool unreadable)
+    {
+        tracker.Statuses = unreadable ? null : ["Open", "Done"];
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        var result = await setup.ChangeAsync(SetupSetting.Statuses, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Empty(dialog.Asked);
+        Assert.Equal(
+            unreadable ? "The statuses of the board cannot be read: `toobusy doctor` says why." : "The board has no statuses “Todo”, “In Progress”: it has Open, Done.",
+            result.Notes[0].Text);
+        Assert.Equal(SetupTone.Warning, result.Notes[0].Tone);
     }
 
     async Task<ProjectSetup> OpenAsync()
@@ -1926,6 +1989,8 @@ public class ProjectSetupTests
         Assert.True(await setup.OpenAsync(TestContext.Current.CancellationToken));
         return setup;
     }
+
+    static SetupValue Value(IReadOnlyList<SetupValue> values, SetupSetting setting) => values.Single(value => value.Setting == setting);
 
     Task<SetupResult> RunAsync(SetupProposals? proposals = null) => new ProjectSetup(dialog, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
 

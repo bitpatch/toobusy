@@ -12,6 +12,10 @@ public sealed record BoardStatuses(string Todo, string InProgress, string Done)
     // The three names, in the order a task goes through them.
     public IReadOnlyList<string> Names => [Todo, InProgress, Done];
 
+    // Which name of the board is which of the three, as `Todo: Ready · In Progress: Doing · Done: Shipped`: each
+    // status by the name GitHub gives it, and after it what the board calls it.
+    public string Told => string.Join(" · ", Default.Names.Zip(Names, (known, named) => $"{known}: {named}"));
+
     // A status by what a board calls it; an empty name is that of a task that has none.
     public BoardStatus Of(string name) =>
         name.Length == 0 ? BoardStatus.Missing

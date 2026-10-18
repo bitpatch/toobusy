@@ -242,9 +242,13 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             var labels = settings.Queue.Labels;
             static SetupValue Value(SetupSetting setting, string label, string? value, SetupLook look = SetupLook.Set) =>
                 value is null ? new(setting, label, "none", SetupLook.Unset) : new(setting, label, value, look);
+
+            // Which status of the board is which stands under the board, in a project that has one.
+            IEnumerable<SetupValue> statuses = settings.Tracker.Board is null ? [] : [Value(SetupSetting.Statuses, StatusesLabel, settings.Tracker.Statuses.Told)];
             return
             [
                 Value(SetupSetting.Project, ProjectLabel, settings.Tracker.Board is { } address ? Board(address) : null),
+                .. statuses,
                 Value(SetupSetting.Blocking, BlockingLabel, labels.Blocking.Count == 0 ? null : string.Join(", ", labels.Blocking), SetupLook.KeepsOut),
                 Value(SetupSetting.Take, TakeLabel, labels.Take.Count == 0 ? "any task" : string.Join(", ", labels.Take)),
                 Value(SetupSetting.Manual, ManualLabel, labels.Manual),
@@ -290,7 +294,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             if (outcome == SetupOutcome.Written)
                 current = kept ?? current;
             var told = outcome == SetupOutcome.Written ? Values.Where(value => value.Setting == setting).Select(value => new SetupAnswer(value.Label, value.Value)).ToList() : [];
-            var result = new SetupResult(outcome, told, failure, written) { Done = done[before..] };
+            var result = new SetupResult(outcome, told, failure, written) { Notes = lacking, Done = done[before..] };
             if (outcome is SetupOutcome.Written or SetupOutcome.Failed)
                 Remember(result);
             Reset();
@@ -301,6 +305,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     Task<bool> AskAsync(SetupSetting setting, CancellationToken cancellationToken) => setting switch
     {
         SetupSetting.Project => AskProjectAsync(cancellationToken),
+        SetupSetting.Statuses => AskBoardStatusesAsync(cancellationToken),
         SetupSetting.Blocking => AskBlockingAsync(cancellationToken),
         SetupSetting.Take => AskTakeAsync(cancellationToken),
         SetupSetting.Manual => AskManualAsync(cancellationToken),
@@ -315,6 +320,11 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The project of the menu: the boards are read the first time it is asked about.
     async Task<bool> AskProjectAsync(CancellationToken cancellationToken) =>
         await ReadBoardsAsync(cancellationToken) && await AskBoardAsync(cancellationToken);
+
+    // Which status of the board of the settings is which, for the menu: the three questions are asked whatever the
+    // board calls its statuses, under the board, which is not asked for again.
+    async Task<bool> AskBoardStatusesAsync(CancellationToken cancellationToken) =>
+        board is BoardAnswer.Existing && await AskStatusesAsync(cancellationToken, always: true);
 
     // The answers as the settings have them: the menu changes one of them at a time.
     void Reset()
@@ -581,8 +591,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // nothing is verified. A new board has the names of GitHub, and a project without a board has none to name.
     // A board that cannot be asked about, with fewer than three statuses or with nobody to ask, is taken all the
     // same, and it is said: a run would take no task of it. One whose statuses cannot be read is left to the
-    // doctor. False is going back from the first of the questions.
-    async Task<bool> AskStatusesAsync(CancellationToken cancellationToken)
+    // doctor. False is going back from the first of the questions. `always` asks the three questions of a board
+    // that has the names of GitHub too, as the statuses of the menu do, and says so of one that cannot be read.
+    async Task<bool> AskStatusesAsync(CancellationToken cancellationToken, bool always = false)
     {
         string?[] offered = [proposals.TodoStatus, proposals.InProgressStatus, proposals.DoneStatus];
         var given = BoardStatuses.Default.Names;
@@ -659,6 +670,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (await tracker.ReadStatusesAsync(taken.Address, cancellationToken) is not { } has)
         {
             statuses = new BoardStatuses(wanted[0], wanted[1], wanted[2]);
+            if (always)
+                lacking = [new SetupNote(SetupTone.Warning, "The statuses of the board cannot be read: `toobusy doctor` says why.")];
             return true;
         }
 
@@ -677,7 +690,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         statuses = new BoardStatuses(wanted[0], wanted[1], wanted[2]);
         var lack = statuses.Lack(has);
         var usual = !was && !optioned.Contains(true) && wanted.Zip(given).All(pair => BoardStatuses.Same(pair.First, pair.Second));
-        if (lack is null && (unasked || usual))
+        if (lack is null && (unasked || (usual && !always)))
             return true;
 
         if (has.Count < wanted.Length)

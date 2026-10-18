@@ -10,9 +10,10 @@ public static class SettingsScreen
     public const string Label = "Settings";
     public const string Hint = "Choose a setting to change it: a change is saved when you say so.";
 
-    // `at` is the row the pointer starts on. Gives the setting that is chosen, or null when Escape is pressed or
-    // `Back` is chosen.
-    public static SetupSetting? Ask(Page page, IReadOnlyList<SetupValue> values, int at = 0)
+    // `at` is the setting the pointer starts on: a project without a board has no row of its statuses, so a setting
+    // is not always on the same row. Gives the setting that is chosen, or null when Escape is pressed or `Back` is
+    // chosen.
+    public static SetupSetting? Ask(Page page, IReadOnlyList<SetupValue> values, SetupSetting at = SetupSetting.Project)
     {
         page.EscapeLeaves = false;
         page.Keys = "esc back";
@@ -25,6 +26,7 @@ public static class SettingsScreen
                 _ => null,
             })),
         ];
-        return Picker.Pick(page, Picker.Head(Label, Hint), choices, at: at, rows: choices.Length + 1) is { } picked ? values[picked].Setting : null;
+        var row = Math.Max(0, values.ToList().FindIndex(value => value.Setting == at));
+        return Picker.Pick(page, Picker.Head(Label, Hint), choices, at: row, rows: choices.Length + 1) is { } picked ? values[picked].Setting : null;
     }
 }
