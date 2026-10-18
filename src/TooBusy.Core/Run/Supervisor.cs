@@ -694,7 +694,9 @@ public sealed class Supervisor(
 
             if (clock.Now >= next)
             {
+                // The status line of the session tells of the limits as it works, so they are read with every look.
                 look = await session.LookAsync(kill);
+                limits = assistant.ReadLimits().At(clock.Now);
                 next = clock.Now + policy.Poll;
                 Remember(number, session);
                 if (look.Phase == SessionPhase.Unseen)
@@ -703,8 +705,9 @@ public sealed class Supervisor(
                     {
                         unseen = true;
                         Say(RunMark.Paused, $"The sessions of the assistant cannot be read: #{number} may still be working · {session.Open}");
-                        Show(Now());
                     }
+
+                    Show(Now());
                 }
                 else
                 {

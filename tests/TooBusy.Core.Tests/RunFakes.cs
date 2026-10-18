@@ -268,10 +268,10 @@ sealed class FakeSession(int task) : IAssistantSession
 
     public FakeSession Lost(string? reply = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply));
 
-    public FakeSession Unseen(int looks = 1)
+    public FakeSession Unseen(int looks = 1, Action? and = null)
     {
         for (var index = 0; index < looks; index++)
-            Add(new SessionLook(SessionPhase.Unseen));
+            Add(new SessionLook(SessionPhase.Unseen), and);
         return this;
     }
 

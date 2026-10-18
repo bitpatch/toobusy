@@ -1781,7 +1781,7 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task AWindowWhoseResetHasPassedIsNotUsedAtAll()
+    public async Task AWindowWhoseResetHasPassedIsNotKnown()
     {
         tracker.Add(3);
         assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start - TimeSpan.FromMinutes(1)), new UsageWindow("weekly", 100, FakeClock.Start));
@@ -1789,6 +1789,56 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.All(log.Statuses, status => Assert.Equal(UsageLimits.Unknown, status.Limits));
+    }
+
+    [Fact]
+    public async Task TheLimitsAreReadWithEveryLookAtTheSession()
+    {
+        tracker.Add(3);
+        var before = new UsageLimits(new UsageWindow("5-hour", 2, FakeClock.Start + TimeSpan.FromHours(4)), new UsageWindow("weekly", 3, FakeClock.Start + TimeSpan.FromDays(5)));
+        var now = new UsageLimits(new UsageWindow("5-hour", 11, FakeClock.Start + TimeSpan.FromHours(4)), new UsageWindow("weekly", 4, FakeClock.Start + TimeSpan.FromDays(5)));
+        assistant.Limits = before;
+        assistant.Session(3)
+            .Works()
+            .Works(and: () => assistant.Limits = now)
+            .Works()
+            .Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal(before, log.Statuses.First(status => status is { Phase: RunPhase.Preparing, Text: "Starting #3…" }).Limits);
+        Assert.Equal([before, now], log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Limits).Distinct());
+
+        // After the task the limits are those read last.
+        Assert.Equal(now, log.Statuses[^1].Limits);
+    }
+
+    [Fact]
+    public async Task AWindowWhoseResetPassesWhileTheSessionWorksIsNotOnTheStatusFromThen()
+    {
+        tracker.Add(3);
+        var far = new UsageWindow("weekly", 4, FakeClock.Start + TimeSpan.FromDays(5));
+        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 11, FakeClock.Start + TimeSpan.FromMinutes(1)), far);
+        assistant.Session(3).Works(looks: 30).Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal(
+            [new UsageLimits(new UsageWindow("5-hour", 11, FakeClock.Start + TimeSpan.FromMinutes(1)), far), new UsageLimits(null, far)],
+            log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Limits).Distinct());
+    }
+
+    [Fact]
+    public async Task TheLimitsAreReadWhileTheSessionsCannotBe()
+    {
+        tracker.Add(3);
+        var now = new UsageLimits(new UsageWindow("5-hour", 11, null), null);
+        assistant.Session(3).Works().Unseen().Unseen(and: () => assistant.Limits = now).Unseen().Works().Ends(Done);
+
+        await RunAsync();
+
+        Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Working, Step: "its session cannot be read" } && status.Limits == now);
     }
 
     [Fact]
@@ -1860,6 +1910,20 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(RunEnd.Limited, result.End);
         Assert.Contains("‖ #3 is paused: the weekly limit is spent, it resets 2030-01-02 09:00 UTC. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
         Assert.Equal(RecordState.Paused, state.Record?.State);
+    }
+
+    [Fact]
+    public async Task AFarLimitWhoseResetHasPassedPausesNothing()
+    {
+        tracker.Add(3);
+        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromMinutes(1)));
+        var session = assistant.Session(3).Works(looks: 30).Limit().Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([Briefing.AfterLimit(3)], session.Told);
+        Assert.Contains("‖ #3 waits 30 min for the limit to reset, then goes on · /stop pauses it for the next run", log.Lines);
     }
 
     [Fact]

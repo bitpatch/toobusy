@@ -95,11 +95,12 @@ public sealed record UsageLimits(UsageWindow? Near, UsageWindow? Far)
 {
     public static UsageLimits Unknown { get; } = new(null, null);
 
-    // The limits as they stand at the moment: a window whose reset has passed is not used at all.
+    // The limits as they stand at the moment: a window whose reset has passed started anew since it was told of, and
+    // how much of it is used now is not known.
     public UsageLimits At(DateTimeOffset now) => new(Fresh(Near, now), Fresh(Far, now));
 
     static UsageWindow? Fresh(UsageWindow? window, DateTimeOffset now) =>
-        window is { ResetsAt: { } reset } && reset <= now ? window with { Used = 0, ResetsAt = null } : window;
+        window is { ResetsAt: { } reset } && reset <= now ? null : window;
 }
 
 // The working copy of the project: how many files differ from what is committed, how many commits of the branch are

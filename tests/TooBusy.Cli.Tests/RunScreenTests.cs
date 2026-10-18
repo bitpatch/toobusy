@@ -145,10 +145,45 @@ public sealed class RunScreenTests : IDisposable
         Assert.Matches("\u001b\\[7G\u001b\\[38;2;[0-9;]+m▰", written);
     }
 
+    [Fact]
+    public async Task TheRightEdgeShowsTheWindowsOfTheLastStatusAndNothingForOneThatIsNotKnown()
+    {
+        var edges = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null)) });
+            await SeenAsync("5-hour 11% · weekly 4%");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+
+            // A window whose reset has passed is not on the status, and nothing stands for it.
+            view.Show(Working with { Limits = new UsageLimits(null, new UsageWindow("weekly", 4, null)) });
+            await GoneAsync("5-hour");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+
+            view.Show(Working);
+            await GoneAsync("weekly");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        const string Hints = " ctrl+c stop the session and exit";
+        Assert.Equal([Hints + new string(' ', 44) + "5-hour 11% · weekly 4%", Hints + new string(' ', 57) + "weekly 4%", Hints], edges);
+    }
+
     // Waits until the terminal's own screen shows the text.
     async Task SeenAsync(string text)
     {
         while (!Has(text))
+            await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+    }
+
+    // Waits until the terminal's own screen does not show the text any more.
+    async Task GoneAsync(string text)
+    {
+        while (Has(text))
             await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
     }
 
