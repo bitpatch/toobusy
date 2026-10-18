@@ -4,25 +4,23 @@ A command-line tool that works through the tasks of your project while you are t
 
 ## Status
 
-toobusy is in development, and there is no release yet: it is built from source, and it says `1.0.0.dev` as its version at the top of its menu, and `toobusy --version` adds the commit it is built from after a plus, `1.0.0.dev+c56f6c2`.
+toobusy is in development, and there is no release yet: it is built from source.
 
 What works today:
 
 - **Setting a project up**: `toobusy init` asks what it needs and writes the settings, on a screen or by options alone.
 - **Setting it up with your assistant**: `toobusy init --assist` tells the assistant how, one step at a time, and changes nothing itself.
 - **Checking the machine**: `toobusy doctor` says whether everything a run needs is there, and how to fix what is not.
-- **Your own choices**: the milestone to work on, and the model and the effort the tasks are done with.
 - **Looking at the queue**: `toobusy queue` shows which tasks a run would take, which open later and which are held, and why, without running anything.
 - **Knowing that a run goes on**: `toobusy status` says whether one works in the working copy right now, and on which task, so that nobody commits in the middle of it.
 - **A run** with Claude Code over GitHub Issues, with or without a GitHub Projects board: tasks one after another, a session that waits for you and is told to go on alone, usage limits, stopping, and going on with the same session after any interruption.
-- **Demos** of all of it over made-up data, which change nothing.
 
 What does not, yet:
 
 - No installer and no released binaries.
 - GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
 - Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The settings hold the board, the labels, the skill a session starts with, the commands a run runs around a task, the branch the tasks are done on and the permission mode a session works in, and nothing else to choose: the tracker and the assistant are named there, with one value each. What the board calls its statuses is named there too, where it is not what GitHub calls them. The messages a session gets are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
+- The messages a session gets are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
 
 ## The idea
 
@@ -51,7 +49,7 @@ For another machine put its [runtime identifier](https://learn.microsoft.com/dot
 
 ## Trying it without changing anything
 
-`--demo` is an option of every command: it shows the tool over made-up data, and nothing is made, linked, written or remembered. The demos read only what is safe to read: the settings of the project when it has them, the `origin` remote of the folder and, through `gh`, your boards and the open milestones. Run them in a terminal, inside any git repository:
+`--demo` is an option of every command: it shows the tool over made-up data, and nothing is made, linked, written or remembered. Run the demos in a terminal, inside any git repository:
 
 ```sh
 toobusy --demo           # the whole tool: the menu, and from it a run, the choices and the settings
@@ -62,7 +60,7 @@ toobusy status --demo    # what is said of a run that goes on
 toobusy doctor --demo    # the checks over a made-up machine that has it all
 ```
 
-The bar of the screen says `demo`. A demo of a run takes about a minute and shows a task that is done, a session that stops with a question, a task that is done in part, whose session is marked as waiting after its report, a usage limit and tasks that are held.
+The bar of the screen says `demo`. A demo of a run takes about a minute.
 
 ## Setting a project up
 
@@ -90,51 +88,30 @@ Run it in a terminal, in the folder of the project. It asks:
 
 The last page shows what saving will do. Until you choose `Save and exit` nothing is changed anywhere. Saving writes `.toobusy/settings.toml` and does on GitHub what you asked for: it makes a new board, links the board to the repository, and makes the two labels when the repository does not have them. It never touches the working copy or git.
 
-A run knows a board by three statuses: it takes a task only from the first, moves it to the second before its session and to the third when it is done. GitHub names them `Todo`, `In Progress` and `Done` on a new board, and a board that keeps those names is asked nothing about. For a board that calls them otherwise, `Ready`, `Doing`, `Shipped`, `init` asks which of its statuses is which and writes the names to the settings:
+A run knows a board by three statuses: it takes a task only from the first, moves it to the second before its session and to the third when it is done. While the board lacks a status the settings name, `toobusy doctor` fails and no run starts. `toobusy init --no-board` works without a board.
 
-```toml
-[tracker.statuses]
-todo = "Ready"
-in-progress = "Doing"
-done = "Shipped"
-```
+The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 
-A status that is not named there is called as GitHub calls it, and a name is the same whatever the case of its letters. With `--yes` the options `--todo-status`, `--in-progress-status` and `--done-status` name them. While the board lacks a status the settings name, `toobusy doctor` fails and no run starts. `toobusy init --no-board` works without a board.
-
-The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
-
-Four settings are not asked for by `init`. Two are the commands a run runs around every task, for what must not depend on a session remembering it. Options of `init` set them, `toobusy init --before "scripts/dev.sh ports free" --after "scripts/dev.sh server stop"`, and `--no-before` and `--no-after` take them away; the last page shows what changes before it is saved.
+Four settings are not asked for by `init`: the two commands a run runs around every task, for what must not depend on a session remembering it, the branch the tasks are done on, and the permission mode of Claude Code a session works in. The options `--before`, `--after`, `--branch` and `--permission-mode` of `init` set them, and `--no-before`, `--no-after` and `--no-branch` take them away; the last page shows what changes before it is saved.
 
 ```toml
 [task]
 before = "scripts/dev.sh ports free"    # before a task is taken; when it fails, the run stops and the task is not touched
 after = "scripts/dev.sh server stop"    # after the session of a task, however the task went
-```
 
-Each is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. Without an option `init` keeps them, `doctor` does not run them, and a demo runs none. What they do, the instructions and the skill of your project need not tell a session to do.
-
-The third is the branch the tasks are done on: `toobusy init --branch develop` names it, and `--no-branch` takes it away.
-
-```toml
 [workspace]
 branch = "develop"    # the working copy must be on it, and it is brought up to date with its upstream before a task
-```
 
-Before every task the run checks that the working copy is on that branch, and stops on another one: what is checked out is yours, and it does not change it. Then it fetches what the remote has and moves the branch forward to it, so that the task starts from there; a branch with commits its upstream lacks, one that has parted from it, and a remote that refuses, or does not answer three tries in a row, stop the run before the task is touched. A session that finds the branch moved when it pushes brings it up to date as the instructions of your project say, by a rebase or by a merge, and pushes again. Without a branch, a run does the tasks on whatever is checked out, as it stands.
-
-The fourth is the permission mode of Claude Code a session works in: `toobusy init --permission-mode dontAsk` names it.
-
-```toml
 [assistant]
 type = "claude-code"
 permission-mode = "dontAsk"    # `auto` when it is not named
 ```
 
-Nobody answers the prompts of a session, so it works in a mode that goes on without an answer and still checks what it does: `auto`, where a model of Claude Code looks at every action before it is done, and which a session is started in when the settings name none; or `dontAsk`, where whatever the settings of Claude Code in your project do not allow is refused. A mode that asks, as `manual`, `acceptEdits` and `plan`, is refused, as a session in it would wait for ever, and so is `bypassPermissions`, which checks nothing. What a session is allowed and refused in particular stays in the settings of Claude Code in your project, `.claude/settings.json`.
+Each command is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. Without a branch, a run does the tasks on whatever is checked out, as it stands. Nobody answers the prompts of a session, so it works in a mode that goes on without an answer and still checks what it does: `auto`, where a model of Claude Code looks at every action before it is done, or `dontAsk`, where whatever the settings of Claude Code in your project do not allow is refused. What a session is allowed and refused in particular stays in the settings of Claude Code in your project, `.claude/settings.json`. The specification tells the rest: [the branch of the tasks](docs/SPEC.md#the-branch-of-the-tasks) and [the commands of the project](docs/SPEC.md#the-commands-of-the-project).
 
-Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way. `Settings` in the menu of `toobusy` changes them one at a time, the four that `init` does not ask for among them: it lists every setting with its value, opens the questions of the one you choose, and asks before it saves a change.
+Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way. `Settings` in the menu of `toobusy` changes them one at a time, the four that `init` does not ask for among them.
 
-Without questions, as in a script: `toobusy init --yes` takes what the options say and keeps every other setting as it is, or in a first setup takes what the setup proposes, so `toobusy init --before "scripts/dev.sh ports free" -y` changes that command alone. `toobusy init --help` lists the options.
+Without questions, as in a script: `toobusy init --yes` takes what the options say and keeps every other setting as it is. `toobusy init --help` lists the options.
 
 ### With an assistant
 
@@ -142,9 +119,7 @@ Your assistant can set the project up with you. Tell it, in the folder of the pr
 
 > Set toobusy up here: run `toobusy init --assist` and follow it.
 
-The command prints a walk through the setup for the assistant, one step at a time, and changes nothing itself: the machine, which tasks are taken, the board, your own choices, the instructions of the project, the skill, the branch and the commands around a task, what a session may do, and a last check. Each step says how things stand now, what is to be decided, where to look in the project, what to ask you, the command that sets it and how to check it; `toobusy init --assist 3` prints step 3 alone. The assistant asks you whatever is yours to decide, starts no run, and commits nothing before you agree. The same walk changes a setup that exists. In a project that ran its tasks without you before, with a script of its own, it has the assistant fit the skill and the instructions of that old way to toobusy, and asks you what is taken out of the project: nothing is deleted without you.
-
-It is you who tells the assistant to follow the steps: an assistant does not take what a tool prints for an order.
+The command prints a walk through the setup for the assistant, one step at a time, and changes nothing itself; `toobusy init --assist 3` prints step 3 alone. The assistant asks you whatever is yours to decide, starts no run, and commits nothing before you agree. The same walk changes a setup that exists. In a project that ran its tasks without you before, with a script of its own, it has the assistant fit the skill and the instructions of that old way to toobusy, and asks you what is taken out of the project: nothing is deleted without you.
 
 ### `toobusy doctor`
 
@@ -181,7 +156,7 @@ toobusy run --max 3               # three tasks at most, then it stops as after 
 toobusy run --skip-label design   # not the tasks with the label, nor those that wait for them; give it again, or several names separated by commas
 ```
 
-A skipped label holds its tasks for that run alone, as when the assistant cannot do them this time; the task an earlier run left with a session is gone on with whatever its labels. `Skip labels` in the menu of `toobusy` chooses the same for the runs it opens, until `toobusy` is closed, and `toobusy queue --skip-label design` shows the queue of such a run.
+`Skip labels` in the menu of `toobusy` chooses the same for the runs it opens, until `toobusy` is closed.
 
 `toobusy queue` shows what a run would do before you start one, and changes nothing:
 
@@ -197,7 +172,7 @@ Held
   #9  Draft of the new page            it has the draft label
 ```
 
-It needs the settings and your milestone, not the model and the effort. `toobusy queue --json` prints the same lists for an assistant or a script, each task with its number, its title, its address and its labels.
+`toobusy queue --json` prints the same lists for an assistant or a script.
 
 `toobusy status` says whether a run is going on in the working copy, and changes nothing:
 
@@ -205,25 +180,20 @@ It needs the settings and your milestone, not the model and the effort. `toobusy
 A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d
 ```
 
-```text
-No run is going on.
-```
-
-A run works in the working copy itself, so a commit made beside it lands in the middle of its task. `status` needs nothing but the working copy, and exits with 3 while a run goes on and with 0 when none does: `toobusy status && git commit` commits only then. Tell the assistant you work with to look before it commits, and not the sessions of a run, which commit while their run goes on; `toobusy status --json` prints the same for an assistant. A second run does not start in a working copy while one goes on.
+A run works in the working copy itself, so a commit made beside it lands in the middle of its task. `status` exits with 3 while a run goes on and with 0 when none does: `toobusy status && git commit` commits only then. Tell the assistant you work with to look before it commits, and not the sessions of a run, which commit while their run goes on; `toobusy status --json` prints the same for an assistant.
 
 What to know before the first run:
 
-- **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the manual label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the status `Todo`.
-- **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own. Where the settings name a branch, the working copy must be on it, and the run brings it up to date with the remote before a task.
-- **Each task gets a session of Claude Code of its own**, a background one in the permission mode of the settings, `auto` unless they name `dontAsk`, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
-- **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`), and starts with the skill of your project when the settings name one: it changes the code, checks it, commits and pushes. toobusy keeps the task: it moves it on the board, assigns it to you, writes the report of the session into it as a comment, and closes it. New tasks are the session's to make: the one of what is left for you, and those the instructions of your project call for.
-- **The commands of your project run around every task**, when the settings have them: one before a task is taken and one after its session, however the task went. A command that fails stops the run.
+- **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the manual label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the Todo status of the settings, `Todo` when they name none.
+- **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own.
+- **Each task gets a session of Claude Code of its own**, a background one in the permission mode of the settings, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
+- **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`), and starts with the skill of your project when the settings name one: it changes the code, checks it, commits and pushes. toobusy keeps the task: it moves it on the board, assigns it to you, writes the report of the session into it as a comment, and closes it.
 - **A task that needs you is not guessed at.** What can be done without you is done, and of what is left the session makes a new task with the manual label and the questions for you. Answer in it, take the label off, and a later run takes it.
 - **A task that went wrong stops the run.** When its session failed, did not say how the task went, or left changes or commits that are not pushed, the task gets the manual label and a comment that says what went wrong and how its session is opened. No run takes it while it has the label: look at it, take the label off, and a later run takes it.
-- **GitHub away for a moment does not stop the run.** A call of the tracker that gets no answer, and a fetch of the branch, is made again after 10 seconds and after 30 more; only the third failure stops the run. A comment is written once, as a second one could stand twice.
+- **GitHub away for a moment does not stop the run.** A call of the tracker that gets no answer, and a fetch of the branch, is made again after 10 seconds and after 30 more; only the third failure stops the run.
 - **Stopping.** Press `/` during a run for its menu: `stop` finishes the current task and takes no other, `abort` stops as soon as possible with nothing committed. Ctrl+C twice kills the run; the next run goes on with the same session.
 
-`toobusy about` tells how a run works in full, with every message a session gets, word for word: it is written for you and for the assistant that helps you fit the instructions of your project to a run and write its skill. The rest is in [docs/SPEC.md](docs/SPEC.md#running-the-tasks): which tasks are held and why, how a task ends, usage limits, and going on after an interruption.
+`toobusy about` tells how a run works in full, with every message a session gets, word for word. The rest is in [docs/SPEC.md](docs/SPEC.md#running-the-tasks): which tasks are held and why, how a task ends, usage limits, and going on after an interruption.
 
 ## Working on toobusy
 
