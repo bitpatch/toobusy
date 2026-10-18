@@ -48,6 +48,31 @@ public class GitHubTasksTests
         Assert.False(gone.MayPass);
     }
 
+    // As the choice of the user is checked: the title as it is written first, then the only one that differs in case.
+    [Theory]
+    [InlineData("1\tV0.2.0\n4\tv0.3.0\n", "1")]
+    [InlineData("1\tV0.2.0\n4\tv0.2.0\n", "4")]
+    public async Task AMilestoneIsFoundWhateverTheCaseOfItsTitle(string open, string number)
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(open));
+        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+
+        await Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
+
+        Assert.Contains($"milestone={number}", processes.Asked[1].Arguments);
+    }
+
+    [Fact]
+    public async Task TwoMilestonesThatDifferOnlyInCaseAreNotGuessedBetween()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("1\tNext\n4\tNEXT\n"));
+
+        var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("next", TestContext.Current.CancellationToken));
+
+        Assert.Equal("The milestone “next” is not open any more.", gone.Message);
+        Assert.Single(processes.Asked);
+    }
+
     [Fact]
     public async Task ATaskIsALineOfTheAnswer()
     {
@@ -132,6 +157,32 @@ public class GitHubTasksTests
 
         Assert.Equal("The milestone “v0.2.0” has 140 open tasks, and the queue reads only the first 100.", milestone.Message);
         Assert.Equal("acme/rocket has 101 open tasks, and the queue reads only the first 100.", whole.Message);
+    }
+
+    // GitHub may answer with no issues and no error, and the tool prints `null` for their count.
+    [Fact]
+    public async Task ACountThatIsNotANumberIsAnErrorThatStays()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered("total\tnull\n"));
+
+        var unread = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(("The open tasks of acme/rocket cannot be read: the count is `null`.", false), (unread.Message, unread.MayPass));
+    }
+
+    // A line that is short of a field, or whose blockers or parts are not numbers, would leave a task out of the queue.
+    [Fact]
+    public async Task LinesThatCannotBeReadAsTasksAreAnErrorThatStays()
+    {
+        const string Readable = "12\tAdd\thttps://github.com/acme/rocket/issues/12\tTodo\t\t\t\n";
+        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t2\n{Readable}13\tShort\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\n"));
+        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t3\n{Readable}13\tA\thttps://github.com/acme/rocket/issues/13\tTodo\t4,x\t\t\n14\tB\thttps://github.com/acme/rocket/issues/14\tTodo\t\tnull\t\n"));
+
+        var one = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
+        var two = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(("The open tasks of acme/rocket cannot be read: `gh` printed a line that cannot be read as a task.", false), (one.Message, one.MayPass));
+        Assert.Equal("The open tasks of acme/rocket cannot be read: `gh` printed 2 lines that cannot be read as tasks.", two.Message);
     }
 
     [Fact]

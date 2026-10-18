@@ -31,12 +31,16 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
         string[] filter = [];
         if (milestone is not null)
         {
-            // GitHub filters issues by the number of a milestone, not by its title.
+            // GitHub filters issues by the number of a milestone, not by its title. The title is found as the choice of
+            // the user is checked: as it is written, or, when no title is written so, the only one that differs in the
+            // case of its letters.
             var listed = await AskAsync(
                 ["api", $"repos/{repository}/milestones?state=open&per_page=100", "--jq", """.[] | "\(.number)\t\(.title)" """.Trim()],
                 $"The milestones of {repository} cannot be read.",
                 cancellationToken);
-            var number = Lines(listed).Select(line => line.Split('\t', 2)).FirstOrDefault(fields => fields.Length == 2 && fields[1] == milestone)?[0]
+            var open = Lines(listed).Select(line => line.Split('\t', 2)).Where(fields => fields.Length == 2).ToList();
+            var number = (open.FirstOrDefault(fields => fields[1] == milestone)
+                    ?? (open.Where(fields => fields[1].Equals(milestone, StringComparison.OrdinalIgnoreCase)).ToList() is [var only] ? only : null))?[0]
                 ?? throw new TrackerException($"The milestone “{milestone}” is not open any more.");
             filter = ["-f", $"milestone={number}"];
         }
@@ -53,21 +57,34 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
             $"The tasks of {repository} cannot be read.",
             cancellationToken);
 
+        // A line that cannot be read is not passed over: a queue without a task that nobody knows is missing is worse
+        // than a run that stops and says what it could not read, as when the tool prints otherwise than it did.
         var tasks = new List<QueueTask>();
+        var unread = 0;
         foreach (var fields in Lines(answer).Select(line => line.Split('\t')))
         {
             if (fields is ["total", var total])
             {
-                if (int.Parse(total, CultureInfo.InvariantCulture) > Page)
+                if (!int.TryParse(total, NumberStyles.None, CultureInfo.InvariantCulture, out var count))
+                    throw new TrackerException($"The open tasks of {repository} cannot be read: the count is `{total}`.");
+                if (count > Page)
                     throw new TrackerException($"{(milestone is null ? repository : $"The milestone “{milestone}”")} has {total} open tasks, and the queue reads only the first {Page}.");
             }
-            else if (fields.Length >= 7 && int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+            else if (fields.Length >= 7 && int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                && Numbers(fields[4]) is { } blockedBy && Numbers(fields[5]) is { } parts)
             {
                 var named = Unescaped(fields[3]);
                 var of = Unescaped(fields[6]);
-                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(7).Select(Unescaped)], statuses.Of(named), named, Numbers(fields[4]), Numbers(fields[5]), of.Length == 0 ? null : of));
+                tasks.Add(new QueueTask(number, Unescaped(fields[1]), fields[2], [.. fields.Skip(7).Select(Unescaped)], statuses.Of(named), named, blockedBy, parts, of.Length == 0 ? null : of));
+            }
+            else
+            {
+                unread++;
             }
         }
+
+        if (unread > 0)
+            throw new TrackerException($"The open tasks of {repository} cannot be read: `gh` printed {(unread == 1 ? "a line" : $"{Text(unread)} lines")} that cannot be read as {(unread == 1 ? "a task" : "tasks")}.");
 
         return tasks;
     }
@@ -228,8 +245,19 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
     static IEnumerable<string> Lines(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).Where(line => line.Length > 0);
 
-    static List<int> Numbers(string text) =>
-        [.. text.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(number => int.Parse(number, CultureInfo.InvariantCulture))];
+    // The numbers of a field, as `4,9`; null when one of them is not a number.
+    static List<int>? Numbers(string text)
+    {
+        var numbers = new List<int>();
+        foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+                return null;
+            numbers.Add(number);
+        }
+
+        return numbers;
+    }
 
     static string Text(int number) => number.ToString(CultureInfo.InvariantCulture);
 
