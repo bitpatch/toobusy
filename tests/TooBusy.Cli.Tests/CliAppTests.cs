@@ -3604,7 +3604,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Equal((3, "A run is going on: between tasks" + Environment.NewLine, ""), meanwhile);
         Assert.Equal((0, "No run is going on." + Environment.NewLine, ""), Look());
-        Assert.Equal([".gitignore"], new DirectoryInfo(Path.Combine(folder.FullName, ".toobusy", "local")).GetFiles().Select(file => file.Name));
+        // The lock that the sign was put up under stays.
+        Assert.Equal([".gitignore", "run.lock"], new DirectoryInfo(Path.Combine(folder.FullName, ".toobusy", "local")).GetFiles().Select(file => file.Name).Order());
 
         (int Exit, string Output, string Error) Look()
         {

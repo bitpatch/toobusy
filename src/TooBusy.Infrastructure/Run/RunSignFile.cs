@@ -10,25 +10,32 @@ namespace TooBusy.Infrastructure.Run;
 // run, when that process started, when the run did, and what the run says of itself. A sign counts while its process
 // lives: what a run that died left behind says nothing, and neither does a file that cannot be read. The number of a
 // process is given anew after a while, so the process must have started when the sign says it did. `process` is the
-// process of this run, `startOf` says when a process started, null for one that does not live, and `now` is the time.
-// A sign that cannot be written or taken down is a LocalStateException.
-public sealed class RunSignFile(string folder, int process, Func<int, ProcessStart?> startOf, Func<DateTimeOffset> now) : IRunSign
+// process of this run, `startOf` says when a process started, null for one that does not live, `now` is the time, and
+// `pause` waits while another run holds the sign. A sign that cannot be written or taken down is a LocalStateException.
+public sealed class RunSignFile(string folder, int process, Func<int, ProcessStart?> startOf, Func<DateTimeOffset> now, Action<TimeSpan> pause) : IRunSign
 {
     const string Stamp = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
 
     // Two readings of the start of one process differ by less than this.
     static readonly TimeSpan Slack = TimeSpan.FromSeconds(2);
 
+    // A run that another one holds the sign against waits a moment, as many times as this, two seconds in all: putting
+    // a sign up takes a few milliseconds.
+    const int Waits = 100;
+    static readonly TimeSpan Moment = TimeSpan.FromMilliseconds(20);
+
     // When this run and its process started, as they stand on its sign.
     DateTimeOffset since;
     DateTimeOffset? processStarted;
 
     public RunSignFile(string folder)
-        : this(folder, Environment.ProcessId, StartOf, () => DateTimeOffset.UtcNow)
+        : this(folder, Environment.ProcessId, StartOf, () => DateTimeOffset.UtcNow, Thread.Sleep)
     {
     }
 
     string Path => System.IO.Path.Combine(folder, "run.json");
+
+    string Lock => System.IO.Path.Combine(folder, "run.lock");
 
     // The run that goes on in the working copy; null when none does.
     public GoingRun? Read()
@@ -70,9 +77,13 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
         }
     }
 
-    // The sign of a run of this very process is its own: a run of the menu comes after another one of the same tool.
+    // The sign of a run of this very process is its own: a run of the menu comes after another one of the same tool. The
+    // run looks at the sign and puts its own up while it holds the lock of the sign, so that two runs started together
+    // cannot both find none, or one that died, and both put theirs up: the one that comes second finds the sign of the
+    // first.
     public RunSign? Raise(RunSign sign)
     {
+        using var held = Hold();
         if (Read() is { } going && going.Process != process)
             return going.Sign;
 
@@ -83,6 +94,29 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
     }
 
     public void Change(RunSign sign) => Write(sign);
+
+    // The lock of the sign, `run.lock`, which one process holds at a time and which the operating system takes back from
+    // a process that ended, however it ended. The file is never taken down: a lock that is taken down and made anew can
+    // be held by two runs at once, one of the old file and one of the new.
+    FileStream Hold()
+    {
+        for (var waited = 0; ; waited++)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                return new FileStream(Lock, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (waited < Waits)
+            {
+                pause(Moment);
+            }
+            catch (Exception unheld) when (unheld is IOException or UnauthorizedAccessException)
+            {
+                throw new LocalStateException($"the sign of the run cannot be written: {unheld.Message}", unheld);
+            }
+        }
+    }
 
     // Only the sign of this process is taken down.
     public void Lower()

@@ -40,7 +40,24 @@ public sealed class RunSignFileTests : IDisposable
 
         sign.Change(Working with { Phase = RunPhase.WaitingForOwner });
         Assert.Equal(RunPhase.WaitingForOwner, Sign(200).Read()?.Sign.Phase);
-        Assert.Equal(["run.json"], root.GetFiles().Select(file => file.Name));
+        Assert.Equal(["run.json", "run.lock"], root.GetFiles().Select(file => file.Name).Order());
+    }
+
+    [Fact]
+    public void TheSignIsWrittenWithTheProcessAndTheTimes()
+    {
+        var sign = Sign(100);
+        sign.Raise(Working);
+
+        Assert.Equal(
+            """{"process":100,"processStarted":"2030-01-01T09:00:00.0000000Z","since":"2030-01-01T10:00:00.0000000Z","phase":"working","task":12,"title":"Export the orders as a file","url":"https://github.com/acme/rocket/issues/12","open":"claude attach 1a2b3c4d"}""",
+            File.ReadAllText(Path.Combine(root.FullName, "run.json")));
+
+        sign.Change(new RunSign(RunPhase.WaitingForLimit) { Until = Morning + TimeSpan.FromHours(2) });
+
+        Assert.Equal(
+            """{"process":100,"processStarted":"2030-01-01T09:00:00.0000000Z","since":"2030-01-01T10:00:00.0000000Z","phase":"waiting-for-limit","until":"2030-01-01T11:00:00.0000000Z"}""",
+            File.ReadAllText(Path.Combine(root.FullName, "run.json")));
     }
 
     [Fact]
@@ -67,7 +84,9 @@ public sealed class RunSignFileTests : IDisposable
         sign.Lower();
 
         Assert.Null(Sign(200).Read());
-        Assert.Empty(root.GetFiles());
+
+        // The lock of the sign stays.
+        Assert.Equal(["run.lock"], root.GetFiles().Select(file => file.Name));
     }
 
     [Fact]
@@ -81,6 +100,52 @@ public sealed class RunSignFileTests : IDisposable
         // The sign it found is not its own to take down.
         second.Lower();
         Assert.Equal(new GoingRun(100, Morning + TimeSpan.FromHours(1), Working), Sign(200).Read());
+    }
+
+    // The first run has looked and found no sign that counts; before it puts its own up, the second one starts. The
+    // second waits for the first and finds its sign instead of putting up one of its own.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OfTwoRunsStartedTogetherOnlyOnePutsItsSignUp(bool overOneThatDied)
+    {
+        if (overOneThatDied)
+        {
+            living[300] = Morning;
+            Sign(300).Raise(Working);
+            living.Remove(300);
+        }
+
+        using var waits = new ManualResetEventSlim();
+        Task<RunSign?>? second = null;
+        var first = new RunSignFile(root.FullName, 100, id =>
+        {
+            if (id == 100 && second is null)
+            {
+                second = Task.Run(() => Sign(200, moment => { waits.Set(); Thread.Sleep(moment); }).Raise(new RunSign(RunPhase.Preparing)), TestContext.Current.CancellationToken);
+                Assert.True(waits.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            }
+
+            return Start(id);
+        }, () => Morning + TimeSpan.FromHours(1), Thread.Sleep);
+
+        Assert.Null(first.Raise(Working));
+
+        Assert.Equal(Working, await second!);
+        Assert.Equal(100, Sign(200).Read()?.Process);
+    }
+
+    [Fact]
+    public void ASignHeldForTooLongCannotBePutUp()
+    {
+        using var held = File.Open(Path.Combine(root.FullName, "run.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var waited = 0;
+
+        var stuck = Assert.Throws<LocalStateException>(() => Sign(100, _ => waited++).Raise(Working));
+
+        Assert.StartsWith("the sign of the run cannot be written: ", stuck.Message, StringComparison.Ordinal);
+        Assert.Equal(100, waited);
+        Assert.False(File.Exists(Path.Combine(root.FullName, "run.json")));
     }
 
     [Fact]
@@ -149,6 +214,8 @@ public sealed class RunSignFileTests : IDisposable
     }
 
     // The sign as the process with that number has it; the time is an hour after the morning.
-    RunSignFile Sign(int process) =>
-        new(root.FullName, process, id => living.TryGetValue(id, out var started) ? new ProcessStart(started) : null, () => Morning + TimeSpan.FromHours(1));
+    RunSignFile Sign(int process, Action<TimeSpan>? pause = null) =>
+        new(root.FullName, process, Start, () => Morning + TimeSpan.FromHours(1), pause ?? Thread.Sleep);
+
+    ProcessStart? Start(int process) => living.TryGetValue(process, out var started) ? new ProcessStart(started) : null;
 }

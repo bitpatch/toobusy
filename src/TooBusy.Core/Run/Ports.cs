@@ -250,7 +250,8 @@ public sealed record TaskRecord(int Number, SessionTrace Session, RecordState St
 // throws LocalStateException.
 public interface IRunSign
 {
-    // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given.
+    // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given: of two runs
+    // that put theirs up at the same moment, one is given the sign of the other.
     RunSign? Raise(RunSign sign);
 
     // Says anew what the run is doing.
