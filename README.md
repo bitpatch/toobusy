@@ -1,209 +1,50 @@
 # toobusy
 
-A command-line tool that works through the tasks of your project while you are too busy to do it yourself. It reads the task queue from your tracker, takes the tasks one after another according to your rules, and has an AI coding assistant do each of them in your working copy.
+Create tasks in GitHub Projects, and `toobusy` takes them one by one and hands them to your AI assistant. You can choose which tasks exactly will be done with `toobusy`.
 
-## Status
+For now `GitHub` and `Claude Code` are supported.
 
-toobusy is in development, and there is no release yet: it is built from source.
+Unfortunately, I work on a Mac, so I have only tested it there. If anyone helps with Windows and Linux, I will be grateful.
 
-What works today:
+## Installation
 
-- **Setting a project up**: `toobusy init` asks what it needs and writes the settings, on a screen or by options alone.
-- **Setting it up with your assistant**: `toobusy init --assist` tells the assistant how, one step at a time, and changes nothing itself.
-- **Checking the machine**: `toobusy doctor` says whether everything a run needs is there, and how to fix what is not.
-- **Looking at the queue**: `toobusy queue` shows which tasks a run would take, which open later and which are held, and why, without running anything.
-- **Knowing that a run goes on**: `toobusy status` says whether one works in the working copy right now, and on which task, so that nobody commits in the middle of it.
-- **A run** with Claude Code over GitHub Issues, with or without a GitHub Projects board: tasks one after another, a session that waits for you and is told to go on alone, usage limits, stopping, and going on with the same session after any interruption.
+There is no release yet, but it is coming soon, and then this is where it will say how to install. For now, build from source: `dotnet publish src/TooBusy.Cli -c Release -r osx-arm64`, you need the .NET 10 SDK.
 
-What does not, yet:
-
-- No installer and no released binaries.
-- GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
-- Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The messages a session gets are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
-
-## The idea
-
-1. Get the `toobusy` binary.
-2. Run `toobusy init` in a project folder. It asks about the board, the labels and the skill a session starts with, and writes `.toobusy/settings.toml`; nothing is written by hand.
-3. Commit that file, so that everyone who clones the project has the same settings.
-4. Run `toobusy run` and leave. It takes tasks until none is left, waits out usage limits, and stops when something needs you.
-
-Read more in [docs/IDEA.md](docs/IDEA.md), [docs/SPEC.md](docs/SPEC.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Getting the binary
-
-It takes the [.NET 10 SDK](https://dotnet.microsoft.com/download) and, on macOS, the command line tools of Xcode (`xcode-select --install`). In a clone of this repository:
-
-```sh
-dotnet publish src/TooBusy.Cli -c Release -r osx-arm64
-```
-
-The result is one native file that needs no runtime, `src/TooBusy.Cli/bin/Release/net10.0/osx-arm64/publish/toobusy`. Copy it to a folder that is on your `PATH`, and check it:
-
-```sh
-toobusy --version
-```
-
-For another machine put its [runtime identifier](https://learn.microsoft.com/dotnet/core/rid-catalog) in the place of `osx-arm64`, here and in the path.
-
-## Trying it without changing anything
-
-`--demo` is an option of every command: it shows the tool over made-up data, and nothing is made, linked, written or remembered. Run the demos in a terminal, inside any git repository:
-
-```sh
-toobusy --demo           # the whole tool: the menu, and from it a run, the choices and the settings
-toobusy init --demo      # the setup, question by question
-toobusy run --demo       # a run over made-up tasks and made-up sessions
-toobusy queue --demo     # the queue of that run: what is ready, what opens later, what is held
-toobusy status --demo    # what is said of a run that goes on
-toobusy doctor --demo    # the checks over a made-up machine that has it all
-```
-
-The bar of the screen says `demo`. A demo of a run takes about a minute.
-
-## Setting a project up
-
-A project is a git repository whose `origin` remote is a GitHub repository. Its tasks are the issues of that repository.
-
-### What is needed on the machine
+### What you need on the machine
 
 - [`git`](https://git-scm.com/downloads).
 - [`gh`](https://cli.github.com/), the GitHub CLI, logged in: `gh auth login`. For a project with a board the token needs the `project` scope: `gh auth refresh -s project`.
-- [Claude Code](https://claude.com/claude-code), logged in: run `claude`, then `/login`. Run `claude` once in the folder of the project as well, so that it trusts the folder.
+- [Claude Code](https://claude.com/claude-code), logged in: run `claude`, then `/login`. Run `claude` once in the project folder too, so that it trusts the folder.
 
-### `toobusy init`
-
-Run it in a terminal, in the folder of the project. It asks:
-
-| Question | What it is |
-|---|---|
-| Project | the GitHub Projects board that keeps the statuses of the tasks: one of yours, one by its address, a new one, or none |
-| Todo status, In Progress status, Done status | which status of the board is which; asked only of a board that does not call them as GitHub does |
-| Blocking labels | a task with any of these labels is never taken |
-| Labels to take | a task needs one of these labels; none chosen means any task |
-| Manual label | the label a run puts on a task that waits for you; such a task is not taken while it has it. `manual` is proposed |
-| Interrupt label | the label a run puts on a task it had to stop; such a task is taken first. `interrupted` is proposed |
-| Skill | the skill of your project a session starts with, by its name; leave it empty for none. `task-auto` is proposed |
-
-The last page shows what saving will do. Until you choose `Save and exit` nothing is changed anywhere. Saving writes `.toobusy/settings.toml` and does on GitHub what you asked for: it makes a new board, links the board to the repository, and makes the two labels when the repository does not have them. It never touches the working copy or git.
-
-A run knows a board by three statuses: it takes a task only from the first, moves it to the second before its session and to the third when it is done. While the board lacks a status the settings name, `toobusy doctor` fails and no run starts. `toobusy init --no-board` works without a board.
-
-The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
-
-Four settings are not asked for by `init`: the two commands a run runs around every task, for what must not depend on a session remembering it, the branch the tasks are done on, and the permission mode of Claude Code a session works in. The options `--before`, `--after`, `--branch` and `--permission-mode` of `init` set them, and `--no-before`, `--no-after` and `--no-branch` take them away; the last page shows what changes before it is saved.
-
-```toml
-[task]
-before = "scripts/dev.sh ports free"    # before a task is taken; when it fails, the run stops and the task is not touched
-after = "scripts/dev.sh server stop"    # after the session of a task, however the task went
-
-[workspace]
-branch = "develop"    # the working copy must be on it, and it is brought up to date with its upstream before a task
-
-[assistant]
-type = "claude-code"
-permission-mode = "dontAsk"    # `auto` when it is not named
-```
-
-Each command is optional, and a line for the shell that runs at the root of the working copy; the task is in its environment, as `TOOBUSY_TASK`, `TOOBUSY_TASK_TITLE` and `TOOBUSY_TASK_URL`. Without a branch, a run does the tasks on whatever is checked out, as it stands. Nobody answers the prompts of a session, so it works in a mode that goes on without an answer and still checks what it does: `auto`, where a model of Claude Code looks at every action before it is done, or `dontAsk`, where whatever the settings of Claude Code in your project do not allow is refused. What a session is allowed and refused in particular stays in the settings of Claude Code in your project, `.claude/settings.json`. The specification tells the rest: [the branch of the tasks](docs/SPEC.md#the-branch-of-the-tasks) and [the commands of the project](docs/SPEC.md#the-commands-of-the-project).
-
-Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way. `Settings` in the menu of `toobusy` changes them one at a time, the four that `init` does not ask for among them.
-
-Without questions, as in a script: `toobusy init --yes` takes what the options say and keeps every other setting as it is. `toobusy init --help` lists the options.
-
-### With an assistant
-
-Your assistant can set the project up with you. Tell it, in the folder of the project:
-
-> Set toobusy up here: run `toobusy init --assist` and follow it.
-
-The command prints a walk through the setup for the assistant, one step at a time, and changes nothing itself; `toobusy init --assist 3` prints step 3 alone. The assistant asks you whatever is yours to decide, starts no run, and commits nothing before you agree. The same walk changes a setup that exists. In a project that ran its tasks without you before, with a script of its own, it has the assistant fit the skill and the instructions of that old way to toobusy, and asks you what is taken out of the project: nothing is deleted without you.
-
-### `toobusy doctor`
+You can also run the command
 
 ```sh
 toobusy doctor
 ```
 
-It checks everything a run needs: `git`, `gh` and Claude Code with their logins, the settings, the repository, the board and its statuses, the labels and the skill. It prints a line per check and, under a failed one, the command that fixes it. It changes nothing, and exits with 0 when nothing failed. One thing it does not check is that Claude Code trusts the folder: a run says so when it cannot start its first session.
+It checks everything a run needs: `git`, `gh` and `Claude Code` with their logins, the settings, the repository, the board and its statuses, the labels and the skill.
 
-## Starting a run
+If you run into trouble, ask your assistant to run toobusy doctor and help you figure out the problem.
 
-Three choices are yours and not the project's: the milestone whose tasks are taken, and the model and the effort they are done with. They are kept on your machine and are not committed. `toobusy` without a command asks for whatever is missing and then opens its menu, where `Run` starts a run:
+## Getting started
 
-```sh
-toobusy
+The most convenient thing is that your AI assistant can set it up for you itself. Just ask, for example, Claude Code. Everything needed for the setup is already in the tool itself: `toobusy about` tells how it works, and `toobusy init --assist` walks the assistant through the setup step by step. So you can just type a message like this
+
+```
+Help me set up toobusy for my project. First run toobusy about to figure out how it works, then run toobusy init --assist and follow it step by step.
 ```
 
-The same from the command line:
+To me, this is the most preferable way to set it up. You can give more details in your prompt or ask about what the tool can do. The assistant will write the special skill for handling tasks in automatic mode itself along the way, `init --assist` leads to it.
 
-```sh
-toobusy milestone v1.0.0    # an open milestone by its title; `--none` takes tasks whatever their milestone
-toobusy model opus          # a model by its name; `--default` leaves the choice to Claude Code
-toobusy effort high         # low, medium, high, xhigh or max
-toobusy run
-```
+If something goes wrong, you can always give the logs to your assistant and ask it to set everything up properly. And if you find a bug, I would be glad if you file it in the issues of the repository and attach the logs there.
 
-Either way a run starts with the checks of `toobusy doctor`: while one fails it does not start, and says what failed and how to fix it.
+If you want to set it up yourself, run `toobusy init` in your project folder.
 
-A run takes tasks until none is left. Three options of `toobusy run` make it shorter:
+Once everything is ready, just run the `toobusy` command in your project folder. You will see how many tasks can be done in automatic mode, and choose Run.
 
-```sh
-toobusy run --task 12             # task #12 and no other; a task that a run would not take now is not started, and the run says why
-toobusy run --max 3               # three tasks at most, then it stops as after `stop`
-toobusy run --skip-label design   # not the tasks with the label, nor those that wait for them; give it again, or several names separated by commas
-```
+Tasks are taken from the milestone you chose, or all of them if you do not specify one.
 
-`Skip labels` in the menu of `toobusy` chooses the same for the runs it opens, until `toobusy` is closed.
-
-`toobusy queue` shows what a run would do before you start one, and changes nothing:
-
-```text
-Ready
-  #71 Paint the windows yellow         interrupted
-  #12 Export the orders as a file
-
-Later
-  #20 Deploy                           waits for #12
-
-Held
-  #9  Draft of the new page            it has the draft label
-```
-
-`toobusy queue --json` prints the same lists for an assistant or a script.
-
-`toobusy status` says whether a run is going on in the working copy, and changes nothing:
-
-```text
-A run is going on: #12 Export the orders as a file · claude attach 1a2b3c4d
-```
-
-A run works in the working copy itself, so a commit made beside it lands in the middle of its task. `status` exits with 3 while a run goes on and with 0 when none does: `toobusy status && git commit` commits only then. Tell the assistant you work with to look before it commits, and not the sessions of a run, which commit while their run goes on; `toobusy status --json` prints the same for an assistant.
-
-What to know before the first run:
-
-- **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the manual label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the Todo status of the settings, `Todo` when they name none.
-- **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own.
-- **Each task gets a session of Claude Code of its own**, a background one in the permission mode of the settings, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
-- **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`), and starts with the skill of your project when the settings name one: it changes the code, checks it, commits and pushes. toobusy keeps the task: it moves it on the board, assigns it to you, writes the report of the session into it as a comment, and closes it.
-- **A task that needs you is not guessed at.** What can be done without you is done, and of what is left the session makes a new task with the manual label and the questions for you. Answer in it, take the label off, and a later run takes it.
-- **A task that went wrong stops the run.** When its session failed, did not say how the task went, or left changes or commits that are not pushed, the task gets the manual label and a comment that says what went wrong and how its session is opened. No run takes it while it has the label: look at it, take the label off, and a later run takes it.
-- **GitHub away for a moment does not stop the run.** A call of the tracker that gets no answer, and a fetch of the branch, is made again after 10 seconds and after 30 more; only the third failure stops the run.
-- **Stopping.** Press `/` during a run for its menu: `stop` finishes the current task and takes no other, `abort` stops as soon as possible with nothing committed. Ctrl+C twice kills the run; the next run goes on with the same session.
-
-`toobusy about` tells how a run works in full, with every message a session gets, word for word. The rest is in [docs/SPEC.md](docs/SPEC.md#running-the-tasks): which tasks are held and why, how a task ends, usage limits, and going on after an interruption.
-
-## Working on toobusy
-
-```sh
-dotnet build
-dotnet test
-dotnet run --project src/TooBusy.Cli -- --help
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Again, if you run into trouble, ask your assistant to help you figure this tool out.
 
 ## License
 
