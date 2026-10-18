@@ -6,10 +6,12 @@ using TooBusy.Core.Run;
 namespace TooBusy.Assistants.ClaudeCode;
 
 // What a session did, read from the conversation Claude Code writes as it goes: a line of JSON for everything said
-// and done. The file is read on from where the reading stopped, whole lines only, and what was written before the
-// run took the session is left out, so that a session that goes on does not count for what it said before. Its plan
-// is the one thing that is read from the start: a session that goes on has the plan it had.
-public sealed class Transcript(string path, DateTimeOffset since, string root)
+// and done. The file is read on from where the reading stopped, by its bytes, whole lines only, and what was written
+// before the run took the session is left out, so that a session that goes on does not count for what it said
+// before. Its plan is the one thing that is read from the start: a session that goes on has the plan it had.
+//
+// The conversation is opened anew for every read; a test gives it what it opens.
+public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string root)
 {
     // Tools with which a session asks instead of doing: they are no steps of its own.
     static readonly string[] Asking = ["AskUserQuestion", "ExitPlanMode"];
@@ -27,8 +29,15 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
     readonly Dictionary<string, string> planning = [];
     readonly List<(string Id, PlanStep State)> steps = [];
 
+    // Where the reading stopped, in bytes, and the bytes of the line that was not written to its end by then.
     long position;
-    string rest = "";
+    byte[] rest = [];
+
+    // The conversation in the file Claude Code writes it to.
+    public Transcript(string path, DateTimeOffset since, string root)
+        : this(() => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), since, root)
+    {
+    }
 
     // What the session is doing: its last step.
     public string? Step { get; private set; }
@@ -62,30 +71,34 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
     }
 
     // Reads what was written since the last time. A file that is not there yet, or cannot be read now, has nothing new.
+    // The reading goes on from the last byte it read: Claude Code may write on while the file is read, and what it
+    // writes then is read the next time.
     public void Read()
     {
-        string added;
+        byte[] added;
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = open();
             if (stream.Length < position)
-                (position, rest) = (0, "");
+                (position, rest) = (0, []);
 
             stream.Seek(position, SeekOrigin.Begin);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            added = reader.ReadToEnd();
-            position = stream.Length;
+            using var read = new MemoryStream();
+            stream.CopyTo(read);
+            added = read.ToArray();
         }
         catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException)
         {
             return;
         }
 
-        // The last line may be half written: it waits for its end.
-        var lines = (rest + added).Split('\n');
-        rest = lines[^1];
-        foreach (var line in lines[..^1])
-            Take(line);
+        // The last line may be half written, to the middle of a character even: its bytes wait for its end.
+        position += added.Length;
+        var unread = rest.Length == 0 ? added : [.. rest, .. added];
+        var lines = unread.AsSpan();
+        for (int end; (end = lines.IndexOf((byte)'\n')) >= 0; lines = lines[(end + 1)..])
+            Take(Encoding.UTF8.GetString(lines[..end]));
+        rest = lines.ToArray();
     }
 
     void Take(string line)

@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Processes;
@@ -364,20 +366,52 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(step, (await session.LookAsync(TestContext.Current.CancellationToken)).Step);
     }
 
+    // The line is cut in the middle of a character, which is read whole all the same.
     [Fact]
     public async Task ALineThatIsHalfWrittenWaitsForItsEnd()
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
         claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
-        var line = Said("Did it.");
-        File.AppendAllText(folders.Transcript(Conversation), line[..40]);
+        var line = Encoding.UTF8.GetBytes(Said("Did it … all of it.") + "\n");
+        var cut = line.AsSpan().LastIndexOf("…"u8) + 1;
+        File.AppendAllBytes(folders.Transcript(Conversation), line[..cut]);
 
         Assert.Null((await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
 
-        File.AppendAllText(folders.Transcript(Conversation), line[40..] + "\n");
+        File.AppendAllBytes(folders.Transcript(Conversation), line[cut..]);
 
-        Assert.Equal("Did it.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
-        Assert.Equal("Did it.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+        Assert.Equal("Did it … all of it.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+        Assert.Equal("Did it … all of it.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+    }
+
+    // Claude Code may write on while the conversation is read: what it writes then is read the next time.
+    [Fact]
+    public void WhatIsWrittenWhileTheConversationIsReadIsReadTheNextTime()
+    {
+        var (before, during) = (Said("Working on it.") + "\n", Said("Did it.") + "\n");
+        var reads = 0;
+        var transcript = new Transcript(() => reads++ == 0 ? new WrittenOn(before, during) : new MemoryStream(Encoding.UTF8.GetBytes(before + during)), clock.Now, "/work/rocket");
+
+        transcript.Read();
+        Assert.Equal("Working on it.", transcript.Reply);
+
+        transcript.Read();
+        Assert.Equal("Did it.", transcript.Reply);
+    }
+
+    // A conversation that is shorter than what was read of it was written anew: it is read from its start, and what
+    // was half written before is gone.
+    [Fact]
+    public async Task AConversationThatShrankIsReadFromItsStart()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        File.AppendAllText(folders.Transcript(Conversation), Said("Working on it, step by step.") + "\n" + Said("Half")[..40]);
+        Assert.Equal("Working on it, step by step.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+
+        File.WriteAllText(folders.Transcript(Conversation), Said("On it.") + "\n");
+
+        Assert.Equal("On it.", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
     }
 
     [Fact]
@@ -799,9 +833,12 @@ public sealed class ClaudeCodeTests : IDisposable
         + (waitingFor is null ? "" : $",\"waitingFor\":\"{waitingFor}\"")
         + "}";
 
+    // Claude Code writes a character that is not ASCII as it is, not as an escape.
+    static readonly JsonSerializerOptions AsWritten = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     static string Said(string text, string at = "2030-01-01T09:00:05Z", string model = "claude-opus", string extra = "", int tokens = 10) =>
         "{" + $"\"type\":\"assistant\",\"timestamp\":\"{at}\"{extra},\"message\":" + "{" + $"\"model\":\"{model}\",\"content\":["
-        + "{\"type\":\"thinking\",\"thinking\":\"…\"},{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(text) + "}],"
+        + "{\"type\":\"thinking\",\"thinking\":\"…\"},{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(text, AsWritten) + "}],"
         + "\"usage\":{" + $"\"input_tokens\":{tokens},\"cache_read_input_tokens\":20000,\"cache_creation_input_tokens\":1500" + "}}}";
 
     // A call of a tool that is known by a name, and what Claude Code answered to it.
@@ -840,6 +877,35 @@ sealed class FakeClaude : IProcessRunner
     }
 
     public IProcessRunner Inside(string folder) => this;
+}
+
+// A conversation that Claude Code writes on while it is read: what it writes is added once a read has come to the end
+// of what was written before. Whatever way the stream is read, it is read through here.
+sealed class WrittenOn : MemoryStream
+{
+    readonly byte[] during;
+    bool written;
+
+    public WrittenOn(string before, string during)
+    {
+        Write(Encoding.UTF8.GetBytes(before));
+        Position = 0;
+        this.during = Encoding.UTF8.GetBytes(during);
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var read = base.Read(buffer, offset, count);
+        if (read == 0 && !written)
+        {
+            written = true;
+            var reached = Position;
+            Write(during);
+            Position = reached;
+        }
+
+        return read;
+    }
 }
 
 // A clock that goes on only when it is waited on or told to.
