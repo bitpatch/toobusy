@@ -134,7 +134,7 @@ Nobody answers the prompts of a session, so it works in a mode that goes on with
 
 Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way.
 
-Without questions, as in a script: `toobusy init --yes` takes what the options say and, for the rest, what the setup proposes. `toobusy init --help` lists the options.
+Without questions, as in a script: `toobusy init --yes` takes what the options say and keeps every other setting as it is, or in a first setup takes what the setup proposes, so `toobusy init --before "scripts/dev.sh ports free" -y` changes that command alone. `toobusy init --help` lists the options.
 
 ### With an assistant
 

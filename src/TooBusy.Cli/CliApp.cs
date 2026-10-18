@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Help;
 using System.CommandLine.Invocation;
 using System.Globalization;
 using System.Reflection;
@@ -31,7 +32,10 @@ public static class CliApp
         var root = new RootCommand($"Runs the tasks of your tracker one after another with AI coding assistants. {ForAnAssistant}");
         root.Options.OfType<VersionOption>().Single().Action = new PrintVersion();
         root.Options.Add(demo);
-        root.Subcommands.Add(CreateInitCommand(context, demo));
+        var init = CreateInitCommand(context, demo);
+        var help = root.Options.OfType<HelpOption>().Single();
+        help.Action = new HelpWithExamples((SynchronousCommandLineAction)help.Action!, init, InitExamples);
+        root.Subcommands.Add(init);
         root.Subcommands.Add(CreateMilestoneCommand(context, demo));
         root.Subcommands.Add(CreateModelCommand(context, demo));
         root.Subcommands.Add(CreateEffortCommand(context, demo));
@@ -75,6 +79,28 @@ public static class CliApp
         }
     }
 
+    // What `--help` does: the help of System.CommandLine, and after the help of one command the examples of it.
+    sealed class HelpWithExamples(SynchronousCommandLineAction help, Command command, string examples) : SynchronousCommandLineAction
+    {
+        public override int Invoke(ParseResult parseResult)
+        {
+            var exit = help.Invoke(parseResult);
+            if (parseResult.CommandResult.Command == command)
+                parseResult.InvocationConfiguration.Output.Write(examples);
+            return exit;
+        }
+    }
+
+    // How a setup that exists is changed from the command line, as the list of the options does not show it.
+    static readonly string InitExamples = string.Join(Environment.NewLine,
+        "Examples:",
+        "  Set the command before a task; the other settings stay as they are:",
+        "    toobusy init --before \"scripts/dev.sh ports free\" -y",
+        "  Take the command after a task away:",
+        "    toobusy init --no-after -y",
+        "",
+        "");
+
     static Command CreateInitCommand(CliContext context, Option<bool> demo)
     {
         var board = new Option<string?>("--board") { Description = "The GitHub project of the tasks, by the address of its board or of any page of it.", HelpName = "URL" };
@@ -103,14 +129,14 @@ public static class CliApp
             Description = "The permission mode of Claude Code a session is started in: `auto`, where a model of Claude Code looks at every action, or `dontAsk`, where whatever the settings of Claude Code do not allow is refused. `auto` while the settings name none.",
             HelpName = "mode",
         };
-        var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
+        var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say, keep every other setting as it is, or in a first setup what it proposes, and save." };
         var assist = new Option<string?>("--assist")
         {
             Description = "Tell an assistant how to set the project up, one step at a time: the introduction with the first step, or the step of this number. It changes nothing, and goes with no other option.",
             HelpName = "step",
             Arity = ArgumentArity.ZeroOrOne,
         };
-        var command = new Command("init", $"Sets the project up: asks what it needs and writes the settings. {ForAnAssistant}")
+        var command = new Command("init", $"Sets the project up or changes its settings: asks what it needs and writes them. `--before`, `--after`, `--branch` and `--permission-mode` are not asked: give them as options. {ForAnAssistant}")
         {
             board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes, assist,
         };

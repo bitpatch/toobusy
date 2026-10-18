@@ -2404,6 +2404,31 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task TheHelpOfInitSaysHowASettingThatIsNotAskedIsChangedAndEndsWithExamples()
+    {
+        var (exit, output, _) = await RunAsync("init", "--help");
+        var (_, run, _) = await RunAsync("run", "--help");
+        var said = Regex.Replace(output, @"\s+", " ");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Sets the project up or changes its settings", said, StringComparison.Ordinal);
+        Assert.Contains("`--before`, `--after`, `--branch` and `--permission-mode` are not asked: give them as options.", said, StringComparison.Ordinal);
+        Assert.Contains("keep every other setting as it is", said, StringComparison.Ordinal);
+        Assert.EndsWith(
+            string.Join(Environment.NewLine,
+                "Examples:",
+                "  Set the command before a task; the other settings stay as they are:",
+                "    toobusy init --before \"scripts/dev.sh ports free\" -y",
+                "  Take the command after a task away:",
+                "    toobusy init --no-after -y",
+                "",
+                ""),
+            output,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Examples:", run, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WithYesAndWithoutATerminalAFirstSetupTakesWhatIsProposedAndWritesIt()
     {
         GitRepository();
