@@ -59,6 +59,28 @@ public sealed class RunStateFileTests : IDisposable
         Assert.False(File.Exists(Path.Combine(folder, "session.json")));
     }
 
+    [Fact]
+    public void ARecordThatCannotBeWrittenOrTakenAwayIsAFailureOfTheLocalFiles()
+    {
+        // A file stands where the folder should be.
+        var blocked = Path.Combine(root.FullName, "local");
+        File.WriteAllText(blocked, "");
+        var since = new DateTimeOffset(2030, 1, 1, 9, 0, 0, TimeSpan.Zero);
+
+        var unwritten = Assert.Throws<LocalStateException>(() => new RunStateFile(blocked).Save(new TaskRecord(12, new SessionTrace("15555bc6", null, since))));
+
+        Assert.StartsWith("the record of #12 cannot be written: ", unwritten.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<IOException>(unwritten.InnerException);
+
+        // A folder stands where the record should be.
+        var folder = LocalFolder.Ensure(root.FullName);
+        Directory.CreateDirectory(Path.Combine(folder, "session.json", "inside"));
+
+        var kept = Assert.Throws<LocalStateException>(new RunStateFile(folder).Clear);
+
+        Assert.StartsWith("the record of the run cannot be taken away: ", kept.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not json")]

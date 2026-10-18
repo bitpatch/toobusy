@@ -81,10 +81,69 @@ public static class CliApp
     public static async Task<int> RunAsync(string[] args, CliContext context, CancellationToken cancellationToken = default)
     {
         // A run that is stopped from outside stops its session before it leaves, and that takes a moment.
-        var configuration = new InvocationConfiguration { Output = context.Output, Error = context.Error, ProcessTerminationTimeout = TimeSpan.FromSeconds(30) };
-        var result = CreateRootCommand(context).Parse(args);
-        var exit = await result.InvokeAsync(configuration, cancellationToken);
+        var configuration = new InvocationConfiguration
+        {
+            Output = context.Output,
+            Error = context.Error,
+            ProcessTerminationTimeout = TimeSpan.FromSeconds(30),
+            EnableDefaultExceptionHandler = false,
+        };
+        var root = CreateRootCommand(context);
+        Guard(root, context);
+        var result = root.Parse(args);
+        int exit;
+        try
+        {
+            exit = await result.InvokeAsync(configuration, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // The user stopped the tool: a command lets no other cancellation through.
+            return ExitCode.Failed;
+        }
+        catch (Exception unforeseen)
+        {
+            return Unforeseen(context, unforeseen);
+        }
+
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
+    }
+
+    // Every command, with what it did not foresee said in words where errors go instead of a stack trace.
+    static void Guard(Command command, CliContext context)
+    {
+        if (command.Action is AsynchronousCommandLineAction action)
+            command.Action = new Guarded(action, context);
+        foreach (var inner in command.Subcommands)
+            Guard(inner, context);
+    }
+
+    // What a command does, and an error it did not foresee: a line where errors go and exit code 1, as for any
+    // failure. The cancellation of the user is not such an error, and goes on to where the tool stops.
+    sealed class Guarded(AsynchronousCommandLineAction action, CliContext context) : AsynchronousCommandLineAction
+    {
+        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await action.InvokeAsync(parseResult, cancellationToken);
+            }
+            catch (Exception unforeseen) when (unforeseen is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                return Unforeseen(context, unforeseen);
+            }
+        }
+    }
+
+    // An error the tool did not foresee: its words, and where it happened only when `TOOBUSY_TRACE=1` asks for it.
+    static int Unforeseen(CliContext context, Exception unforeseen)
+    {
+        Fail(context, $"toobusy: {string.Join(' ', unforeseen.Message.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))}");
+        if (!context.Trace)
+            return Fail(context, $"This is an error toobusy did not foresee ({unforeseen.GetType().Name}): run the command again with TOOBUSY_TRACE=1 to see where it happened.");
+
+        context.Error.WriteLine(unforeseen.ToString());
+        return ExitCode.Failed;
     }
 
     // What `--version` does: prints the version of the tool, and the commit of a build in development after it.

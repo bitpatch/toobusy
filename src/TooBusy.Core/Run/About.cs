@@ -165,7 +165,7 @@ public static class About
 
             - A command is a line for the shell, `sh -c` and on Windows `cmd /c`. It runs at the root of the working copy, and the run knows of it only whether it exited with 0. It learns the task from its environment: `TOOBUSY_TASK` is the number of the task, `TOOBUSY_TASK_TITLE` its title and `TOOBUSY_TASK_URL` its address.
             - `before` runs when the working tree and the queue are read, and the branch is brought up to date where the project names one, before the task is moved to {progress} and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
-            - `after` runs when the run has done with the task, however it went: done, done in part, left to the owner, interrupted, failed, paused by a usage limit, and when the run was killed over it. The working copy is checked and the tracker is told before it. When it fails, the task stays as it ended, and the run stops.
+            - `after` runs when the run has done with the task, however it went: done, done in part, left to the owner, interrupted, failed, paused by a usage limit, when the run was killed over it, and when anything else stopped the run over it. The working copy is checked and the tracker is told before it. When it fails, the task stays as it ended, and the run stops.
             - A command is given up after {Spoken.Time(policy.CommandTime)}, and counts as failed then. After a kill of the run, `after` has {Spoken.Time(policy.KilledCommandTime)}.
             - Neither runs around the wait for a usage limit inside a task, and a demo runs none.
 

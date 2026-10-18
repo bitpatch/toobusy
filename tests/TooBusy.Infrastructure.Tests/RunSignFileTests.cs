@@ -44,6 +44,21 @@ public sealed class RunSignFileTests : IDisposable
     }
 
     [Fact]
+    public void ASignThatCannotBeWrittenOrTakenDownIsAFailureOfTheLocalFiles()
+    {
+        // A folder stands where the sign should be.
+        Directory.CreateDirectory(Path.Combine(root.FullName, "run.json", "inside"));
+        var sign = Sign(100);
+
+        var unwritten = Assert.Throws<LocalStateException>(() => sign.Raise(new RunSign(RunPhase.Preparing)));
+        Assert.StartsWith("the sign of the run cannot be written: ", unwritten.Message, StringComparison.Ordinal);
+        Assert.Throws<LocalStateException>(() => sign.Change(Working));
+
+        var kept = Assert.Throws<LocalStateException>(sign.Lower);
+        Assert.StartsWith("the sign of the run cannot be taken down: ", kept.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheSignIsTakenDownWhenTheRunEnds()
     {
         var sign = Sign(100);

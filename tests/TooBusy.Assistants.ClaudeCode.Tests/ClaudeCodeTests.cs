@@ -440,6 +440,18 @@ public sealed class ClaudeCodeTests : IDisposable
     }
 
     [Fact]
+    public async Task ARequestThatCannotBeWrittenIsAFailureOfTheLocalFiles()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+
+        // A folder stands where the request should be.
+        Directory.CreateDirectory(Path.Combine(folders.Request, "inside"));
+
+        var unwritten = await Assert.ThrowsAsync<LocalStateException>(() => session.AskAsync("Wrap up.", TestContext.Current.CancellationToken));
+        Assert.StartsWith("the request for the session cannot be written: ", unwritten.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ASessionOfAnEarlierRunThatStillWorksIsFoundAndReadFromWhereItWasStarted()
     {
         var since = clock.Now;

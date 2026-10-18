@@ -43,7 +43,8 @@ public interface IAssistantSession
     // False when the session did not go on.
     Task<bool> TellAsync(string message, CancellationToken cancellationToken);
 
-    // Lets the session read the message after its next step, cutting nothing.
+    // Lets the session read the message after its next step, cutting nothing. A message that cannot be left where
+    // the session reads it, a file of the machine, throws LocalStateException.
     Task AskAsync(string message, CancellationToken cancellationToken);
 
     // Stops the session; its conversation is kept.
@@ -194,9 +195,15 @@ public interface IMachine
     void Notify(string text);
 }
 
+// A file a run keeps on the machine could not be written or taken away: the record, the sign, the request of a
+// session. The message says which, in words for the user, with what the system said. A run does not go on without
+// them: it stops the session of its task and stops.
+public sealed class LocalStateException(string message, Exception? cause = null) : Exception(message, cause);
+
 // What a run leaves for the next one: the record of the task it has a session for. It is written as soon as the
 // session is started and forgotten when the task comes to an outcome, so whatever stops a run in between, the next
-// one finds the task and its session.
+// one finds the task and its session. A record that cannot be read is none; one that cannot be written or forgotten
+// throws LocalStateException.
 public interface IRunState
 {
     TaskRecord? Load();
@@ -223,7 +230,8 @@ public sealed record TaskRecord(int Number, SessionTrace Session, RecordState St
 
 // The sign a run puts up in the working copy for as long as it goes on, so that whoever works beside it can tell: a
 // second run, which does not start, and `toobusy status`. Unlike the record it does not outlive its run: it is taken
-// down when the run ends, and the sign of a run that died says nothing.
+// down when the run ends, and the sign of a run that died says nothing. A sign that cannot be written or taken down
+// throws LocalStateException.
 public interface IRunSign
 {
     // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given.

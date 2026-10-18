@@ -32,6 +32,10 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
     // The time a run goes by; a test gives one that does not make it wait.
     public IClock Clock { get; init; } = new SystemClock();
 
+    // Whether an error the tool did not foresee is printed with where it happened, for a report of the bug:
+    // `TOOBUSY_TRACE=1` asks for it.
+    public bool Trace { get; init; }
+
     public static CliContext OfProcess() => new(Environment.CurrentDirectory, Console.Out, Console.Error)
     {
         OutputPalette = Palette.Detect(!Console.IsOutputRedirected, Environment.GetEnvironmentVariable),
@@ -51,6 +55,7 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
         Processes = new ProcessRunner(),
         PersonalFolder = PersonalSettingsFile.FindFolder(
             Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+        Trace = Environment.GetEnvironmentVariable("TOOBUSY_TRACE") == "1",
     };
 
     // The folder as people write it: from `~` when it is under the home folder.

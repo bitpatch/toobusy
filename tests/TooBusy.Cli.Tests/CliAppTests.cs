@@ -925,6 +925,33 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task AnErrorTheToolDidNotForeseeIsALineWhereErrorsGoAndNotAStackTrace()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await RunAsync("milestone", "--none");
+        var processes = new FakeProcesses(command => command == "git"
+            ? new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", "")
+            : throw new InvalidOperationException("The answer of gh\nis not what it was."));
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["queue"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal(
+            "toobusy: The answer of gh is not what it was." + Environment.NewLine
+            + "This is an error toobusy did not foresee (InvalidOperationException): run the command again with TOOBUSY_TRACE=1 to see where it happened." + Environment.NewLine,
+            error);
+
+        // TOOBUSY_TRACE=1 asks for where it happened, for a report of the bug.
+        (exit, _, error) = await RunAsync(Context(processes) with { Trace = true }, ["queue"]);
+
+        Assert.Equal(1, exit);
+        Assert.StartsWith("toobusy: The answer of gh is not what it was." + Environment.NewLine + "System.InvalidOperationException: The answer of gh", error, StringComparison.Ordinal);
+        Assert.Contains("   at ", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task QueueIsNotShownBeforeTheMilestoneIsChosen()
     {
         GitRepository();

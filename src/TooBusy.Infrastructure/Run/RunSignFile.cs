@@ -11,6 +11,7 @@ namespace TooBusy.Infrastructure.Run;
 // lives: what a run that died left behind says nothing, and neither does a file that cannot be read. The number of a
 // process is given anew after a while, so the process must have started when the sign says it did. `process` is the
 // process of this run, `startOf` says when a process started, null for one that does not live, and `now` is the time.
+// A sign that cannot be written or taken down is a LocalStateException.
 public sealed class RunSignFile(string folder, int process, Func<int, ProcessStart?> startOf, Func<DateTimeOffset> now) : IRunSign
 {
     const string Stamp = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
@@ -86,38 +87,52 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
     // Only the sign of this process is taken down.
     public void Lower()
     {
-        if (Read() is not { } going || going.Process == process)
-            File.Delete(Path);
+        try
+        {
+            if (Read() is not { } going || going.Process == process)
+                File.Delete(Path);
+        }
+        catch (Exception kept) when (kept is IOException or UnauthorizedAccessException)
+        {
+            throw new LocalStateException($"the sign of the run cannot be taken down: {kept.Message}", kept);
+        }
     }
 
     // The file is put in place whole, never half written: it is read by others while the run goes on.
     void Write(RunSign sign)
     {
-        Directory.CreateDirectory(folder);
-        var written = Path + ".tmp";
-        using (var stream = File.Create(written))
-        using (var writer = new Utf8JsonWriter(stream))
+        try
         {
-            writer.WriteStartObject();
-            writer.WriteNumber("process", process);
-            if (processStarted is { } started)
-                writer.WriteString("processStarted", started.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
-            writer.WriteString("since", since.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
-            writer.WriteString("phase", Name(sign.Phase));
-            if (sign.Task is { } task)
-                writer.WriteNumber("task", task);
-            if (sign.Title is { } title)
-                writer.WriteString("title", title);
-            if (sign.Url is { } url)
-                writer.WriteString("url", url);
-            if (sign.Open is { } open)
-                writer.WriteString("open", open);
-            if (sign.Until is { } until)
-                writer.WriteString("until", until.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
-            writer.WriteEndObject();
-        }
+            Directory.CreateDirectory(folder);
+            var written = Path + ".tmp";
+            using (var stream = File.Create(written))
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("process", process);
+                if (processStarted is { } started)
+                    writer.WriteString("processStarted", started.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
+                writer.WriteString("since", since.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
+                writer.WriteString("phase", Name(sign.Phase));
+                if (sign.Task is { } task)
+                    writer.WriteNumber("task", task);
+                if (sign.Title is { } title)
+                    writer.WriteString("title", title);
+                if (sign.Url is { } url)
+                    writer.WriteString("url", url);
+                if (sign.Open is { } open)
+                    writer.WriteString("open", open);
+                if (sign.Until is { } until)
+                    writer.WriteString("until", until.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
+                writer.WriteEndObject();
+            }
 
-        File.Move(written, Path, overwrite: true);
+            File.Move(written, Path, overwrite: true);
+        }
+        catch (Exception unwritten) when (unwritten is IOException or UnauthorizedAccessException)
+        {
+            throw new LocalStateException($"the sign of the run cannot be written: {unwritten.Message}", unwritten);
+        }
     }
 
     // The phase of a run by the name it has in the file, and in what `toobusy status --json` prints.

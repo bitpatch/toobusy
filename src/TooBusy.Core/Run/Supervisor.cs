@@ -9,9 +9,10 @@ namespace TooBusy.Core.Run;
 // moved before its session starts and after it ends, and the session is told so. New tasks are the session's to make.
 //
 // It never goes on past a doubt: a session that ends without saying how the task went, a working tree that is not
-// clean, a tracker that refuses, a command of the project that fails, each stops the run, and the next task is not
-// built on it. A failure that may pass is not such a doubt yet: a call of the tracker that is safe to make twice, and
-// the sync of the branch, are made again when GitHub or the remote did not answer, and stop the run only after that.
+// clean, a tracker that refuses, a command of the project that fails, a file of the run that cannot be written, and
+// whatever nobody foresaw, each stops the run, and the next task is not built on it; no session works on after that.
+// A failure that may pass is not such a doubt yet: a call of the tracker that is safe to make twice, and the sync of
+// the branch, are made again when GitHub or the remote did not answer, and stop the run only after that.
 //
 // Everything it knows of time comes from the clock, and everything it is told comes through `Send`, which only puts
 // the command in a line: the run itself looks at the line, in one place, so nothing here is shared between threads.
@@ -77,14 +78,24 @@ public sealed class Supervisor(
         this.view = view;
         var started = clock.Now;
 
-        // One run goes on in a working copy: a second one would work in the middle of the task of the first.
+        // One run goes on in a working copy: a second one would work in the middle of the task of the first. A run
+        // whose sign cannot be put up starts nothing either: nobody beside it could tell that it goes on.
         var up = RunSign.Of(status);
-        if (sign.Raise(up) is { } other)
+        string? unstarted;
+        try
         {
-            var going = $"a run is going on in this working copy already: {other.Told}";
-            Say(RunMark.Failed, $"Did not start: {going}");
+            unstarted = sign.Raise(up) is { } other ? $"a run is going on in this working copy already: {other.Told}" : null;
+        }
+        catch (LocalStateException unwritten)
+        {
+            unstarted = unwritten.Message;
+        }
+
+        if (unstarted is not null)
+        {
+            Say(RunMark.Failed, $"Did not start: {unstarted}");
             Show(new RunStatus(RunPhase.Ended, ""));
-            return Ended(RunEnd.Problem, going);
+            return Ended(RunEnd.Problem, unstarted);
         }
 
         told = up;
@@ -107,10 +118,20 @@ public sealed class Supervisor(
             {
                 result = Stop(refused.Message);
             }
+            catch (LocalStateException unwritten)
+            {
+                result = Stop(unwritten.Message);
+            }
+            catch (Exception unforeseen)
+            {
+                // What nothing of the run foresaw stops it all the same, a cancellation that is not the kill among
+                // it: a session that worked was stopped where its task was done, and the log names what happened.
+                result = Stop(Unforeseen(unforeseen));
+            }
             finally
             {
                 told = null;
-                sign.Lower();
+                Lower();
             }
         }
 
@@ -292,10 +313,10 @@ public sealed class Supervisor(
         {
             result = await take(since);
         }
-        catch (Exception thrown) when (begun && thrown is OperationCanceledException or TrackerException or AssistantException)
+        catch (Exception) when (begun)
         {
-            // The kill that ended the task does not cut this command: it is what stops what the task started. The
-            // owner waits for it, so it is given less time.
+            // Whatever ended the task, the command runs. The kill does not cut it: it is what stops what the task
+            // started. The owner waits for it then, so it is given less time.
             var killed = kill.IsCancellationRequested;
             if (await CommandAsync(after: true, task, since, queued, killed ? policy.KilledCommandTime : policy.CommandTime, killed ? CancellationToken.None : kill) is { } missed)
                 Say(RunMark.Attention, $"{missed} · see to it by hand before the next run");
@@ -502,10 +523,10 @@ public sealed class Supervisor(
 
         // The session works from here on, so it is written down before the tracker is told anything more: a
         // tracker that refuses, or a kill, stops the session as it stops the run, and the next run goes on with it.
-        state.Save(record = new TaskRecord(number, session.Trace));
         string? unassigned = null;
         try
         {
+            state.Save(record = new TaskRecord(number, session.Trace));
             if (goesOn)
                 await MoveAsync(number, BoardStatus.InProgress, kill);
 
@@ -533,6 +554,12 @@ public sealed class Supervisor(
             await Quietly(() => session.StopAsync(CancellationToken.None));
             left = $"#{number} was being taken, and the next run goes on with its session · {session.Open}";
             Say(RunMark.Interrupted, $"Killed the session of #{number} while the task was taken: the next run goes on with its session · {session.Open}");
+            throw;
+        }
+        catch (Exception failed)
+        {
+            if (await BreakOffAsync(number, session, failed) is { } broken)
+                return broken;
             throw;
         }
 
@@ -563,6 +590,12 @@ public sealed class Supervisor(
 
                 throw;
             }
+            catch (Exception failed)
+            {
+                if (await BreakOffAsync(number, session, failed) is { } broken)
+                    return broken;
+                throw;
+            }
 
             if (watched.Paused)
             {
@@ -582,6 +615,21 @@ public sealed class Supervisor(
         {
             view.Report(new TaskEnd(task, mark, clock.Now - since));
         }
+    }
+
+    // A failure that is neither the tracker's nor the kill's while a session works, as a file of the run that cannot
+    // be written: the session is stopped first, unless a pause stopped it, so that nothing works on with nobody
+    // watching. A file of the run stops the run here, with its words; anything else is said, and the one who catches
+    // it throws it on to where the run ends over what nobody foresaw: null then.
+    async Task<RunResult?> BreakOffAsync(int number, IAssistantSession session, Exception failed)
+    {
+        if (!paused)
+            await Quietly(() => session.StopAsync(CancellationToken.None));
+        if (failed is LocalStateException unwritten)
+            return Stop($"{unwritten.Message} · the session of #{number} is stopped · {session.Open}");
+
+        Say(RunMark.Interrupted, $"Stopped the session of #{number}: the run cannot go on · {session.Open}");
+        return null;
     }
 
     // Whether the look shows a session that ended with a line for toobusy: it is not watched, only settled.
@@ -1267,6 +1315,23 @@ public sealed class Supervisor(
         return Ended(RunEnd.Problem, problem);
     }
 
+    // What nobody foresaw, in a line: its kind and its words, for a report of the bug.
+    static string Unforeseen(Exception failed) => $"an error toobusy did not foresee: {failed.GetType().Name}: {string.Join(' ', Lines(failed.Message))}";
+
+    // Takes the sign down however the run ended. A sign that stays says nothing once the process of the run ends, so
+    // the run ends as it would have, and the log says so.
+    void Lower()
+    {
+        try
+        {
+            sign.Lower();
+        }
+        catch (LocalStateException kept)
+        {
+            Say(RunMark.Attention, $"{kept.Message} · it counts until toobusy ends");
+        }
+    }
+
     // How the tasks of the run went so far, as the tape of a run says it: `3 done`, `3 done · 1 done in part`.
     string Went() => string.Create(CultureInfo.InvariantCulture, $"{done} done{(partial > 0 ? $" · {partial} done in part" : "")}");
 
@@ -1278,8 +1343,21 @@ public sealed class Supervisor(
     {
         status = next with { Limits = limits, Behind = taken, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
         view.Show(status);
-        if (told is not null && RunSign.Of(status) is var now && now != told)
-            sign.Change(told = now);
+        var now = RunSign.Of(status);
+        if (told is null || now == told)
+            return;
+
+        // A sign that cannot be written stops the run, and is not tried again while the run ends over it.
+        try
+        {
+            sign.Change(now);
+            told = now;
+        }
+        catch (LocalStateException)
+        {
+            told = null;
+            throw;
+        }
     }
 
     // The commands that mean something at the moment.

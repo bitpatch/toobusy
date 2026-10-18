@@ -359,9 +359,14 @@ sealed class FakeWorkspace : IWorkspace
     // What happens when the branch is brought up to date, for a test that looks at what was done before it.
     public Action? Syncing { get; set; }
 
+    // What a reading of the working copy throws, as a bug would; null while it reads.
+    public Exception? Failure { get; set; }
+
     public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken)
     {
         Read++;
+        if (Failure is not null)
+            throw Failure;
         return Task.FromResult(Next.Count > 0 ? Next.Dequeue() : State);
     }
 
@@ -429,12 +434,24 @@ sealed class FakeState : IRunState
     // Every record that was written, in its order; null is a record that was forgotten.
     public List<TaskRecord?> Written { get; } = [];
 
+    // What a record that is written, and one that is forgotten, fails with, as a full disk; null while it works.
+    public LocalStateException? Unwritable { get; set; }
+
+    public LocalStateException? Unclearable { get; set; }
+
     public TaskRecord? Load() => Record;
 
-    public void Save(TaskRecord record) => Written.Add(Record = record);
+    public void Save(TaskRecord record)
+    {
+        if (Unwritable is not null)
+            throw Unwritable;
+        Written.Add(Record = record);
+    }
 
     public void Clear()
     {
+        if (Unclearable is not null)
+            throw Unclearable;
         if (Record is not null)
             Written.Add(Record = null);
     }
@@ -449,18 +466,44 @@ sealed class FakeSign : IRunSign
 
     public List<RunSign?> Written { get; } = [];
 
+    // What putting the sign up, saying anew what it says and taking it down fail with; null while they work. A
+    // change that fails is counted.
+    public LocalStateException? Unraisable { get; set; }
+
+    public LocalStateException? Unwritable { get; set; }
+
+    public LocalStateException? Unlowerable { get; set; }
+
+    public int Refused { get; private set; }
+
     public RunSign? Raise(RunSign sign)
     {
         if (Other is not null)
             return Other;
+        if (Unraisable is not null)
+            throw Unraisable;
 
         Written.Add(sign);
         return null;
     }
 
-    public void Change(RunSign sign) => Written.Add(sign);
+    public void Change(RunSign sign)
+    {
+        if (Unwritable is not null)
+        {
+            Refused++;
+            throw Unwritable;
+        }
 
-    public void Lower() => Written.Add(null);
+        Written.Add(sign);
+    }
+
+    public void Lower()
+    {
+        if (Unlowerable is not null)
+            throw Unlowerable;
+        Written.Add(null);
+    }
 }
 
 sealed class Log : IRunView
