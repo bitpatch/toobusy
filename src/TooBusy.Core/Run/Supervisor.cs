@@ -312,24 +312,35 @@ public sealed class Supervisor(
         try
         {
             result = await take(since);
+
+            // A kill does not cut the telling of an outcome or a pause: it ends the run when the task is over, as a
+            // kill, unless the task stopped the run over a problem.
+            if (result?.End != RunEnd.Problem)
+                kill.ThrowIfCancellationRequested();
         }
         catch (Exception) when (begun)
         {
-            // Whatever ended the task, the command runs. The kill does not cut it: it is what stops what the task
-            // started. The owner waits for it then, so it is given less time.
-            var killed = kill.IsCancellationRequested;
-            if (await CommandAsync(after: true, task, since, queued, killed ? policy.KilledCommandTime : policy.CommandTime, killed ? CancellationToken.None : kill) is { } missed)
+            // Whatever ended the task, the command runs.
+            if (await AfterAsync(task, since, queued, kill) is { } missed)
                 Say(RunMark.Attention, $"{missed} · see to it by hand before the next run");
             throw;
         }
 
-        if (!begun || await CommandAsync(after: true, task, since, queued, policy.CommandTime, kill) is not { } wrong)
+        if (!begun || await AfterAsync(task, since, queued, kill) is not { } wrong)
             return result;
         if (result is null)
             return Stop($"{wrong} · #{task.Number} stays as it ended");
 
         Say(RunMark.Attention, $"{wrong} · see to it by hand before the next run");
         return result;
+    }
+
+    // Runs the command after a task. A kill that came before it does not cut it: it is what stops what the task
+    // started. The owner waits for it then, so it is given less time.
+    Task<string?> AfterAsync(QueueTask task, DateTimeOffset since, int queued, CancellationToken kill)
+    {
+        var killed = kill.IsCancellationRequested;
+        return CommandAsync(after: true, task, since, queued, killed ? policy.KilledCommandTime : policy.CommandTime, killed ? CancellationToken.None : kill);
     }
 
     // Runs a command of the project around a task: null when it passed, and when the project has no such command;
@@ -503,15 +514,23 @@ public sealed class Supervisor(
                 return Stop($"{unready} · #{number} is not taken");
 
             begun = true;
-            await MoveAsync(number, BoardStatus.InProgress, kill);
+            var start = Start(task, Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp }, skill: plan.Skill));
+            DateTimeOffset? starting = null;
             try
             {
-                session = await assistant.StartAsync(Start(task, Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp }, skill: plan.Skill)), kill);
+                await MoveAsync(number, BoardStatus.InProgress, kill);
+                starting = clock.Now;
+                session = await assistant.StartAsync(start, kill);
             }
             catch (AssistantException)
             {
                 // Nobody works on the task, so it does not stay as one that is worked on.
                 await Quietly(() => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
+                throw;
+            }
+            catch (OperationCanceledException) when (kill.IsCancellationRequested)
+            {
+                await UnstartAsync(number, starting is { } asked ? (start, asked) : null, kill);
                 throw;
             }
 
@@ -615,6 +634,46 @@ public sealed class Supervisor(
         {
             view.Report(new TaskEnd(task, mark, clock.Now - since));
         }
+    }
+
+    // A kill while a task is moved to In Progress and its session is started: nobody works on the task, so it goes
+    // back to Todo, as a task whose session did not start does. A start that was cut may have reached the assistant
+    // all the same, and no record names what it started: such a session is looked for by the name the start gave it
+    // and stopped, so that nothing works on with nobody watching. `started` is the start and when it was made, null
+    // when the kill came before it. The kill cuts none of this: the owner waits for it.
+    async Task UnstartAsync(int number, (SessionStart Start, DateTimeOffset Since)? started, CancellationToken kill)
+    {
+        string? unmoved = null;
+        try
+        {
+            await MoveAsync(number, BoardStatus.Todo, kill, uncut: true);
+        }
+        catch (TrackerException refused)
+        {
+            unmoved = refused.Message;
+        }
+
+        IAssistantSession? found = null;
+        if (started is { } cut)
+        {
+            await Quietly(async () =>
+            {
+                if (await assistant.FindStartedAsync(cut.Start, cut.Since, CancellationToken.None) is { } session)
+                {
+                    await session.StopAsync(CancellationToken.None);
+                    found = session;
+                }
+            });
+        }
+
+        var todo = plan.Rules.Statuses.Todo;
+        left = $"#{number} was being started: {(!plan.Rules.Board ? "it is left as it was" : unmoved is null ? $"it is back in {todo}" : $"it could not be moved back to {todo}")}"
+            + (found is not null ? $", and the session that started for it all the same is stopped · {found.Open}"
+                : started is not null ? ", and no session was found for it"
+                : "");
+        Say(RunMark.Interrupted, $"Killed while {left}");
+        if (unmoved is not null)
+            Say(RunMark.Attention, $"{unmoved} · set it right by hand before the next run");
     }
 
     // A failure that is neither the tracker's nor the kill's while a session works, as a file of the run that cannot
@@ -886,15 +945,17 @@ public sealed class Supervisor(
         if (waits > policy.LimitWaits)
             return await PauseAsync(task, session, $"the limit did not reset after {policy.LimitWaits} waits", kill);
 
-        await session.StopAsync(kill);
-        var known = limits.Near is { ResetsAt: not null } near && near.Used >= policy.Spent ? limits.Near : null;
-        var until = known is { ResetsAt: { } reset } ? reset + policy.ResetMargin : clock.Now + policy.UnknownLimitWait;
-        Say(RunMark.Paused, $"#{number} waits {Spoken.Time(until - clock.Now)} for {(known is null ? "the limit" : Limit(known))} to reset, then goes on · /stop pauses it for the next run");
-        Show(new RunStatus(RunPhase.WaitingForLimit, "") { Task = task, Since = since, Until = until, Open = session.Open, Plan = status.Plan });
-
+        // A kill while the session is stopped for the wait pauses the task, as one during the wait does.
         bool waited;
         try
         {
+            await Quietly(() => session.StopAsync(kill));
+            kill.ThrowIfCancellationRequested();
+
+            var known = limits.Near is { ResetsAt: not null } near && near.Used >= policy.Spent ? limits.Near : null;
+            var until = known is { ResetsAt: { } reset } ? reset + policy.ResetMargin : clock.Now + policy.UnknownLimitWait;
+            Say(RunMark.Paused, $"#{number} waits {Spoken.Time(until - clock.Now)} for {(known is null ? "the limit" : Limit(known))} to reset, then goes on · /stop pauses it for the next run");
+            Show(new RunStatus(RunPhase.WaitingForLimit, "") { Task = task, Since = since, Until = until, Open = session.Open, Plan = status.Plan });
             waited = await WaitAsync(until, kill);
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
@@ -914,14 +975,14 @@ public sealed class Supervisor(
 
     // Leaves the task for the next run with its changes in the working tree: the session is stopped, the task is
     // marked and goes back among those to do, and what the session is gone on with is remembered. Always false, for
-    // the one who asks whether the session goes on. A pause after a kill is made all the same, and the kill does not
-    // cut it; nothing of it is made twice then, as the owner waits for it.
+    // the one who asks whether the session goes on. A kill does not cut a pause, whether it came before it or comes
+    // in the middle of it: a task that is half paused is neither worked on nor waiting. After the kill nothing of it
+    // is made twice, as the owner waits for it.
     async Task<bool> PauseAsync(QueueTask task, IAssistantSession session, string why, CancellationToken kill)
     {
         var number = task.Number;
         paused = true;
-        var uncut = kill.IsCancellationRequested;
-        var calls = uncut ? CancellationToken.None : kill;
+        var calls = CancellationToken.None;
         var missing = new List<string>();
         async Task Try(Func<Task> change)
         {
@@ -936,8 +997,8 @@ public sealed class Supervisor(
         }
 
         await Quietly(() => session.StopAsync(calls));
-        await Try(() => LabelAsync(number, plan.Rules.Interrupted, kill, uncut));
-        await Try(() => MoveAsync(number, BoardStatus.Todo, kill, uncut));
+        await Try(() => LabelAsync(number, plan.Rules.Interrupted, kill, uncut: true));
+        await Try(() => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
         await Try(() => tracker.CommentAsync(number, Briefing.Paused(why, session.Open), calls));
         state.Save(record = new TaskRecord(number, session.Trace, RecordState.Paused));
         if (session.Trace.Conversation is null)
@@ -951,20 +1012,66 @@ public sealed class Supervisor(
         return false;
     }
 
-    // Tells the tracker how the task went, after checking what the session says against the working copy. Gives the
-    // mark of how it went, and how the run ends with it: null when the run goes on to the next task.
+    // Settles a task whose session came to its end: the session is stopped, what it says is checked against the
+    // working copy, and the tracker is told how the task went. Gives the mark of how it went, and how the run ends with
+    // it: null when the run goes on to the next task.
+    //
+    // Until the record is forgotten a kill leaves the task as it is, and the next run settles it from the record. From
+    // then on the kill cuts nothing: a task whose record is gone has nothing but the tracker to keep it, so the tracker
+    // is told to the end, each call that is left once, and the run ends when the task is over.
+    async Task<(RunMark Mark, RunResult? Ended)> SettleAsync(QueueTask task, IAssistantSession session, SessionLook look, DateTimeOffset since, CancellationToken kill, bool closed = false)
+    {
+        var number = task.Number;
+        WorkspaceState? tree = null;
+        try
+        {
+            await Quietly(() => session.StopAsync(kill));
+            kill.ThrowIfCancellationRequested();
+            if (Outcome.Read(look.Reply) is { Kind: not OutcomeKind.Failed })
+                tree = await workspace.ReadAsync(kill);
+        }
+        catch (OperationCanceledException) when (kill.IsCancellationRequested)
+        {
+            await Quietly(() => session.StopAsync(CancellationToken.None));
+            left = $"#{number} was being settled, and the next run settles it · {session.Open}";
+            Say(RunMark.Interrupted, $"Killed while #{number} was being settled: nothing of how it went is told yet, and the next run settles it · {session.Open}");
+            throw;
+        }
+
+        (RunMark Mark, RunResult? Ended) settled;
+        try
+        {
+            settled = await ConcludeAsync(task, session, look, tree, Spoken.Time(clock.Now - since), closed, kill);
+        }
+        catch (TrackerException) when (kill.IsCancellationRequested)
+        {
+            SettledAfterKill(number);
+            throw;
+        }
+
+        if (kill.IsCancellationRequested)
+            SettledAfterKill(number);
+        return settled;
+    }
+
+    // What a kill that came while the tracker was told how a task went says, when it is told.
+    void SettledAfterKill(int number)
+    {
+        left = $"#{number} was being settled, and the tracker was told how it went all the same";
+        Say(RunMark.Interrupted, $"Killed while {left}");
+    }
+
+    // Checks what the session says against the working copy, as it was read before, and tells the tracker how the
+    // task went; `tree` is null where it was not read or could not be. Every call of the tracker here is uncut.
     //
     // A task may be closed by then, as by a commit of its session with `Closes #12` in its message, and it is settled
     // all the same. `closed` says that it is known to be; otherwise the tracker is asked where it matters: a closed
     // task is not put back among those to do, so it gets the comment and neither a label nor a status.
-    async Task<(RunMark Mark, RunResult? Ended)> SettleAsync(QueueTask task, IAssistantSession session, SessionLook look, DateTimeOffset since, CancellationToken kill, bool closed = false)
+    // `kill` is only what ends the pauses of its calls and keeps them from being made again.
+    async Task<(RunMark Mark, RunResult? Ended)> ConcludeAsync(QueueTask task, IAssistantSession session, SessionLook look, WorkspaceState? tree, string took, bool closed, CancellationToken kill)
     {
         var number = task.Number;
-        var took = Spoken.Time(clock.Now - since);
         async Task<bool> Shut() => closed = closed || await ClosedAsync(number, kill);
-
-        await Quietly(() => session.StopAsync(kill));
-        kill.ThrowIfCancellationRequested();
 
         // A failure is for the owner: the record is forgotten, the task is left to them, and no run goes on with
         // it by itself.
@@ -985,8 +1092,6 @@ public sealed class Supervisor(
             await LeaveAsync(number, session, $"its session failed: {reason}", outcome.Report, await Shut(), kill);
             return (RunMark.Failed, Stop($"#{number} failed · {session.Open}"));
         }
-
-        var tree = await workspace.ReadAsync(kill);
 
         // The task has come to an outcome, and its record is forgotten before the tracker is told, so that nothing
         // is told twice. Only a task that was wrapped up keeps it: the next run goes on with the same conversation,
@@ -1027,7 +1132,7 @@ public sealed class Supervisor(
     {
         try
         {
-            return await ClosedTaskAsync(number, kill) is not null;
+            return await ClosedTaskAsync(number, kill, uncut: true) is not null;
         }
         catch (TrackerException)
         {
@@ -1036,7 +1141,8 @@ public sealed class Supervisor(
     }
 
     // Tells the tracker how a task went whose session said so and passed the checks. `closed` is a task that is
-    // known to be closed already: it is not closed again, and it is not put back among those to do.
+    // known to be closed already: it is not closed again, and it is not put back among those to do. A kill cuts none
+    // of it, as none of what settles a task.
     async Task<(RunMark Mark, RunResult? Ended)> TellAsync(QueueTask task, IAssistantSession session, Outcome outcome, string took, bool closed, CancellationToken kill)
     {
         var number = task.Number;
@@ -1045,7 +1151,7 @@ public sealed class Supervisor(
         switch (outcome.Kind)
         {
             case OutcomeKind.Done:
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Done, outcome.Report, session.Open), kill);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Done, outcome.Report, session.Open), CancellationToken.None);
                 await CloseAsync(number, closed, kill);
                 done++;
                 Say(RunMark.Done, $"#{number} {task.Title} — done in {took}");
@@ -1054,7 +1160,7 @@ public sealed class Supervisor(
 
             case OutcomeKind.Partial:
                 // What is left is a task that the session made and that its report names: the run makes nothing.
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open), kill);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Partial, outcome.Report, session.Open), CancellationToken.None);
                 await CloseAsync(number, closed, kill);
                 partial++;
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");
@@ -1062,29 +1168,29 @@ public sealed class Supervisor(
                 return (RunMark.Partial, null);
 
             case OutcomeKind.Owner when closed:
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, closed: true), kill);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, closed: true), CancellationToken.None);
                 Say(RunMark.Owner, $"#{number} {task.Title} — waits for the owner after {took}");
                 Say(RunMark.Note, $"{shut}, with a comment that says what is needed; no run takes it until it is opened again");
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Owner:
-                await LabelAsync(number, rules.Manual, kill);
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Manual), kill);
-                await MoveAsync(number, BoardStatus.Todo, kill);
+                await LabelAsync(number, rules.Manual, kill, uncut: true);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Manual), CancellationToken.None);
+                await MoveAsync(number, BoardStatus.Todo, kill, uncut: true);
                 Say(RunMark.Owner, $"#{number} {task.Title} — waits for the owner after {took}");
                 Say(RunMark.Note, $"#{number} has the {rules.Manual} label and a comment that says what is needed; no run takes it while it has the label");
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Interrupted when closed:
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Interrupted, outcome.Report, session.Open, closed: true), kill);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Interrupted, outcome.Report, session.Open, closed: true), CancellationToken.None);
                 Say(RunMark.Interrupted, $"#{number} {task.Title} — interrupted after {took}: the report is in the task · {shut}");
                 Quote(outcome.Report, session);
                 return (RunMark.Interrupted, aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}"));
 
             default:
-                await LabelAsync(number, rules.Interrupted, kill);
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Interrupted, outcome.Report, session.Open), kill);
-                await MoveAsync(number, BoardStatus.Todo, kill);
+                await LabelAsync(number, rules.Interrupted, kill, uncut: true);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Interrupted, outcome.Report, session.Open), CancellationToken.None);
+                await MoveAsync(number, BoardStatus.Todo, kill, uncut: true);
                 Say(RunMark.Interrupted, $"#{number} {task.Title} — interrupted after {took}: the report is in the task, and the next run takes it first");
                 Quote(outcome.Report, session);
                 return (RunMark.Interrupted, aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}"));
@@ -1094,7 +1200,8 @@ public sealed class Supervisor(
     // Leaves a task that the run stops over to the owner: it gets the manual label and a comment that says
     // what went wrong, and goes back among those to do, where the label holds it in a project with a board as in
     // one without. A tracker that refuses any of it is said, and changes nothing of why the run stops. A task that is
-    // closed is left closed: it gets the comment only, and no run takes it until its owner opens it again.
+    // closed is left closed: it gets the comment only, and no run takes it until its owner opens it again. A kill cuts
+    // none of it.
     async Task LeaveAsync(int number, IAssistantSession session, string why, string report, bool closed, CancellationToken kill)
     {
         var manual = plan.Rules.Manual;
@@ -1115,7 +1222,7 @@ public sealed class Supervisor(
 
         if (closed)
         {
-            if (await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual, closed: true), kill)))
+            if (await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual, closed: true), CancellationToken.None)))
                 Say(RunMark.Note, $"#{number} was closed before its session ended, and is left closed, with a comment that says what went wrong; no run takes it until it is opened again");
             else
                 Say(RunMark.Attention, $"#{number} is closed and did not get the comment that says what went wrong: {missing[0]}");
@@ -1123,11 +1230,11 @@ public sealed class Supervisor(
         }
 
         // Without the label the status is all that holds the task, so it is moved only when the label is put.
-        var labelled = await Try(() => LabelAsync(number, manual, kill));
-        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual), kill));
+        var labelled = await Try(() => LabelAsync(number, manual, kill, uncut: true));
+        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual), CancellationToken.None));
         if (labelled)
         {
-            await Try(() => MoveAsync(number, BoardStatus.Todo, kill));
+            await Try(() => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
             Say(RunMark.Note, $"#{number} has the {manual} label{(missing.Count == 0 ? " and a comment that says what went wrong" : "")}; no run takes it while it has the label");
         }
 
@@ -1140,10 +1247,10 @@ public sealed class Supervisor(
     async Task CloseAsync(int number, bool closed, CancellationToken kill)
     {
         if (!closed)
-            await AgainAsync($"#{number} is closed", () => tracker.CloseAsync(number, kill), kill);
+            await CloseTaskAsync(number, kill, uncut: true);
         try
         {
-            await MoveAsync(number, BoardStatus.Done, kill);
+            await MoveAsync(number, BoardStatus.Done, kill, uncut: true);
         }
         catch (TrackerException refused)
         {
@@ -1154,51 +1261,67 @@ public sealed class Supervisor(
     // The calls of the tracker that are safe to make twice, as a run makes them: each is made again when GitHub did not
     // answer it, and the log says so in the words of what the call does. A comment is not among them: one whose answer
     // was lost may be written already, and a second would stand twice. An `uncut` call is one that a kill does not
-    // cut, as what is done for good measure, or after the kill; its pauses are cut all the same.
+    // cut, as what is done for good measure, what is told of a task that is settled or paused, or what is done after
+    // the kill; its pauses are cut all the same.
     Task<IReadOnlyList<QueueTask>> OpenTasksAsync(CancellationToken kill) =>
-        AgainAsync("the open tasks are read", () => tracker.ReadOpenAsync(plan.Milestone, kill), kill);
+        AgainAsync("the open tasks are read", calls => tracker.ReadOpenAsync(plan.Milestone, calls), kill);
 
-    Task<QueueTask?> ClosedTaskAsync(int number, CancellationToken kill) =>
-        AgainAsync($"#{number} is read", () => tracker.ReadClosedAsync(number, kill), kill);
+    Task<QueueTask?> ClosedTaskAsync(int number, CancellationToken kill, bool uncut = false) =>
+        AgainAsync($"#{number} is read", calls => tracker.ReadClosedAsync(number, calls), kill, uncut);
 
     Task MoveAsync(int number, BoardStatus status, CancellationToken kill, bool uncut = false) =>
-        AgainAsync($"#{number} is moved to {plan.Rules.Statuses.NameOf(status)}", () => tracker.SetStatusAsync(number, status, uncut ? CancellationToken.None : kill), kill);
+        AgainAsync($"#{number} is moved to {plan.Rules.Statuses.NameOf(status)}", calls => tracker.SetStatusAsync(number, status, calls), kill, uncut);
 
     Task AssignAsync(int number, CancellationToken kill) =>
-        AgainAsync($"#{number} is assigned to the current user", () => tracker.AssignAsync(number, kill), kill);
+        AgainAsync($"#{number} is assigned to the current user", calls => tracker.AssignAsync(number, calls), kill);
 
     Task LabelAsync(int number, string label, CancellationToken kill, bool uncut = false) =>
-        AgainAsync($"the label {label} is put on #{number}", () => tracker.AddLabelAsync(number, label, uncut ? CancellationToken.None : kill), kill);
+        AgainAsync($"the label {label} is put on #{number}", calls => tracker.AddLabelAsync(number, label, calls), kill, uncut);
 
     Task UnlabelAsync(int number, string label, CancellationToken kill) =>
-        AgainAsync($"the label {label} is taken off #{number}", () => tracker.RemoveLabelAsync(number, label, kill), kill);
+        AgainAsync($"the label {label} is taken off #{number}", calls => tracker.RemoveLabelAsync(number, label, calls), kill);
+
+    Task CloseTaskAsync(int number, CancellationToken kill, bool uncut = false) =>
+        AgainAsync($"#{number} is closed", calls => tracker.CloseAsync(number, calls), kill, uncut);
 
     // Makes a call that is safe to make twice, and makes it again when it failed in a way that may pass, after each
-    // pause of the policy: the failure of the last try is the one that stands. `what` says what the call does. A kill
-    // ends a pause at once, and after a kill nothing is made again: the owner waits for what is done then.
-    async Task<T> AgainAsync<T>(string what, Func<Task<T>> call, CancellationToken kill)
+    // pause of the policy: the failure of the last try is the one that stands. `what` says what the call does, and
+    // `call` makes it with the token it is cut by: none for one that is `uncut`. A kill ends a pause at once, and after
+    // a kill nothing is made again: the owner waits for what is done then. An uncut call whose pause the kill ends
+    // fails with the failure it had.
+    async Task<T> AgainAsync<T>(string what, Func<CancellationToken, Task<T>> call, CancellationToken kill, bool uncut = false)
     {
         for (var tried = 0; ; tried++)
         {
+            TrackerException failed;
             try
             {
-                return await call();
+                return await call(uncut ? CancellationToken.None : kill);
             }
-            catch (TrackerException failed) when (failed.MayPass && tried < policy.RetryPauses.Count && !kill.IsCancellationRequested)
+            catch (TrackerException passing) when (passing.MayPass && tried < policy.RetryPauses.Count && !kill.IsCancellationRequested)
             {
-                var pause = policy.RetryPauses[tried];
-                Say(RunMark.Attention, $"GitHub did not answer: {what} again in {Spoken.Time(pause)}");
+                failed = passing;
+            }
+
+            var pause = policy.RetryPauses[tried];
+            Say(RunMark.Attention, $"GitHub did not answer: {what} again in {Spoken.Time(pause)}");
+            try
+            {
                 await clock.DelayAsync(pause, kill);
+            }
+            catch (OperationCanceledException) when (uncut && kill.IsCancellationRequested)
+            {
+                throw failed;
             }
         }
     }
 
-    async Task AgainAsync(string what, Func<Task> call, CancellationToken kill) =>
-        await AgainAsync(what, async () =>
+    async Task AgainAsync(string what, Func<CancellationToken, Task> call, CancellationToken kill, bool uncut = false) =>
+        await AgainAsync(what, async calls =>
         {
-            await call();
+            await call(calls);
             return true;
-        }, kill);
+        }, kill, uncut);
 
     // Waits for a moment to come; false when the owner asked to stop before it did.
     async Task<bool> WaitAsync(DateTimeOffset until, CancellationToken kill)

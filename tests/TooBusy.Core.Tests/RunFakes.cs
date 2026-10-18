@@ -62,7 +62,8 @@ sealed class FakeTracker : ITaskTracker
     // Everything that was asked, answered or not, in its order: a call that is made again is here once for each try.
     public List<string> Asked { get; } = [];
 
-    // What happens as something is done, before it is: a kill that comes in the middle of it, for one.
+    // What happens as something is done, before it is: a kill that comes in the middle of it, for one. A call whose
+    // token the kill cancels is cut then, and neither asked nor done.
     public Action<string>? Doing { get; set; }
 
     // A tracker that says a task is closed and goes on listing it among the open ones.
@@ -78,13 +79,14 @@ sealed class FakeTracker : ITaskTracker
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken)
     {
         Read.Add(milestone);
-        Do("read");
+        Do("read", cancellationToken);
         return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
     }
 
     public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken)
     {
         Looked.Add(number);
+        cancellationToken.ThrowIfCancellationRequested();
         Ask($"look {number}");
         if (Refused.Contains("look"))
             throw new TrackerException($"The tracker refused: look {number}.");
@@ -100,41 +102,41 @@ sealed class FakeTracker : ITaskTracker
 
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {
-        Do($"status {number} {status}");
+        Do($"status {number} {status}", cancellationToken);
         Change(number, task => task with { Status = status, StatusName = status.ToString() });
         return Task.CompletedTask;
     }
 
     public Task AssignAsync(int number, CancellationToken cancellationToken)
     {
-        Do($"assign {number}");
+        Do($"assign {number}", cancellationToken);
         return Task.CompletedTask;
     }
 
     public Task AddLabelAsync(int number, string label, CancellationToken cancellationToken)
     {
-        Do($"label {number} +{label}");
+        Do($"label {number} +{label}", cancellationToken);
         Change(number, task => task with { Labels = [.. task.Labels, label] });
         return Task.CompletedTask;
     }
 
     public Task RemoveLabelAsync(int number, string label, CancellationToken cancellationToken)
     {
-        Do($"label {number} -{label}");
+        Do($"label {number} -{label}", cancellationToken);
         Change(number, task => task with { Labels = [.. task.Labels.Where(has => has != label)] });
         return Task.CompletedTask;
     }
 
     public Task CommentAsync(int number, string text, CancellationToken cancellationToken)
     {
-        Do($"comment {number}");
+        Do($"comment {number}", cancellationToken);
         Comments.Add((number, text));
         return Task.CompletedTask;
     }
 
     public Task CloseAsync(int number, CancellationToken cancellationToken)
     {
-        Do($"close {number}");
+        Do($"close {number}", cancellationToken);
         if (ForgetsClosing)
             return Task.CompletedTask;
 
@@ -144,9 +146,10 @@ sealed class FakeTracker : ITaskTracker
         return Task.CompletedTask;
     }
 
-    void Do(string what)
+    void Do(string what, CancellationToken cancellationToken)
     {
         Doing?.Invoke(what);
+        cancellationToken.ThrowIfCancellationRequested();
         Ask(what);
         if (Refused.Contains(what) || Refused.Contains(what.Split(' ')[0]))
             throw new TrackerException($"The tracker refused: {what}.");
@@ -192,6 +195,16 @@ sealed class FakeAssistant : IAssistant
 
     public string? RefuseToStart { get; set; }
 
+    // What happens as a session is started, before it is: a kill that comes in the middle of it, for one. A start
+    // whose token the kill cancels is cut then.
+    public Action<SessionStart>? Starting { get; set; }
+
+    // Whether a start that was cut off started its session all the same: it is found by the name of the start then.
+    public bool StartsAnyway { get; set; }
+
+    // The starts that were cut off and looked for, each with the moment its session was looked for since.
+    public List<(SessionStart Start, DateTimeOffset Since)> LookedFor { get; } = [];
+
     // An assistant that has nothing left of the sessions of earlier runs.
     public bool Gone { get; set; }
 
@@ -208,6 +221,8 @@ sealed class FakeAssistant : IAssistant
         if (RefuseToStart is not null)
             throw new AssistantException(RefuseToStart);
 
+        Starting?.Invoke(start);
+        cancellationToken.ThrowIfCancellationRequested();
         Started.Add(start);
         return Task.FromResult<IAssistantSession>(Session(start.Task).Begin());
     }
@@ -217,6 +232,12 @@ sealed class FakeAssistant : IAssistant
     {
         Found.Add(trace);
         return Task.FromResult<IAssistantSession?>(Gone ? null : Session(int.Parse(trace.Conversation!.Split('-')[^1], System.Globalization.CultureInfo.InvariantCulture)).Begin());
+    }
+
+    public Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        LookedFor.Add((start, since));
+        return Task.FromResult<IAssistantSession?>(StartsAnyway ? Session(start.Task).Begin() : null);
     }
 
     public UsageLimits ReadLimits() => Limits;
@@ -243,6 +264,10 @@ sealed class FakeSession(int task) : IAssistantSession
     public List<string> Asked { get; } = [];
 
     public int Stopped { get; private set; }
+
+    // What happens as the session is stopped, before it is: a kill that comes in the middle of it, for one. A stop
+    // whose token the kill cancels is cut then, and not counted.
+    public Action? Stopping { get; set; }
 
     // A session that does not go on when it is told something.
     public bool Deaf { get; set; }
@@ -329,6 +354,8 @@ sealed class FakeSession(int task) : IAssistantSession
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
+        Stopping?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
         Stopped++;
         return Task.CompletedTask;
     }

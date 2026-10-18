@@ -540,6 +540,52 @@ public sealed class ClaudeCodeTests : IDisposable
     }
 
     [Fact]
+    public async Task TheSessionOfAStartThatWasCutOffIsFoundByItsNameFromWhenTheStartWasMade()
+    {
+        var since = clock.Now;
+        var after = since.ToUnixTimeMilliseconds();
+        claude.Sessions = Listing(
+            Entry("aaaa1111", "conversation-old", "stopped", startedAt: after - 60_000),
+            Entry("bbbb2222", "conversation-other", "working", "busy", startedAt: after + 300, name: "#13 Import the data"),
+            Entry("cccc3333", "conversation-new", "working", "busy", startedAt: after + 500));
+
+        var session = await Assistant().FindStartedAsync(Start, since, TestContext.Current.CancellationToken);
+
+        // An earlier session of the same task, started before, is not the one, and neither is another task's.
+        Assert.NotNull(session);
+        Assert.Equal("claude attach cccc3333", session.Open);
+        await session.StopAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(["stop", "cccc3333"], claude.Asked[^1]);
+    }
+
+    [Fact]
+    public async Task TheSessionOfAStartThatWasCutOffIsLookedForAFewTimes()
+    {
+        var since = clock.Now;
+        claude.Listings.Enqueue(Listing());
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy", startedAt: since.ToUnixTimeMilliseconds()));
+
+        var session = await Assistant().FindStartedAsync(Start, since, TestContext.Current.CancellationToken);
+
+        Assert.Equal("claude attach 15555bc6", session?.Open);
+        Assert.Equal(2, claude.Asked.Count);
+    }
+
+    [Fact]
+    public async Task AStartThatWasCutOffBeforeClaudeCodeHadItLeftNoSession()
+    {
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+
+        Assert.Null(await Assistant().FindStartedAsync(Start, clock.Now, TestContext.Current.CancellationToken));
+        Assert.Equal(3, claude.Asked.Count);
+        Assert.Equal(TimeSpan.FromSeconds(2), clock.Passed);
+
+        // A list that cannot be read shows no session either.
+        claude.List = new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
+        Assert.Null(await Assistant().FindStartedAsync(Start, clock.Now, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public void TheUsageLimitsAreWhatTheStatusLineOfTheLastSessionTold()
     {
         Assert.Equal(UsageLimits.Unknown, Assistant().ReadLimits());
@@ -599,8 +645,8 @@ public sealed class ClaudeCodeTests : IDisposable
     static string Listing(params string[] entries) => "[" + string.Join(',', entries) + "]";
 
     // A session as the list of Claude Code has it: one that a process has says so with its `pid` and its `status`.
-    static string Entry(string id, string conversation, string state, string? status = null, string? waitingFor = null) =>
-        "{" + $"\"id\":\"{id}\",\"cwd\":\"/work/rocket\",\"kind\":\"background\",\"startedAt\":1791661881643,\"sessionId\":\"{conversation}\",\"name\":\"#12 Export the data\",\"state\":\"{state}\""
+    static string Entry(string id, string conversation, string state, string? status = null, string? waitingFor = null, long startedAt = 1791661881643, string name = "#12 Export the data") =>
+        "{" + $"\"id\":\"{id}\",\"cwd\":\"/work/rocket\",\"kind\":\"background\",\"startedAt\":{startedAt},\"sessionId\":\"{conversation}\",\"name\":\"{name}\",\"state\":\"{state}\""
         + (status is null ? "" : $",\"pid\":56109,\"status\":\"{status}\"")
         + (waitingFor is null ? "" : $",\"waitingFor\":\"{waitingFor}\"")
         + "}";

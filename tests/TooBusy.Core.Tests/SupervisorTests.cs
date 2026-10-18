@@ -1934,6 +1934,89 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task AKillWhileASessionStartsSendsTheTaskBackAndStopsTheSessionTheStartLeft()
+    {
+        plan = plan with { Commands = Around };
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Starting = _ => kill.Cancel();
+        assistant.StartsAnyway = true;
+
+        var result = await RunAsync();
+
+        const string Left = "#3 was being started: it is back in Todo, and the session that started for it all the same is stopped · fake attach 3";
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, Left), result);
+        Assert.Contains($"■ Killed while {Left}", log.Lines);
+        Assert.Equal(["status 3 InProgress", "status 3 Todo"], tracker.Did);
+
+        // The session is looked for by the name the start gave it, since the start was made, after the command before.
+        var (start, since) = Assert.Single(assistant.LookedFor);
+        Assert.Equal(("#3 Task 3", FakeClock.Start + TimeSpan.FromSeconds(2)), (start.Name, since));
+        Assert.Equal(1, assistant.Session(3).Stopped);
+
+        // No record names a session that does not work, and what the task started is stopped by the command after it.
+        Assert.Null(state.Record);
+        Assert.Equal([(Free, "3", policy.CommandTime), (Halt, "3", policy.KilledCommandTime)], shell.Ran);
+        Assert.Empty(log.Ends);
+    }
+
+    [Fact]
+    public async Task AKillWhileASessionStartsSaysWhenNoSessionWasFound()
+    {
+        tracker.Add(3);
+        assistant.Starting = _ => kill.Cancel();
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being started: it is back in Todo, and no session was found for it"), result);
+        Assert.Equal(["status 3 InProgress", "status 3 Todo"], tracker.Did);
+        Assert.Single(assistant.LookedFor);
+        Assert.Empty(assistant.Started);
+    }
+
+    [Fact]
+    public async Task AKillWhileATaskIsMovedToInProgressSendsItBackAndLooksForNoSession()
+    {
+        tracker.Add(3);
+        tracker.Doing = what =>
+        {
+            if (what == "status 3 InProgress")
+                kill.Cancel();
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being started: it is back in Todo"), result);
+        Assert.Equal(["status 3 Todo"], tracker.Did);
+        Assert.Empty(assistant.LookedFor);
+    }
+
+    [Fact]
+    public async Task ATaskThatCannotBeSentBackAfterAKillWhileItsSessionStartsIsSaid()
+    {
+        tracker.Add(3);
+        tracker.Refused.Add("status 3 Todo");
+        assistant.Starting = _ => kill.Cancel();
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being started: it could not be moved back to Todo, and no session was found for it"), result);
+        Assert.Contains("▲ The tracker refused: status 3 Todo. · set it right by hand before the next run", log.Lines);
+    }
+
+    [Fact]
+    public async Task AKillWhileASessionStartsWithoutABoardLeavesTheTaskAsItWas()
+    {
+        plan = plan with { Rules = Rules with { Board = false } };
+        tracker.Add(3);
+        assistant.Starting = _ => kill.Cancel();
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being started: it is left as it was, and no session was found for it"), result);
+    }
+
+    [Fact]
     public async Task TheNearLimitHoldsNoTaskBack()
     {
         tracker.Add(3);
@@ -2136,6 +2219,49 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Contains("label 3 +interrupted", tracker.Did);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith("■ Killed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AKillWhileTheSessionIsStoppedForALimitPausesTheTask()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Limit();
+        session.Stopping = kill.Cancel;
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Killed, result.End);
+        Assert.StartsWith("#3 is paused: toobusy was stopped while it waited for the limit.", result.Why, StringComparison.Ordinal);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
+        Assert.Equal([(3, RunMark.Paused)], Ended);
+
+        // The stop for the wait was cut, and the pause stops the session again.
+        Assert.Equal(1, session.Stopped);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("to reset, then goes on", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AKillInTheMiddleOfAPauseDoesNotCutItAndEndsTheRun()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(1))))
+            .Limit();
+        tracker.Doing = what =>
+        {
+            if (what == "label 3 +interrupted")
+                kill.Cancel();
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Killed, result.End);
+        Assert.StartsWith("#3 is paused: the weekly limit is spent", result.Why, StringComparison.Ordinal);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
+        Assert.Single(assistant.Started);
     }
 
     [Fact]
@@ -2768,6 +2894,91 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(1, assistant.Session(5).Stopped);
         Assert.Contains("■ Killed the session of #5 while the task was taken: the next run goes on with its session · fake attach 5", log.Lines);
         Assert.Equal(Record(5), state.Record);
+    }
+
+    [Fact]
+    public async Task AKillWhileTheOutcomeIsToldDoesNotCutItAndEndsTheRun()
+    {
+        plan = plan with { Commands = Around };
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Doing = what =>
+        {
+            if (what == "close 3")
+                kill.Cancel();
+        };
+
+        var result = await RunAsync();
+
+        // The record is forgotten before the tracker is told, so the task is closed and moved all the same.
+        const string Left = "#3 was being settled, and the tracker was told how it went all the same";
+        Assert.Equal(new RunResult(RunEnd.Killed, 1, Left), result);
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Null(state.Record);
+        Assert.Equal([(3, RunMark.Done)], Ended);
+        Assert.Equal(["  #3 is closed, with the report of the session as its comment", $"■ Killed while {Left}"], log.Lines.SkipWhile(line => !line.StartsWith("  #3 is closed", StringComparison.Ordinal)).Take(2));
+
+        // The next task is not started, and the command after this one is not cut.
+        Assert.Single(assistant.Started);
+        Assert.Equal([(Free, "3", policy.CommandTime), (Halt, "3", policy.KilledCommandTime)], shell.Ran);
+    }
+
+    [Fact]
+    public async Task AKillWhileATaskIsLeftToTheOwnerDoesNotCutItAndTheRunStopsOverTheTask()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works().Ends("The tests do not build.\nTOOBUSY: failed the tests do not build");
+        tracker.Doing = what =>
+        {
+            if (what == "label 3 +needs-owner")
+                kill.Cancel();
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Contains("■ Killed while #3 was being settled, and the tracker was told how it went all the same", log.Lines);
+    }
+
+    [Fact]
+    public async Task AKillInAPauseWhileTheOutcomeIsToldLeavesTheFailureOfTheCall()
+    {
+        tracker.Add(3);
+        tracker.Unanswered["close"] = 1;
+        tracker.Doing = what =>
+        {
+            if (what == "close 3")
+                clock.At(clock.Now - FakeClock.Start + TimeSpan.FromSeconds(5), kill.Cancel);
+        };
+
+        var result = await RunAsync();
+
+        // The close is not made again, and the task is left to the owner as over any tracker that does not answer.
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: close 3 (1)."), result);
+        Assert.Single(tracker.Asked, asked => asked == "close 3");
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.Contains("■ Killed while #3 was being settled, and the tracker was told how it went all the same", log.Lines);
+    }
+
+    [Fact]
+    public async Task AKillBeforeTheRecordOfASettledTaskIsForgottenLeavesTheTaskToTheNextRun()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3);
+        session.Stopping = kill.Cancel;
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being settled, and the next run settles it · fake attach 3"), result);
+        Assert.Contains("■ Killed while #3 was being settled: nothing of how it went is told yet, and the next run settles it · fake attach 3", log.Lines);
+        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
+        Assert.Equal(Record(3), state.Record);
+        Assert.Equal(1, session.Stopped);
+        Assert.Equal([(3, RunMark.Interrupted)], Ended);
+
+        // The working copy is read before the task, and not after its session.
+        Assert.Equal(1, workspace.Read);
     }
 
     [Fact]

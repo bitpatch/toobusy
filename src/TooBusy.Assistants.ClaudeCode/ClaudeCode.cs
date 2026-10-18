@@ -28,6 +28,10 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     const int StopLooks = 40;
     static readonly TimeSpan StopPause = TimeSpan.FromMilliseconds(500);
 
+    // How a session that a start which was cut off may have left is looked for: so many looks, so far apart.
+    const int StartLooks = 3;
+    static readonly TimeSpan StartPause = TimeSpan.FromSeconds(1);
+
     // How many times a session is tried to be gone on with, and for how long a session that was in the way is left
     // to go away.
     const int Tries = 3;
@@ -67,6 +71,23 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             return null;
 
         return new Session(this, found?.Id ?? trace.Id, conversation, trace.Since, earlier: true);
+    }
+
+    // A start that was cut off may have reached Claude Code all the same: its session is the one of the list that has
+    // the name of the start and was started since the moment, to the millisecond the list gives. One that has just
+    // started is not always listed at once, so the list is read again a few times.
+    public async Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        for (var look = 1; ; look++)
+        {
+            var listed = await ListAsync(cancellationToken);
+            if (listed?.LastOrDefault(entry => entry.Name == start.Name && entry.Started >= since.ToUnixTimeMilliseconds()) is { } found)
+                return new Session(this, found.Id, found.Conversation, since);
+            if (look == StartLooks)
+                return null;
+
+            await clock.DelayAsync(StartPause, cancellationToken);
+        }
     }
 
     // The limits as the status line of the last session told of them; nothing is known before a session has run.
@@ -133,7 +154,9 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                     Text(entry, "sessionId"),
                     Text(entry, "state"),
                     Text(entry, "waitingFor"),
-                    entry.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number || Text(entry, "status") is not null)),
+                    entry.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number || Text(entry, "status") is not null,
+                    Text(entry, "name"),
+                    entry.TryGetProperty("startedAt", out var started) && started.ValueKind == JsonValueKind.Number && started.TryGetInt64(out var at) ? at : null)),
             ];
         }
         catch (JsonException)
@@ -156,8 +179,9 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     [GeneratedRegex(@"backgrounded · ([0-9a-f]+)")]
     private static partial Regex Backgrounded();
 
-    // A session of the list. Alive tells that a process still has it.
-    sealed record Listed(string Id, string? Conversation, string? State, string? WaitingFor, bool Alive);
+    // A session of the list. Alive tells that a process still has it; Name is what its start called it, and Started
+    // when it was started, in Unix milliseconds.
+    sealed record Listed(string Id, string? Conversation, string? State, string? WaitingFor, bool Alive, string? Name, long? Started);
 
     // A background session. It is known by the short name Claude Code gave it; its conversation, which later runs go
     // on with it by, is learnt from the list of the sessions.

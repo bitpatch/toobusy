@@ -14,6 +14,10 @@ public interface IAssistant
     // started here. Null when nothing is left of it: no session that lives, and no conversation to go on with.
     Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken);
 
+    // The session that a start which was cut off may have started all the same: the one that has the name of the start
+    // and was started since the moment. Null when there is none, and when the sessions cannot be read.
+    Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken);
+
     // How much of the usage limits of the assistant is used, as far as it is known.
     UsageLimits ReadLimits();
 }
@@ -302,7 +306,8 @@ public interface IRunView
 }
 
 // A run of the queue. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at
-// once, and its task stays as it is.
+// once, and its task stays as it is. A task whose session was being started goes back to Todo, and one whose outcome
+// or pause was being told is told to its end.
 public interface IQueueRun
 {
     Task<RunResult> RunAsync(IRunView view, CancellationToken kill);

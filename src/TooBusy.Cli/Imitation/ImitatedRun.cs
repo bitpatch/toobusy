@@ -268,6 +268,10 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
             ? new MadeUpSession(this, task, Plays.GetValueOrDefault(task, Plain), earlier: true)
             : null);
 
+    // A made-up session starts at once, so no start is cut off with a session left behind it.
+    public Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken) =>
+        Task.FromResult<IAssistantSession?>(null);
+
     // The near window starts anew a few seconds after a session ran into it.
     public UsageLimits ReadLimits()
     {
