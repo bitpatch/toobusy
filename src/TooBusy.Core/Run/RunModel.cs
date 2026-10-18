@@ -134,9 +134,12 @@ public enum RunMark
     Paused,
 }
 
-// A line of the log of a run.
+// A line of the log of a run. Detail is what a log on disk keeps of the line and a screen does not show: the whole
+// of an error, with where it happened.
 public sealed record RunLine(RunMark Mark, string Text)
 {
+    public string? Detail { get; init; }
+
     public string Symbol => Mark switch
     {
         RunMark.Head => "✻",

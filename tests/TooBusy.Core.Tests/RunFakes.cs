@@ -559,7 +559,14 @@ sealed class Log : IRunView
 
     public string Text => string.Join('\n', Lines);
 
-    public void Say(RunLine line) => Lines.Add(line.ToString());
+    // The lines as they were said, with what a screen does not show of them.
+    public List<RunLine> Said { get; } = [];
+
+    public void Say(RunLine line)
+    {
+        Lines.Add(line.ToString());
+        Said.Add(line);
+    }
 
     public void Report(TaskEnd ended) => Ends.Add((ended.Task.Number, ended.Mark, (int)ended.Took.TotalSeconds));
 

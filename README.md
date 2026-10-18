@@ -36,7 +36,7 @@ Help me set up toobusy for my project. First run toobusy about to figure out how
 
 To me, this is the most preferable way to set it up. You can give more details in your prompt or ask about what the tool can do. The assistant will write the special skill for handling tasks in automatic mode itself along the way, `init --assist` leads to it.
 
-If something goes wrong, you can always give the logs to your assistant and ask it to set everything up properly. And if you find a bug, I would be glad if you file it in the issues of the repository and attach the logs there.
+If something goes wrong, you can always give the logs to your assistant and ask it to set everything up properly: every run leaves one in `.toobusy/local/logs/`, with every line it said, every command it ran and what came back. And if you find a bug, I would be glad if you file it in the issues of the repository and attach the logs there.
 
 If you want to set it up yourself, run `toobusy init` in your project folder.
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Processes;
@@ -370,10 +371,12 @@ public sealed class CliAppTests : IDisposable
 
         var (exit, output, _) = await RunAsync("run", "--demo", "--task", number);
 
+        // A demo writes no log, so it names none.
         Assert.Equal(1, exit);
         Assert.Equal(
             $"Demo: nothing is changed.{Environment.NewLine}✖ Stopped: #{number} is not taken: {why} · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}",
             output);
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy", "local", "logs")));
     }
 
     [Fact]
@@ -483,10 +486,17 @@ public sealed class CliAppTests : IDisposable
 
         var (exit, output, _) = await RunAsync(Context(processes) with { Home = personal.FullName }, ["run", "--task", "40"]);
 
+        // A run that stopped over a problem names its log, which holds what it said and every command it ran.
+        var log = $".toobusy/local/logs/run-{InstantClock.Start.ToLocalTime().ToString("yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture)}.log";
         Assert.Equal(1, exit);
-        Assert.Equal($"✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}", output);
+        Assert.Equal($"✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}  the log of the run: {log}{Environment.NewLine}", output);
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments[0] == "issue");
+        var written = File.ReadAllText(Path.Combine(folder.FullName, log));
+        Assert.Contains("✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started", written, StringComparison.Ordinal);
+        Assert.Contains(" $ gh api ", written, StringComparison.Ordinal);
+        Assert.Contains("→ gh exited 0 in ", written, StringComparison.Ordinal);
+        Assert.Contains("run ended: problem · #40 is not taken", written, StringComparison.Ordinal);
     }
 
     [Fact]

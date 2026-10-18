@@ -113,18 +113,24 @@ public sealed record Workbench(
         if (Repository is null)
             return null;
 
+        // The log of the run is written by everything around the run: the commands of the machine and of the
+        // project, and the view of the run itself.
         var local = LocalFolder.Ensure(Root);
-        return new Supervisor(
-            new GitHubTasks(Processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
-            new ClaudeCode(Processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, Home, System.Environment.GetEnvironmentVariable), Root, plan.PermissionMode),
-            new GitWorkspace(Processes, Root),
-            new RunStateFile(local),
-            new RunSignFile(local),
-            new LocalMachine(Processes),
-            Clock,
-            new ShellCommands(Root),
-            plan,
-            RunPolicy.Default);
+        var log = new RunLogFile(local, Clock);
+        var processes = new LoggedProcesses(Processes, log);
+        return new LoggedRun(
+            new Supervisor(
+                new GitHubTasks(processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
+                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, Home, System.Environment.GetEnvironmentVariable), Root, plan.PermissionMode),
+                new GitWorkspace(processes, Root),
+                new RunStateFile(local),
+                new RunSignFile(local),
+                new LocalMachine(processes),
+                Clock,
+                new LoggedCommands(new ShellCommands(Root), log),
+                plan,
+                RunPolicy.Default),
+            log);
     }
 
     // The run that goes on in the working copy; null when none does. A demo looks at no sign, as it puts none up.

@@ -1210,6 +1210,11 @@ public sealed class SupervisorTests : IDisposable
             log.Lines.SkipWhile(line => !line.StartsWith('■')).Take(4));
         Assert.Equal([$"Stopped: {why}"], machine.Notified);
 
+        // The whole error, with where it happened, is kept for the log on disk, which a screen does not show.
+        var detail = log.Said.Single(line => line.Text.StartsWith("Stopped:", StringComparison.Ordinal)).Detail;
+        Assert.StartsWith("System.InvalidOperationException: The list of the sessions", detail, StringComparison.Ordinal);
+        Assert.Contains("   at ", detail, StringComparison.Ordinal);
+
         // The record stays, so the next run goes on with the session; the command after the task has its whole time.
         Assert.Equal(Record(3), state.Record);
         Assert.Equal([(Free, "3", policy.CommandTime), (Halt, "3", policy.CommandTime)], shell.Ran);

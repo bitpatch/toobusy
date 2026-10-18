@@ -126,7 +126,7 @@ public sealed class Supervisor(
             {
                 // What nothing of the run foresaw stops it all the same, a cancellation that is not the kill among
                 // it: a session that worked was stopped where its task was done, and the log names what happened.
-                result = Stop(Unforeseen(unforeseen));
+                result = Stop(Unforeseen(unforeseen), unforeseen.ToString());
             }
             finally
             {
@@ -1455,9 +1455,10 @@ public sealed class Supervisor(
             Say(RunMark.Note, $"│ … {session.Open} shows the whole session");
     }
 
-    RunResult Stop(string problem)
+    // `detail` is what the log on disk keeps of the problem beyond its line: the whole of an error nobody foresaw.
+    RunResult Stop(string problem, string? detail = null)
     {
-        Say(RunMark.Failed, $"Stopped: {problem} · the next task did not start · {Went()}");
+        view.Say(new RunLine(RunMark.Failed, $"Stopped: {problem} · the next task did not start · {Went()}") { Detail = detail });
         machine.Notify($"Stopped: {problem}");
         return Ended(RunEnd.Problem, problem);
     }
