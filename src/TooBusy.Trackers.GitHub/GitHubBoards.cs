@@ -17,18 +17,31 @@ public sealed class GitHubBoards(IProcessRunner processes) : ISetupBoards
         .data | (.viewer | "owner\tuser\t\(.login)", (.organizations.nodes[]? | select(. != null) | "owner\torg\t\(.login)"), ([.projectsV2.nodes[]?, .organizations.nodes[]?.projectsV2.nodes[]?] | .[] | select(. != null and .closed != true) | "board\t\(.url)\t\(.title)")), (.repository.projectsV2.nodes[]? | select(. != null and .closed != true) | "linked\t\(.url)\t\(.title)")
         """;
 
-    // The question waits for the list, so a slow answer is given up.
-    static readonly TimeSpan Patience = TimeSpan.FromSeconds(3);
+    // One request asks for a lot, and the setup waits for it under its dots, where the user can go back at any time:
+    // it has the patience of the other requests of the setup.
+    static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
     public async Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
     {
-        // A repository that cannot be read fails the whole request, so it is asked again without it.
-        var lines = repository?.Split('/') is [var owner, var name]
-            ? await AskAsync(
+        // A repository that cannot be read fails the whole request, so it is asked again without it. A GitHub that did
+        // not answer in time is not asked again: the user would wait twice as long for the same.
+        ProcessResult? answer = null;
+        if (repository?.Split('/') is [var owner, var name])
+        {
+            answer = await AskAsync(
                 ["-f", $"owner={owner}", "-f", $"name={name}", "-f", $"query=query($owner: String!, $name: String!) {{ {Viewer} repository(owner: $owner, name: $name) {{ {Boards} }} }}"],
-                cancellationToken)
-            : null;
-        lines ??= await AskAsync(["-f", $"query={{ {Viewer} }}"], cancellationToken) ?? [];
+                cancellationToken);
+            if (answer.Status == ProcessStatus.TimedOut)
+                return SetupBoards.NoAnswer;
+        }
+
+        if (answer is not { Status: ProcessStatus.Exited, ExitCode: 0 })
+            answer = await AskAsync(["-f", $"query={{ {Viewer} }}"], cancellationToken);
+        if (answer.Status == ProcessStatus.TimedOut)
+            return SetupBoards.NoAnswer;
+
+        // A tool that is missing or fails gives none.
+        var lines = answer is { Status: ProcessStatus.Exited, ExitCode: 0 } ? answer.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) : [];
 
         var linked = Fields(lines, "linked", SettingsValidator.IsBoard).Select(fields => new SetupBoard(fields[1], fields[2], Linked: true)).ToList();
         var others = Fields(lines, "board", SettingsValidator.IsBoard)
@@ -38,12 +51,8 @@ public sealed class GitHubBoards(IProcessRunner processes) : ISetupBoards
         return new SetupBoards([.. linked, .. others], [.. owners]);
     }
 
-    // The lines of the answer; null when the tool is missing, fails or is too slow.
-    async Task<string[]?> AskAsync(string[] request, CancellationToken cancellationToken)
-    {
-        var result = await processes.RunAsync("gh", ["api", "graphql", .. request, "--jq", Lines.Trim()], Patience, cancellationToken);
-        return result is { Status: ProcessStatus.Exited, ExitCode: 0 } ? result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) : null;
-    }
+    Task<ProcessResult> AskAsync(string[] request, CancellationToken cancellationToken) =>
+        processes.RunAsync("gh", ["api", "graphql", .. request, "--jq", Lines.Trim()], Patience, cancellationToken);
 
     static IEnumerable<string[]> Fields(string[] lines, string kind, Func<string, bool> accept) => lines
         .Select(line => line.TrimEnd('\r').Split('\t', 3))

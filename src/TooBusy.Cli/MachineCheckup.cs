@@ -49,8 +49,13 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform, 
         return manager is not null && (await processes.RunAsync(manager, ["--version"], Patience, cancellationToken)).Status != ProcessStatus.NotFound;
     }
 
-    public async Task<bool> TrackerLoggedInAsync(CancellationToken cancellationToken) =>
-        await new GitHubCli(processes).CheckAsync(cancellationToken) == GitHubCliState.Ready;
+    public async Task<TrackerLoginState> CheckTrackerLoginAsync(CancellationToken cancellationToken) =>
+        await new GitHubCli(processes).CheckAsync(cancellationToken) switch
+        {
+            GitHubCliState.Ready => TrackerLoginState.LoggedIn,
+            GitHubCliState.TimedOut => TrackerLoginState.NoAnswer,
+            _ => TrackerLoginState.LoggedOut,
+        };
 
     public Task<bool> AssistantLoggedInAsync(CancellationToken cancellationToken) => new ClaudeLogin(processes).CheckAsync(cancellationToken);
 

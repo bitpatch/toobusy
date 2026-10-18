@@ -122,11 +122,12 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     }
 
     // The ways to name a board, as tabs that Tab goes through: one of the known boards, an address, a new board, none.
+    // The boards that are not known because GitHub did not answer have their tab all the same, which says so.
     BoardAnswer? PickBoard(BoardQuestion question)
     {
         (Way Way, string Name)[] ways =
         [
-            .. question.Known.Count > 0 ? [(Way.Known, "Your projects")] : ((Way, string)[])[],
+            .. question.Known.Count > 0 || question.Unread is not null ? [(Way.Known, "Your projects")] : ((Way, string)[])[],
             (Way.Address, "By URL"),
             .. question.Owners.Count > 0 ? [(Way.Created, "New project")] : ((Way, string)[])[],
             (Way.None, "No project"),
@@ -183,6 +184,19 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
             string keys;
             switch (ways[way].Way)
             {
+                case Way.Known when question.Unread is { } unread:
+                    // There is nothing to filter, and nothing to choose but `Back`.
+                    lines.Add(Line.Of($"  {unread}", Tone.Error));
+                    if (back > 0)
+                    {
+                        pointed = lines.Count;
+                        lines.Add(Picker.BackRow(true));
+                    }
+
+                    named = back > 0;
+                    keys = back > 0 ? "enter choose" : "";
+                    break;
+
                 case Way.Known:
                     fitting = BoardSuggestions.Matching(question.Known, filter.Text);
                     // A filter that fits nothing leaves no list, and so no `Back` for Enter to fall on.
@@ -266,6 +280,11 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
 
             switch (ways[way].Way)
             {
+                case Way.Known when question.Unread is not null:
+                    if (key.Key == ConsoleKey.Enter && back > 0)
+                        return null;
+                    break;
+
                 case Way.Known when key.Key == ConsoleKey.UpArrow && fitting.Count > 0:
                     at = (at + fitting.Count + back - 1) % (fitting.Count + back);
                     break;

@@ -132,9 +132,12 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
         if (await ToolAsync(TrackerTool, Tool.GitHubCli, "The GitHub command-line tool `gh`", "The GitHub command-line tool `gh` is not installed."))
         {
             view.Start(TrackerLogin);
-            Tell(await machine.TrackerLoggedInAsync(cancellationToken)
-                ? new CheckResult(TrackerLogin, CheckState.Passed)
-                : new CheckResult(TrackerLogin, CheckState.Failed, "`gh` is not logged in to github.com.", Fixes.TrackerLogin));
+            Tell(await machine.CheckTrackerLoginAsync(cancellationToken) switch
+            {
+                TrackerLoginState.LoggedIn => new CheckResult(TrackerLogin, CheckState.Passed),
+                TrackerLoginState.NoAnswer => new CheckResult(TrackerLogin, CheckState.Failed, "GitHub did not answer in time, so the login could not be checked.", Fixes.NoAnswer),
+                _ => new CheckResult(TrackerLogin, CheckState.Failed, "`gh` is not logged in to github.com.", Fixes.TrackerLogin),
+            });
         }
         else
         {

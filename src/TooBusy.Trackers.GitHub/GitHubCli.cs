@@ -14,6 +14,9 @@ public enum GitHubCliState
 
     // `gh` is there, and it is not logged in to github.com.
     LoggedOut,
+
+    // `gh` is there, and GitHub did not answer it in time: whether it is logged in is not known.
+    TimedOut,
 }
 
 // The GitHub command-line tool of the machine: whether it can be asked at all.
@@ -21,6 +24,8 @@ public sealed class GitHubCli(IProcessRunner processes)
 {
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
 
+    // `gh auth status` asks GitHub whether the token is good, so a slow GitHub is no answer about the login: when it
+    // does not end in its time, or says that its own request timed out, nothing is known of the login.
     public async Task<GitHubCliState> CheckAsync(CancellationToken cancellationToken)
     {
         var result = await processes.RunAsync("gh", ["auth", "status", "--hostname", "github.com"], Patience, cancellationToken);
@@ -28,7 +33,9 @@ public sealed class GitHubCli(IProcessRunner processes)
         {
             { Status: ProcessStatus.NotFound } => GitHubCliState.Missing,
             { Status: ProcessStatus.NotStarted } => GitHubCliState.Unstarted,
+            { Status: ProcessStatus.TimedOut } => GitHubCliState.TimedOut,
             { Status: ProcessStatus.Exited, ExitCode: 0 } => GitHubCliState.Ready,
+            _ when result.Error.Contains("Timeout trying to log in", StringComparison.OrdinalIgnoreCase) => GitHubCliState.TimedOut,
             _ => GitHubCliState.LoggedOut,
         };
     }

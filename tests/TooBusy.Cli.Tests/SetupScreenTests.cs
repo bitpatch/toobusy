@@ -448,6 +448,18 @@ public sealed class SetupScreenTests : IDisposable
         Assert.DoesNotContain("[Your projects]", coloured.Output.ToString(), StringComparison.Ordinal);
     }
 
+    // Boards that GitHub did not answer for are not boards that are not there: their tab says so, has nothing to
+    // filter, and goes back.
+    [Fact]
+    public void BoardsThatGitHubDidNotAnswerForAreSaidInTheirTab()
+    {
+        terminal.Keys.Type("x").Press(Keys.Enter);
+
+        Assert.Null(screen.AskBoard(Question(current: null) with { Known = [], Unread = "GitHub did not answer, so your projects cannot be listed." }));
+        terminal.AssertSaw(" [Your projects]  By URL   New project   No project   press tab to switch\n   GitHub did not answer, so your projects cannot be listed.\n ❯ Back  esc\n enter choose · ctrl+c exit");
+        Assert.DoesNotContain(" Filter", terminal.Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TypingNarrowsTheKnownBoards()
     {

@@ -16,6 +16,7 @@ public class ProjectSetupTests
     const string TodoStatus = "Todo status";
     const string InProgressStatus = "In Progress status";
     const string DoneStatus = "Done status";
+    const string BoardsUnanswered = "GitHub did not answer, so your projects cannot be listed.";
 
     static readonly ProjectSettings Existing = new(
         new TrackerSettings("github", Rocket),
@@ -122,6 +123,20 @@ public class ProjectSetupTests
         Assert.Equal(boards.Read.Boards, dialog.Question!.Known);
         Assert.Equal([new SetupOwner("acme", true), new SetupOwner("denis", false)], dialog.Question.Owners);
         Assert.Null(dialog.Question.Current);
+        Assert.Null(dialog.Question.Unread);
+    }
+
+    // A GitHub that did not answer in time for the boards is not one that has none: the question says so.
+    [Fact]
+    public async Task BoardsThatGitHubDidNotAnswerForAreSaidInTheQuestion()
+    {
+        boards.Read = SetupBoards.NoAnswer;
+
+        await RunAsync();
+
+        Assert.Empty(dialog.Question!.Known);
+        Assert.Empty(dialog.Question.Owners);
+        Assert.Equal(BoardsUnanswered, dialog.Question.Unread);
     }
 
     [Fact]
@@ -822,6 +837,18 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.Failed, result.Outcome);
         Assert.Equal("Project: A new project cannot be made: GitHub named nobody it can be made for.", result.Failure);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WithoutQuestionsANewBoardIsNotMadeWhereGitHubDidNotAnswerForWhoseItCanBe()
+    {
+        boards.Read = SetupBoards.NoAnswer;
+
+        var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("Project: A new project cannot be made: GitHub did not answer, so nobody is known it can be made for.", result.Failure);
         Assert.Null(store.Saved);
     }
 
@@ -1742,6 +1769,26 @@ public class ProjectSetupTests
         Assert.Equal(SetupOutcome.NothingToChange, again.Outcome);
         Assert.Equal(["Reading your projects from GitHub"], dialog.Waited);
         Assert.Single(tracker.Linked);
+    }
+
+    // The menu asks GitHub again for the boards it did not answer for, the next time the project is asked about.
+    [Fact]
+    public async Task TheProjectOfTheMenuReadsTheBoardsAgainWhenGitHubDidNotAnswer()
+    {
+        boards.Read = SetupBoards.NoAnswer;
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+        Assert.Equal(BoardsUnanswered, dialog.Question!.Unread);
+
+        boards.Read = new SetupBoards([new SetupBoard(Rocket, "Rocket", true), new SetupBoard(Moon, "Moon base", false)], []);
+        await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+        await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+
+        Assert.Null(dialog.Question.Unread);
+        Assert.Equal(boards.Read.Boards, dialog.Question.Known);
+        Assert.Equal(["Reading your projects from GitHub", "Reading your projects from GitHub"], dialog.Waited);
     }
 
     [Fact]

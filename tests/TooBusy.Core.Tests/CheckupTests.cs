@@ -90,7 +90,7 @@ public class CheckupTests
     [Fact]
     public async Task ALoginThatIsMissingFailsWithTheCommandThatLogsIn()
     {
-        machine.TrackerLoggedIn = false;
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
         machine.AssistantLoggedIn = false;
 
         var checks = await RunAsync();
@@ -98,6 +98,21 @@ public class CheckupTests
         Assert.Equal(new CheckResult("GitHub login", CheckState.Failed, "`gh` is not logged in to github.com.", "gh auth login"), Of(checks, "GitHub login"));
         Assert.Equal(new CheckResult("Claude Code login", CheckState.Failed, "Claude Code is not logged in.", "claude, then /login"), Of(checks, "Claude Code login"));
         Assert.Equal(CheckState.Skipped, Of(checks, "repository").State);
+    }
+
+    // `gh auth status` asks GitHub: one that did not answer in time says nothing of the login, and the check says so.
+    [Fact]
+    public async Task ALoginThatGitHubDidNotAnswerForIsNotToldAsMissing()
+    {
+        machine.TrackerLogin = TrackerLoginState.NoAnswer;
+
+        var checks = await RunAsync();
+
+        Assert.Equal(
+            new CheckResult("GitHub login", CheckState.Failed, "GitHub did not answer in time, so the login could not be checked.", "try again; GitHub is slow or unreachable"),
+            Of(checks, "GitHub login"));
+        Assert.Equal(new CheckResult("repository", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "repository"));
+        Assert.Equal(new CheckResult("board", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "board"));
     }
 
     // A Claude Code newer than the one toobusy was written against runs, and may print otherwise: it is warned of,
@@ -239,7 +254,7 @@ public class CheckupTests
         Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
 
         machine.Board = BoardAccess.Readable;
-        machine.TrackerLoggedIn = false;
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
         Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
 
         store.Current = Project(board: null);
@@ -277,7 +292,7 @@ public class CheckupTests
     [Fact]
     public async Task TheChecksOfTheMachineAreTheFiveThatNeedNoSettings()
     {
-        machine.TrackerLoggedIn = false;
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
 
         var checks = await Checkup.MachineAsync(machine, view, TestContext.Current.CancellationToken);
 
@@ -393,7 +408,7 @@ public class CheckupTests
 
         public int ManagerAsked { get; private set; }
 
-        public bool TrackerLoggedIn { get; set; } = true;
+        public TrackerLoginState TrackerLogin { get; set; } = TrackerLoginState.LoggedIn;
 
         public bool AssistantLoggedIn { get; set; } = true;
 
@@ -420,7 +435,7 @@ public class CheckupTests
             return Task.FromResult(HasManager);
         }
 
-        public Task<bool> TrackerLoggedInAsync(CancellationToken cancellationToken) => Task.FromResult(TrackerLoggedIn);
+        public Task<TrackerLoginState> CheckTrackerLoginAsync(CancellationToken cancellationToken) => Task.FromResult(TrackerLogin);
 
         public Task<bool> AssistantLoggedInAsync(CancellationToken cancellationToken) => Task.FromResult(AssistantLoggedIn);
 

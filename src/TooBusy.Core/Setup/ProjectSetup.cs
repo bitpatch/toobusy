@@ -45,6 +45,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The steps that are asked; the confirmation comes when they are all done.
     const string ProjectLabel = "Project";
     const string ProjectHint = "The GitHub project of the tasks: their statuses are kept on its board.";
+
+    // What the list of the boards says where GitHub did not answer in time for them.
+    const string BoardsUnanswered = "GitHub did not answer, so your projects cannot be listed.";
+
     const string StatusesLabel = "Statuses";
     const string BlockingLabel = "Blocking labels";
     const string BlockingHint = "Tasks with any of these labels are never taken. Choose none to block nothing.";
@@ -409,8 +413,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         return loaded;
     }
 
-    // Reads the boards the user can reach, once, where the tracker can be read at all. False when the user went back
-    // instead of waiting for them.
+    // Reads the boards the user can reach, once, where the tracker can be read at all; boards that GitHub did not
+    // answer in time for are asked for again when the menu asks about the project again. False when the user went
+    // back instead of waiting for them.
     async Task<bool> ReadBoardsAsync(CancellationToken cancellationToken)
     {
         if (boardsRead || !reachable)
@@ -423,7 +428,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         // A new board is proposed for the owner of the repository when the user can make one there. Without a
         // repository to link it to no board is made, so there is nobody to make one for.
         known = read with { Owners = verified ? [.. read.Owners.OrderBy(owner => repository.StartsWith(owner.Login + "/", StringComparison.OrdinalIgnoreCase) ? 0 : 1)] : [] };
-        boardsRead = true;
+        boardsRead = !read.Unanswered;
         return true;
     }
 
@@ -445,6 +450,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                     Reject($"{ProjectLabel}: A project needs a title.");
                 else if (!verified)
                     Reject($"{ProjectLabel}: A new project cannot be made where nothing is verified.");
+                else if (known.Unanswered)
+                    Reject($"{ProjectLabel}: A new project cannot be made: GitHub did not answer, so nobody is known it can be made for.");
                 else if (known.Owners.Count == 0)
                     Reject($"{ProjectLabel}: A new project cannot be made: GitHub named nobody it can be made for.");
                 else if (created.Owner is null)
@@ -560,7 +567,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 text => SettingsValidator.IsBoard(BoardSuggestions.AddressOf(text)) ? null : "That is not a project. Use https://github.com/orgs/<org>/projects/<number>.",
                 title => string.IsNullOrWhiteSpace(title) ? "A project needs a title." : null,
                 proposed is BoardAnswer.Existing ? null : proposed)
-            { Saved = current?.Tracker.Board });
+            { Saved = current?.Tracker.Board, Unread = known.Unanswered ? BoardsUnanswered : null });
             if (answer is null)
                 return false;
 

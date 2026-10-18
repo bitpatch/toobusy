@@ -26,6 +26,16 @@ public sealed record ToolLook(bool Runs, string? Unstarted = null)
     public string? WrittenAgainst { get; init; }
 }
 
+// What is found of the login of the tracker's command-line tool.
+public enum TrackerLoginState
+{
+    LoggedIn,
+    LoggedOut,
+
+    // The tracker did not answer in time: whether the tool is logged in is not known.
+    NoAnswer,
+}
+
 public enum BoardAccess
 {
     Readable,
@@ -52,7 +62,7 @@ public interface ICheckupMachine
     // Whether the package manager a fix would name on this platform is on the path; false where there is none.
     Task<bool> HasManagerAsync(CancellationToken cancellationToken);
 
-    Task<bool> TrackerLoggedInAsync(CancellationToken cancellationToken);
+    Task<TrackerLoginState> CheckTrackerLoginAsync(CancellationToken cancellationToken);
 
     Task<bool> AssistantLoggedInAsync(CancellationToken cancellationToken);
 

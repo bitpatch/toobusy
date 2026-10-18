@@ -9,6 +9,9 @@ public static class Fixes
     public const string AssistantLogin = "claude, then /login";
     public const string Setup = "toobusy init";
 
+    // A tracker that did not answer in time: nothing is wrong with the machine that is known.
+    public const string NoAnswer = "try again; GitHub is slow or unreachable";
+
     // A board that lacks a status the settings name: the setup asks which of its statuses is which, or the
     // project works without a board.
     public const string Statuses = "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board";

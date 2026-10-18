@@ -101,6 +101,11 @@ public sealed record SetupOwner(string Login, bool Organisation);
 public sealed record SetupBoards(IReadOnlyList<SetupBoard> Boards, IReadOnlyList<SetupOwner> Owners)
 {
     public static SetupBoards None { get; } = new([], []);
+
+    // GitHub did not answer in time: there are none because nothing is known, and the question says so.
+    public static SetupBoards NoAnswer { get; } = new([], []) { Unanswered = true };
+
+    public bool Unanswered { get; init; }
 }
 
 // Current is the board the project has now, when it has one: the user keeps it or changes it.
@@ -120,6 +125,10 @@ public sealed record BoardQuestion(
     // The address of the board the settings have now, which the screen marks among the others; null where they
     // have none, or where there are no settings yet.
     public string? Saved { get; init; }
+
+    // Why the boards the user can reach are not known, which the screen says where it would list them; null when
+    // they are, none among them too.
+    public string? Unread { get; init; }
 }
 
 public abstract record BoardAnswer
@@ -194,7 +203,8 @@ public sealed record SetupEnvironment(IReadOnlyList<SetupProblem> Problems, bool
 public sealed record SetupProblem(string Text, string Fix);
 
 // The boards the user can reach, those linked to the repository first, and who a new one can belong to.
-// It never fails: when they cannot be read there are none, and the question goes without them.
+// It never fails: when they cannot be read there are none, and the question goes without them. When the tracker did
+// not answer in time it says so: the question tells the user, as the user is not to think that there are none.
 public interface ISetupBoards
 {
     Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken);

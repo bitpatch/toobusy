@@ -9,6 +9,9 @@ sealed class FakeProcesses : IProcessRunner
 
     public List<(string Command, IReadOnlyList<string> Arguments)> Asked { get; } = [];
 
+    // How long each command was given, in the order they were asked.
+    public List<TimeSpan> Timeouts { get; } = [];
+
     // What a test looks at while a command runs, as a file the command is given.
     public Action<IReadOnlyList<string>>? Running { get; set; }
 
@@ -19,6 +22,7 @@ sealed class FakeProcesses : IProcessRunner
     public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
         Asked.Add((command, arguments));
+        Timeouts.Add(timeout);
         Running?.Invoke(arguments);
         return Task.FromResult(Answers.Count > 0 ? Answers.Dequeue() : new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
     }

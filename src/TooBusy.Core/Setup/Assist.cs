@@ -283,7 +283,7 @@ public static class Assist
         }
         else if (ground.Unread is null && ground.Boards is not null)
         {
-            things.Append(CultureInfo.InvariantCulture, $" No board can be read: you can reach none that is open, the token lacks the `project` scope, or GitHub did not answer. `gh auth refresh -s project` gives the scope, as step 1 says: `{Command(1)}`. The step is told without the boards.");
+            things.Append(CultureInfo.InvariantCulture, $" No board can be read: you can reach none that is open, or the token lacks the `project` scope. `gh auth refresh -s project` gives the scope, as step 1 says: `{Command(1)}`. The step is told without the boards.");
         }
         else
         {

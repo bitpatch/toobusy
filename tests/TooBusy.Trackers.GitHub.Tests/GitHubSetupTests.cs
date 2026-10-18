@@ -286,7 +286,7 @@ public class GitHubSetupTests
     [Theory]
     [InlineData(ProcessStatus.Exited, 0, GitHubCliState.Ready)]
     [InlineData(ProcessStatus.Exited, 1, GitHubCliState.LoggedOut)]
-    [InlineData(ProcessStatus.TimedOut, 0, GitHubCliState.LoggedOut)]
+    [InlineData(ProcessStatus.TimedOut, 0, GitHubCliState.TimedOut)]
     [InlineData(ProcessStatus.NotFound, 0, GitHubCliState.Missing)]
     [InlineData(ProcessStatus.NotStarted, 0, GitHubCliState.Unstarted)]
     public async Task TheToolIsReadyWhenItIsThereAndLoggedIn(ProcessStatus status, int exitCode, GitHubCliState expected)
@@ -295,6 +295,17 @@ public class GitHubSetupTests
 
         Assert.Equal(expected, await new GitHubCli(processes).CheckAsync(TestContext.Current.CancellationToken));
         Assert.Equal(["auth", "status", "--hostname", "github.com"], Assert.Single(processes.Asked).Arguments);
+    }
+
+    // What `gh auth status` says when its own request to GitHub timed out, and when the token is bad.
+    [Theory]
+    [InlineData("github.com\n  X Timeout trying to log in to github.com account denis (keyring)\n  - Active account: true\n", GitHubCliState.TimedOut)]
+    [InlineData("github.com\n  X Failed to log in to github.com using token (GH_TOKEN)\n  - Active account: true\n  - The token in GH_TOKEN is invalid.\n", GitHubCliState.LoggedOut)]
+    public async Task AToolThatSaysItTimedOutIsNotLoggedOut(string error, GitHubCliState expected)
+    {
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.Exited, 1, "", error));
+
+        Assert.Equal(expected, await new GitHubCli(processes).CheckAsync(TestContext.Current.CancellationToken));
     }
 
     GitHubSetup Setup() => new(processes);

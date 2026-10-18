@@ -75,12 +75,55 @@ public class GitHubBoardsTests
     [Theory]
     [InlineData(ProcessStatus.Exited, 1)]
     [InlineData(ProcessStatus.NotFound, 0)]
-    [InlineData(ProcessStatus.TimedOut, 0)]
+    [InlineData(ProcessStatus.NotStarted, 0)]
     public async Task WhenTheToolFailsThereAreNoBoards(ProcessStatus status, int exitCode)
     {
         processes.Answers.Enqueue(new ProcessResult(status, exitCode, $"board\t{Fatgard}\tFatgard\n", "gh: your token lacks the read:project scope"));
 
-        Assert.Equal(new SetupBoards([], []), await ReadAsync(null), (left, right) => left!.Boards.Count == right!.Boards.Count && left.Owners.Count == right.Owners.Count);
+        var read = await ReadAsync(null);
+
+        Assert.Empty(read.Boards);
+        Assert.Empty(read.Owners);
+        Assert.False(read.Unanswered);
+    }
+
+    // The setup waits for the boards under its dots, where the user can go back: GitHub has as long as it has for
+    // the other requests of the setup.
+    [Fact]
+    public async Task TheBoardsAreWaitedForAsLongAsTheOtherRequestsOfTheSetup()
+    {
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+
+        await ReadAsync(null);
+
+        Assert.Equal(TimeSpan.FromSeconds(15), Assert.Single(processes.Timeouts));
+    }
+
+    // A GitHub that did not answer in time is not taken for one that has no boards, and is not asked once more.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("bitpatch/toobusy")]
+    public async Task BoardsThatGitHubDidNotAnswerForAreToldSo(string? repository)
+    {
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        var read = await ReadAsync(repository);
+
+        Assert.True(read.Unanswered);
+        Assert.Empty(read.Boards);
+        Assert.Single(processes.Asked);
+    }
+
+    [Fact]
+    public async Task ARepositoryThatCannotBeReadAndAGitHubThatDoesNotAnswerAfterItAreToldAsNoAnswer()
+    {
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.Exited, 1, "{\"data\":{\"repository\":null}}", "gh: Could not resolve to a Repository"));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+
+        var read = await ReadAsync("example/project");
+
+        Assert.True(read.Unanswered);
+        Assert.Equal(2, processes.Asked.Count);
     }
 
     Task<SetupBoards> ReadAsync(string? repository) => new GitHubBoards(processes).ReadAsync(repository, TestContext.Current.CancellationToken);

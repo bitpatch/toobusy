@@ -302,7 +302,7 @@ public class AssistTests
     public void TheStepOfTheBoardTellsAProjectWithoutOneAndOneWithoutSettingsAndBoardsThatAreNotThere()
     {
         var none = Assist.Step(3, Set() with { Boards = [] });
-        Assert.Contains("As things are: the project works without a board. No board can be read: you can reach none that is open, the token lacks the `project` scope, or GitHub did not answer. `gh auth refresh -s project` gives the scope, as step 1 says: `toobusy init --assist 1`. The step is told without the boards.\n", none, StringComparison.Ordinal);
+        Assert.Contains("As things are: the project works without a board. No board can be read: you can reach none that is open, or the token lacks the `project` scope. `gh auth refresh -s project` gives the scope, as step 1 says: `toobusy init --assist 1`. The step is told without the boards.\n", none, StringComparison.Ordinal);
 
         var unset = Assist.Step(3, Unset with { Boards = [new AssistBoard(Rocket, "Rocket", false, ["Todo", "In Progress", "Done"])] });
         Assert.Contains("As things are: not set: there are no settings yet. Step 2 writes the settings first: `toobusy init --assist 2`. The boards you can reach", unset, StringComparison.Ordinal);

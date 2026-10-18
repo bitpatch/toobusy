@@ -2018,6 +2018,24 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("The labels to skip are left as they were.", output, StringComparison.Ordinal);
     }
 
+    // `gh auth status` asks GitHub: one that does not answer in time is not a login that is missing.
+    [Fact]
+    public async Task SkipLabelsOfTheMenuSaysThatGitHubDidNotAnswer()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
+            ? new ProcessResult(ProcessStatus.TimedOut, 0, "", "")
+            : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Up, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter), processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("GitHub did not answer, so the labels cannot be read.\u001b[K\r\n", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("not logged in", output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ADemoSkipsTheChosenLabelsOfItsMenuInTheRunsItOpens()
     {
@@ -3384,6 +3402,26 @@ public sealed class CliAppTests : IDisposable
         var elsewhere = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://gitlab.com/acme/rocket.git\n" : "", ""));
         var (_, milestones, _) = await RunAsync(Context(elsewhere), ["init", "--assist", "4"]);
         Assert.Contains("The open milestones cannot be read: the `origin` remote is not a GitHub repository. Step 1 puts it right", milestones, StringComparison.Ordinal);
+    }
+
+    // A GitHub that does not answer in time is neither a `gh` that is logged out nor one that reaches no board.
+    [Fact]
+    public async Task AStepOfAssistSaysThatGitHubDidNotAnswer()
+    {
+        GitRepository();
+        FakeProcesses Silent(Func<IReadOnlyList<string>, bool> unanswered) => new((command, arguments) => command == "gh" && unanswered(arguments)
+            ? new ProcessResult(ProcessStatus.TimedOut, 0, "", "")
+            : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+
+        var (_, login, _) = await RunAsync(Context(Silent(arguments => arguments[0] == "auth")), ["init", "--assist", "3"]);
+        var (_, boards, _) = await RunAsync(Context(Silent(arguments => arguments[0] == "api")), ["init", "--assist", "3"]);
+
+        foreach (var told in (string[])[login, boards])
+        {
+            Assert.Contains("The boards cannot be read: GitHub did not answer. Ask for the step again, or see step 1: `toobusy init --assist 1`.", told, StringComparison.Ordinal);
+            Assert.DoesNotContain("not logged in", told, StringComparison.Ordinal);
+            Assert.DoesNotContain("No board can be read", told, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

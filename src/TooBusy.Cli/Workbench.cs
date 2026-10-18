@@ -219,13 +219,24 @@ public sealed record Workbench(
             return ground;
         if (await Machine.FindAsync(Tool.GitHubCli, cancellationToken) is { Runs: false } gh)
             return ground with { Unread = gh.Unstarted is { } why ? $"the GitHub command-line tool `gh` could not be started: {why}." : "the GitHub command-line tool `gh` is not installed." };
-        if (!await Machine.TrackerLoggedInAsync(cancellationToken))
-            return ground with { Unread = "`gh` is not logged in to github.com." };
+
+        // A GitHub that did not answer has nothing read, and no reason that a step puts right: the step says so.
+        switch (await Machine.CheckTrackerLoginAsync(cancellationToken))
+        {
+            case TrackerLoginState.LoggedOut:
+                return ground with { Unread = "`gh` is not logged in to github.com." };
+            case TrackerLoginState.NoAnswer:
+                return ground;
+        }
 
         // The boards are those of the user, whatever the repository is; the labels and the milestones are its own.
         if (reading == AssistReading.Boards)
         {
-            var known = (await Boards.ReadAsync(Repository, cancellationToken)).Boards;
+            var read = await Boards.ReadAsync(Repository, cancellationToken);
+            if (read.Unanswered)
+                return ground;
+
+            var known = read.Boards;
             if (loaded?.Settings?.Tracker.Board is { } kept && known.All(board => !board.Address.Equals(kept, StringComparison.OrdinalIgnoreCase)))
                 known = [new SetupBoard(kept, "", Linked: false), .. known];
 
@@ -249,15 +260,20 @@ public sealed record Workbench(
 
     // The labels a run may be told to skip, read as `init` reads them for its questions: those of the repository and,
     // after them, those of the settings that it lacks. Null when they cannot be read, with why: without `gh`, logged
-    // in, or a GitHub `origin` remote. A demo has its made-up labels.
+    // in, a GitHub that answers, or a GitHub `origin` remote. A demo has its made-up labels.
     public async Task<(IReadOnlyList<string>? Labels, string? Unread)> ReadLabelsAsync(ProjectSettings settings, CancellationToken cancellationToken)
     {
         if (Repository is null)
             return (null, "The `origin` remote is not a GitHub repository, so there are no labels to choose from.");
         if (await Machine.FindAsync(Tool.GitHubCli, cancellationToken) is { Runs: false } gh)
             return (null, $"The GitHub command-line tool `gh` {(gh.Unstarted is { } why ? $"could not be started: {why}" : "is not installed")}, so the labels cannot be read.");
-        if (!await Machine.TrackerLoggedInAsync(cancellationToken))
-            return (null, "`gh` is not logged in to github.com, so the labels cannot be read.");
+        switch (await Machine.CheckTrackerLoginAsync(cancellationToken))
+        {
+            case TrackerLoginState.LoggedOut:
+                return (null, "`gh` is not logged in to github.com, so the labels cannot be read.");
+            case TrackerLoginState.NoAnswer:
+                return (null, "GitHub did not answer, so the labels cannot be read.");
+        }
 
         var named = settings.Queue.Labels;
         string[] ofSettings = [.. named.Blocking, .. named.Take, named.Manual, named.Interrupted];

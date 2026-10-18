@@ -18,7 +18,7 @@ public sealed class ImitatedCheckup(IClock clock, ISettingsStore settings) : ICh
 
     public Task<bool> HasManagerAsync(CancellationToken cancellationToken) => AfterAsync(true, cancellationToken);
 
-    public Task<bool> TrackerLoggedInAsync(CancellationToken cancellationToken) => AfterAsync(true, cancellationToken);
+    public Task<TrackerLoginState> CheckTrackerLoginAsync(CancellationToken cancellationToken) => AfterAsync(TrackerLoginState.LoggedIn, cancellationToken);
 
     public Task<bool> AssistantLoggedInAsync(CancellationToken cancellationToken) => AfterAsync(true, cancellationToken);
 
