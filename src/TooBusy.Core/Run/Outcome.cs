@@ -54,6 +54,17 @@ public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = n
         return new Outcome(found, Text(lines[..last]), reason.Length == 0 ? null : reason);
     }
 
+    // Whether the reply ends with a line for toobusy: the last of its lines that is not empty is the one `Read`
+    // reads. A reply with a question after the line does not end with it.
+    public static bool Ends(string? reply)
+    {
+        if (Read(reply) is null)
+            return false;
+
+        var lines = reply!.Split('\n');
+        return lines[Array.FindLastIndex(lines, line => line.Trim(Decoration).Length > 0)].Trim(Decoration).StartsWith(Mark, StringComparison.OrdinalIgnoreCase);
+    }
+
     // Whether the report names a task other than `own`, as a session that made a task of what is left does. It is
     // the report that is read, not the tracker: what the named task is, is the session's to see to.
     public bool Names(int own)

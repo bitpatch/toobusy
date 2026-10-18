@@ -213,7 +213,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
 
             if (Conversation is { } known)
                 (transcript ??= new Transcript(claude.folders.Transcript(known), since, claude.root)).Read();
-            return new SessionLook(phase, asks, transcript?.Step, transcript?.Steps ?? 0, transcript?.Context ?? 0, transcript?.Reply, transcript?.Limit, transcript?.Plan);
+            return new SessionLook(phase, asks, transcript?.Step, transcript?.Steps ?? 0, transcript?.Context ?? 0, transcript?.Reply, transcript?.Limit, transcript?.Plan, transcript?.Reported ?? false);
         }
 
         public async Task<bool> TellAsync(string message, CancellationToken cancellationToken)

@@ -101,6 +101,12 @@ public static class Briefing
         The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #{task} from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{owner}` on it, so that no run takes it before the owner answers. End your reply with a `{Outcome.Mark}` line.
         """);
 
+    // What a session is told whose reply ends with a line for toobusy and which the assistant still marks as waiting
+    // for an answer: it is sent at once, and the next reply that ends with the line ends the task.
+    public static string NoAnswer(int task, string owner) => string.Create(CultureInfo.InvariantCulture, $"""
+        No answer will come: the owner is away, and nobody reads your questions. Go on with task #{task} from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{owner}` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `{Outcome.Mark}` line, and ask nothing after it.
+        """);
+
     // What a session is told when the usage limit it ran into has reset.
     public static string AfterLimit(int task) => string.Create(CultureInfo.InvariantCulture, $"""
         The usage limit has reset: go on with task #{task} from where you stopped. The uncommitted changes in the working copy are yours. End your reply with a `{Outcome.Mark}` line, as the rules of this session say.

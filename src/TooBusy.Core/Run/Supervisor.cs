@@ -700,8 +700,11 @@ public sealed class Supervisor(
                         Say(RunMark.GoesOn, $"The sessions are read again: #{number} is watched");
                     unseen = false;
 
-                    // A turn that ends without saying how the task went waits for the owner as a question does.
+                    // A turn that ends without saying how the task went waits for the owner as a question does. One
+                    // that the assistant marks as waiting for an answer and whose reply ends with a line for toobusy
+                    // does not: the session has reported, and there is nothing for the owner to answer.
                     var silent = look.Phase == SessionPhase.Ended && Outcome.Read(look.Reply) is null && !aborting;
+                    var reported = look is { Phase: SessionPhase.Asking, Reported: true };
                     if (look.Limit is { } refusal && look.Phase != SessionPhase.Working)
                     {
                         if (!await LimitAsync(task, session, since, refusal, ++limitWaits, kill))
@@ -715,9 +718,34 @@ public sealed class Supervisor(
                     {
                         return new Watched(look);
                     }
+                    else if (reported && (told > 0 || aborting))
+                    {
+                        // A session that was told that no answer will come, and one that was asked to wrap up, has
+                        // nothing more to do: such a reply ends the task, whatever the assistant marks it as.
+                        return new Watched(look);
+                    }
                     else if (look.Phase == SessionPhase.Working)
                     {
                         (waiting, sendAt) = (false, null);
+                    }
+                    else if (reported)
+                    {
+                        // It is told so at once, with no countdown: nothing is asked of the owner.
+                        told++;
+                        steps = look.Steps;
+                        (waiting, sendAt) = (false, null);
+                        var message = Briefing.NoAnswer(number, plan.Rules.Owner);
+                        Say(RunMark.Attention, $"#{number} ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · {session.Open}");
+                        Quote(look.Reply, session);
+                        Say(RunMark.Note, $"“{message}”");
+                        if (!await session.TellAsync(message, kill))
+                        {
+                            Say(RunMark.Failed, $"#{number} did not go on with the message");
+                            return new Watched(look with { Phase = SessionPhase.Lost });
+                        }
+
+                        look = look with { Phase = SessionPhase.Working };
+                        next = clock.Now + policy.Poll;
                     }
                     else if (!waiting)
                     {

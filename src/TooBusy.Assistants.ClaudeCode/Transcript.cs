@@ -45,6 +45,10 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
     // The last thing the session said.
     public string? Reply { get; private set; }
 
+    // Whether the session has reported: the reply ends with a line for toobusy, and the session did nothing after it,
+    // such as asking with a tool.
+    public bool Reported { get; private set; }
+
     // What the session was refused with when the last thing in its conversation is a usage limit.
     public string? Limit { get; private set; }
 
@@ -53,6 +57,7 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
     {
         since = told;
         Reply = null;
+        Reported = false;
         Limit = null;
     }
 
@@ -147,10 +152,12 @@ public sealed class Transcript(string path, DateTimeOffset since, string root)
                         Step = Told(tool, block.TryGetProperty("input", out var input) ? input : default);
                     if (!Asking.Contains(tool))
                         Steps++;
+                    Reported = false;
                 }
                 else if (Text(block, "type") == "text" && Text(block, "text") is { } said && said.Trim().Length > 0)
                 {
                     Reply = said;
+                    Reported = Outcome.Ends(said);
                 }
             }
         }

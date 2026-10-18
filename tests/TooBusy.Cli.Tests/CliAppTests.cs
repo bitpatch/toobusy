@@ -445,11 +445,13 @@ public sealed class CliAppTests : IDisposable
                 " ✔ #100 Rename the settings page  0:06",
                 " ✔ #101 Show the total of an order in its header  0:09",
                 " ✔ #102 Export the orders as a file  0:21",
-                " ◐ #103 Fix the rounding of a discount  0:10",
+                " ▲ #103 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that",
+                "   none will come · claude attach 4f2a103 (made up)",
+                " ◐ #103 Fix the rounding of a discount  0:11",
                 " ✔ #104 Update the dependencies  0:16",
                 " ✔ #105 Describe the export in the manual  0:07",
                 "",
-                " 6 tasks in 69 s · 5 done · 1 done in part",
+                " 6 tasks in 70 s · 5 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             rows.Skip(3));
@@ -1962,7 +1964,7 @@ public sealed class CliAppTests : IDisposable
 
         // The menu that the run comes back to says how the run went, and counts the tasks that are made up anew.
         Assert.Contains("❯ Run        5 tasks", output, StringComparison.Ordinal);
-        Assert.Contains("6 tasks in 69 s · 5 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
+        Assert.Contains("6 tasks in 70 s · 5 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
 
         // The screen is left for the run and entered again for the menu; the tasks of the run stay in the history
         // of the terminal, and only what else there is to say is printed under them.
@@ -1972,10 +1974,12 @@ public sealed class CliAppTests : IDisposable
                 " ✔ #100 Rename the settings page  0:06",
                 " ✔ #101 Show the total of an order in its header  0:09",
                 " ✔ #102 Export the orders as a file  0:21",
-                " ◐ #103 Fix the rounding of a discount  0:10",
+                " ▲ #103 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that",
+                "   none will come · claude attach 4f2a103 (made up)",
+                " ◐ #103 Fix the rounding of a discount  0:11",
                 " ✔ #104 Update the dependencies  0:16",
                 " ✔ #105 Describe the export in the manual  0:07",
-                " 6 tasks in 69 s · 5 done · 1 done in part",
+                " 6 tasks in 70 s · 5 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             Scroll.Read(output).Rows.Where(row => row.Length > 0).Skip(1));
@@ -2027,8 +2031,9 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--demo");
 
         // The whole of a demo: a task whose session a kill stopped and which goes on with it, a task that is done, a
-        // session that asks and is told to go on alone, a task done in part whose session made a task of what is left,
-        // a usage limit that is waited out, a task that opened after another one, and the tasks that are held.
+        // session that asks and is told to go on alone, a task done in part whose session made a task of what is left
+        // and was marked as waiting after its report, a usage limit that is waited out, a task that opened after
+        // another one, and the tasks that are held.
         Assert.Equal(0, exit);
         Assert.Equal(
             """
@@ -2054,7 +2059,13 @@ public sealed class CliAppTests : IDisposable
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session with the skill task-auto · claude attach 4f2a103 (made up)
               #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
-            ◐ #103 Fix the rounding of a discount — done in part in 10 s
+            ▲ #103 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · claude attach 4f2a103 (made up)
+              │ A discount is rounded once, to the cent, half up, and the cart and the order show the same price.
+              │ - Checked with the tests of the prices: 31 pass.
+              │ - Commit c3d4e5f.
+              │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.
+              “No answer will come: the owner is away, and nobody reads your questions. Go on with task #103 from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `needs-owner` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.”
+            ◐ #103 Fix the rounding of a discount — done in part in 11 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
             → #104 Update the dependencies — started · a new session with the skill task-auto · claude attach 4f2a104 (made up)
               #104 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
@@ -2069,7 +2080,7 @@ public sealed class CliAppTests : IDisposable
               #105 is closed, with the report of the session as its comment
               Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label
             ✔ No task is left · 5 done · 1 done in part
-              Worked 69 s
+              Worked 70 s
 
             """.ReplaceLineEndings(),
             output);

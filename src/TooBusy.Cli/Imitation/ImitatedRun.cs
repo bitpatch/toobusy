@@ -7,8 +7,8 @@ namespace TooBusy.Cli.Imitation;
 // A run of a demo: the real run over made-up tasks and made-up sessions, with a working tree that is always clean
 // and a machine that is left alone. It shows what a run meets: a task whose session a kill stopped and which goes on
 // with it, a task that is done, a session that stops with a question and is told to go on alone, a task done in part
-// whose session makes a task of what is left, a usage limit that is waited out, a task that opens after another, and
-// tasks that are held. Nothing is changed anywhere.
+// whose session makes a task of what is left and is marked as waiting after its report, a usage limit that is waited
+// out, a task that opens after another, and tasks that are held. Nothing is changed anywhere.
 public static class ImitatedRun
 {
     // A demo does not make anybody wait as a run does.
@@ -222,14 +222,11 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
         [
             new(
                 [(2, "Read src/Pricing/Discount.cs"), (3, "Edit src/Pricing/Discount.cs"), (3, "Bash: dotnet test"), (2, "Bash: git push")],
-                Ended(
-                    "A discount is rounded once, to the cent, half up, and the cart and the order show the same price.\n\n- Checked with the tests of the prices: 31 pass.\n- Commit c3d4e5f.\n\n"
-                    + "Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. "
-                    + "I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
-                    + "TOOBUSY: partial"))
+                Reported(Rounded))
             {
                 Leaves = (108, "Decide what a discount of more than the price does"),
             },
+            new([], Reported(Rounded)),
         ],
         [104] =
         [
@@ -280,6 +277,17 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
     }
 
     static SessionLook Ended(string reply) => new(SessionPhase.Ended, Reply: reply);
+
+    // A session that ended its turn with the line for toobusy and that Claude Code marks as waiting all the same, as
+    // it marks a report that leaves something to the owner. Told that no answer will come, it answers with the same.
+    static SessionLook Reported(string reply) => new(SessionPhase.Asking, Asks: "input needed", Reply: reply, Reported: Outcome.Ends(reply));
+
+    // The report of a task done in part.
+    const string Rounded =
+        "A discount is rounded once, to the cent, half up, and the cart and the order show the same price.\n\n- Checked with the tests of the prices: 31 pass.\n- Commit c3d4e5f.\n\n"
+        + "Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. "
+        + "I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
+        + "TOOBUSY: partial";
 
     // What the name of a made-up session starts with.
     const string Name = "4f2a";

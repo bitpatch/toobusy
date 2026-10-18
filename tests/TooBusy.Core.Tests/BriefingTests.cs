@@ -59,7 +59,7 @@ public class BriefingTests
     [Fact]
     public void TheMessagesForASessionThatGoesOnNameNoSkill()
     {
-        foreach (var message in new[] { Briefing.Alone(12, "needs-owner"), Briefing.AfterLimit(12), Briefing.AfterStop(12), Briefing.AfterAbort(12), Briefing.WrapUp(12) })
+        foreach (var message in new[] { Briefing.Alone(12, "needs-owner"), Briefing.NoAnswer(12, "needs-owner"), Briefing.AfterLimit(12), Briefing.AfterStop(12), Briefing.AfterAbort(12), Briefing.WrapUp(12) })
             Assert.False(message.StartsWith('/'));
     }
 
@@ -163,6 +163,12 @@ public class BriefingTests
             + "What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, "
             + "and put the label `needs-owner` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.",
             Briefing.Alone(12, "needs-owner"));
+        Assert.Equal(
+            "No answer will come: the owner is away, and nobody reads your questions. Go on with task #12 from where you stopped. "
+            + "What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, "
+            + "and put the label `manual` on it, so that no run takes it before the owner answers. "
+            + "When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.",
+            Briefing.NoAnswer(12, "manual"));
         Assert.StartsWith("The usage limit has reset: go on with task #12", Briefing.AfterLimit(12), StringComparison.Ordinal);
         Assert.Contains("wrap task #12 up as soon as possible", Briefing.WrapUp(12), StringComparison.Ordinal);
         Assert.Contains("Commit nothing and push nothing. Undo your uncommitted changes", Briefing.WrapUp(12), StringComparison.Ordinal);

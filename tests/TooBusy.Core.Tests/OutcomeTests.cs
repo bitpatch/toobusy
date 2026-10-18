@@ -59,6 +59,19 @@ public class OutcomeTests
         Assert.Contains("It works now.", outcome.Report, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Half of it; the rest is #34.\nTOOBUSY: partial", true)]
+    [InlineData("Half of it; the rest is #34.\n\n**TOOBUSY: partial**\n\n```\n", true)]
+    [InlineData("I will write `TOOBUSY: failed` if it breaks.\nTOOBUSY: done\n", true)]
+    [InlineData("Half of it; the rest is #34.\nTOOBUSY: partial\n\nShall I take #34 too?", false)]
+    [InlineData("TOOBUSY: done\nTOOBUSY: maybe", false)]
+    [InlineData("Shall I go on?", false)]
+    [InlineData(null, false)]
+    public void AReplyEndsWithTheLineWhenNothingButEmptyLinesStandsAfterIt(string? reply, bool ends)
+    {
+        Assert.Equal(ends, Outcome.Ends(reply));
+    }
+
     [Fact]
     public void AReplyIsReadWithoutABlockOfWhatIsLeft()
     {

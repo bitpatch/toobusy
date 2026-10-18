@@ -36,7 +36,7 @@ What is one person's own is not in the folder: the milestone to work on, and the
 - **Starts an assistant session** for the task and watches it: what it is doing, how much context it has used, whether it is waiting for input.
 - **Reads the outcome.** The session ends with one machine-readable line that says how the task went: done, partly done, needs the owner, interrupted, failed. toobusy checks that claim against the tracker and the working copy.
 - **Handles usage limits.** It waits for a limit to reset and continues the same session, or parks the task for the next run.
-- **Handles a session that waits for the owner.** After a countdown it tells the session to decide alone; the owner can do that at once or cancel it.
+- **Handles a session that waits for the owner.** After a countdown it tells the session to decide alone; the owner can do that at once or cancel it. A session that has reported, and that the assistant marks as waiting all the same, is told at once that no answer will come, and its next report ends the task.
 - **Stops on request.** Gently after the current task, or as soon as possible with nothing committed and a report in the task.
 - **Stops by itself** when going on would build on a broken state, and says why.
 - **Shows it all** in an interactive console with a status line and commands, or as plain log lines when there is no terminal.

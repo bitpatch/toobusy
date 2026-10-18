@@ -232,12 +232,15 @@ sealed class FakeSession(int task) : IAssistantSession
         return this;
     }
 
+    // A session that the assistant marks as waiting for an answer; it has reported when its reply ends with the line
+    // for toobusy, as a conversation that the assistant reads says.
     public FakeSession Asks(string? what = "input needed", string? reply = "Which of the two?") =>
-        Add(new SessionLook(SessionPhase.Asking, Asks: what, Steps: steps, Reply: reply));
+        Add(new SessionLook(SessionPhase.Asking, Asks: what, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply)));
 
-    public FakeSession Ends(string reply) => Add(new SessionLook(SessionPhase.Ended, Steps: steps, Reply: reply));
+    public FakeSession Ends(string reply) => Add(new SessionLook(SessionPhase.Ended, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply)));
 
-    public FakeSession Limit(string refusal = "You have hit your usage limit.") => Add(new SessionLook(SessionPhase.Ended, Steps: steps, Limit: refusal));
+    public FakeSession Limit(string refusal = "You have hit your usage limit.", SessionPhase phase = SessionPhase.Ended, string? reply = null) =>
+        Add(new SessionLook(phase, Steps: steps, Reply: reply, Limit: refusal, Reported: Outcome.Ends(reply)));
 
     public FakeSession Lost(string? reply = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply));
 

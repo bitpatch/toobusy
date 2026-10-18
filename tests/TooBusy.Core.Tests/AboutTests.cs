@@ -21,6 +21,7 @@ public class AboutTests
         Assert.Contains("```text\n- This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how.", text, StringComparison.Ordinal);
         Assert.Contains("One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description.\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.Alone(12, "needs-owner")}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"with no countdown, and it counts as one of those messages:\n\n```text\n{Briefing.NoAnswer(12, "needs-owner")}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterLimit(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.WrapUp(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterStop(12)}\n```", text, StringComparison.Ordinal);

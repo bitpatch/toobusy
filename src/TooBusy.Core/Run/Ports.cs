@@ -80,8 +80,10 @@ public enum PlanStep
 // A look at a session. Asks is what a session that waits wants; Step is what it is doing; Steps counts the steps
 // it has made on its own since the run started it; Context is the size of its conversation in tokens; Reply is the
 // last thing it said; Limit is what it was refused with when it ran into a usage limit, and null otherwise. Plan is
-// the plan the session keeps of its work, step by step in its order; null when it keeps none.
-public sealed record SessionLook(SessionPhase Phase, string? Asks = null, string? Step = null, int Steps = 0, long Context = 0, string? Reply = null, string? Limit = null, IReadOnlyList<PlanStep>? Plan = null);
+// the plan the session keeps of its work, step by step in its order; null when it keeps none. Reported tells that the
+// session has reported: the reply is the last thing it did, and it ends with a line for toobusy, as `Outcome.Ends`
+// reads it.
+public sealed record SessionLook(SessionPhase Phase, string? Asks = null, string? Step = null, int Steps = 0, long Context = 0, string? Reply = null, string? Limit = null, IReadOnlyList<PlanStep>? Plan = null, bool Reported = false);
 
 // A window of usage, by the word it is known by among the limits of the assistant, as `weekly` is: how much of it
 // is used, in percent, and when it starts anew. Null is a time that is not known.

@@ -228,6 +228,35 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Null(look.Limit);
     }
 
+    [Theory]
+    [InlineData("Half of it; the rest is #34.\n\n**TOOBUSY: partial**\n", true)]
+    [InlineData("Half of it; the rest is #34.\nTOOBUSY: partial\n\nShall I take #34 too?", false)]
+    [InlineData("Shall I go on?", false)]
+    public async Task ASessionThatIsMarkedAsWaitingHasReportedWhenItsReplyEndsWithTheLine(string reply, bool reported)
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "blocked", "waiting", "input needed"));
+        Write(Said(reply));
+
+        var look = await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal((SessionPhase.Asking, reply, reported), (look.Phase, look.Reply, look.Reported));
+    }
+
+    [Fact]
+    public async Task ASessionThatAsksWithAToolAfterItsReportHasNotReported()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "blocked", "waiting", "input needed"));
+        Write(Said("Half of it; the rest is #34.\nTOOBUSY: partial"), Used("AskUserQuestion", """{"questions":[]}"""));
+
+        var asks = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(("Half of it; the rest is #34.\nTOOBUSY: partial", false), (asks.Reply, asks.Reported));
+
+        Write(Said("Half of it; the rest is #34.\nTOOBUSY: partial"));
+        Assert.True((await session.LookAsync(TestContext.Current.CancellationToken)).Reported);
+    }
+
     [Fact]
     public async Task ThePlanOfASessionIsTheListOfTasksItKeeps()
     {
@@ -464,13 +493,14 @@ public sealed class ClaudeCodeTests : IDisposable
         var before = await session.LookAsync(TestContext.Current.CancellationToken);
         var told = await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken);
 
-        Assert.Equal((SessionPhase.Lost, "I was stopped by the limit.\nTOOBUSY: interrupted"), (before.Phase, before.Reply));
+        Assert.Equal((SessionPhase.Lost, "I was stopped by the limit.\nTOOBUSY: interrupted", true), (before.Phase, before.Reply, before.Reported));
         Assert.True(told);
         Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "auto", "The limit has reset."], claude.Asked[^1]);
         Assert.Equal(new SessionTrace(Id, Conversation, clock.Now), session.Trace);
 
         // What it said before it was told does not count any more, and a request that waited for it is forgotten.
-        Assert.Null((await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
+        var after = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((null, false), (after.Reply, after.Reported));
         Assert.False(File.Exists(folders.Request));
 
         Write(Said("On it again.", at: "2030-01-01T12:00:05Z"));

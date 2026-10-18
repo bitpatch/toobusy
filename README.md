@@ -62,7 +62,7 @@ toobusy status --demo    # what is said of a run that goes on
 toobusy doctor --demo    # the checks over a made-up machine that has it all
 ```
 
-The bar of the screen says `demo`. A demo of a run takes about a minute and shows a task that is done, a session that stops with a question, a task that is done in part, a usage limit and tasks that are held.
+The bar of the screen says `demo`. A demo of a run takes about a minute and shows a task that is done, a session that stops with a question, a task that is done in part, whose session is marked as waiting after its report, a usage limit and tasks that are held.
 
 ## Setting a project up
 

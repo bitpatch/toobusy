@@ -1085,6 +1085,148 @@ public sealed class SupervisorTests : IDisposable
         Assert.All(log.Statuses.Where(status => status.Phase != RunPhase.WaitingForOwner), status => Assert.Empty(status.Reply));
     }
 
+    const string Half = "Half of it; the rest is #9.\nTOOBUSY: partial";
+
+    [Fact]
+    public async Task ASessionMarkedAsWaitingWhoseReplyEndsWithTheLineIsToldOnceAndIsOverAtItsNextReply()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", Half).Then().Asks("input needed", Half);
+
+        var result = await RunAsync();
+
+        Assert.Equal((RunEnd.Emptied, 0, 1), (result.End, result.Done, result.Partial));
+        Assert.Equal([Briefing.NoAnswer(3, "needs-owner")], session.Told);
+        Assert.Equal(
+            [
+                "▲ #3 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · fake attach 3",
+                "  │ Half of it; the rest is #9.",
+                $"  “{Briefing.NoAnswer(3, "needs-owner")}”",
+                "◐ #3 Task 3 — done in part in 6 s",
+            ],
+            log.Lines.Skip(3).Take(4));
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal([(3, RunMark.Partial)], Ended);
+
+        // Nothing is asked of the owner: no countdown, no commands for a session that waits, and no notification.
+        Assert.DoesNotContain(log.Statuses, status => status.Phase == RunPhase.WaitingForOwner);
+        Assert.DoesNotContain("#3 waits for an answer", machine.Notified);
+    }
+
+    [Fact]
+    public async Task ASessionThatAsksAfterTheLineWaitsForTheOwnerAsBefore()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", $"{Half}\n\nShall I take #9 too?").Then().Works().Ends(Half);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Partial);
+        Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
+        Assert.Contains("‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+        Assert.Contains("#3 waits for an answer", machine.Notified);
+    }
+
+    [Fact]
+    public async Task AQuestionAfterTheMessageThatNoAnswerWillComeWaitsForTheOwnerAsBefore()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", Half).Then().Works().Asks("input needed", "CSV or JSON?").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal([Briefing.NoAnswer(3, "needs-owner"), Briefing.Alone(3, "needs-owner")], session.Told);
+        Assert.Contains("‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+    }
+
+    [Fact]
+    public async Task ASessionThatWasToldToGoOnAloneIsOverAtOnceWhenItEndsWithTheLineMarkedAsWaiting()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", "CSV or JSON?").Then().Works().Asks("input needed", "JSON it is.\nTOOBUSY: done");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
+        Assert.Contains("✔ #3 Task 3 — done in 99 s", log.Lines);
+        Assert.DoesNotContain(log.Lines, line => line.StartsWith("▲ #3 ended its turn with a line for toobusy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ASessionThatWrapsUpAfterAnAbortAndIsMarkedAsWaitingIsOverAtOnce()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works(20).WhenAsked().Works().Asks("input needed", "Undone: a.cs.\nTOOBUSY: interrupted");
+        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
+        Assert.Equal([Briefing.WrapUp(3)], session.Asked);
+        Assert.Empty(session.Told);
+        Assert.Contains("■ #3 Task 3 — interrupted after 9 s: the report is in the task, and the next run takes it first", log.Lines);
+        Assert.Equal(Record(3, RecordState.WrappedUp), state.Record);
+    }
+
+    [Fact]
+    public async Task ASessionThatWaitedWhenTheRunWasAbortedIsOverWhenItsWrapUpIsMarkedAsWaiting()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks().Then().Asks("input needed", "Undone.\nTOOBUSY: interrupted");
+        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Stopped, result.End);
+        Assert.Equal([Briefing.WrapUp(3)], session.Told);
+        Assert.Contains("label 3 +interrupted", tracker.Did);
+    }
+
+    [Fact]
+    public async Task ASessionThatReportsWhileTheRunAbortsIsSettledAndToldNothing()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works(3).Asks("input needed", Done);
+        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 1), result);
+        Assert.Empty(session.Told);
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+    }
+
+    [Fact]
+    public async Task ASessionThatHasReportedAndDoesNotGoOnWithTheMessageIsSettledByItsReport()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", Half);
+        session.Deaf = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Partial);
+        Assert.Single(session.Told);
+        Assert.Contains("✖ #3 did not go on with the message", log.Lines);
+        Assert.Contains("close 3", tracker.Did);
+    }
+
+    [Fact]
+    public async Task AUsageLimitComesBeforeAReplyThatEndsWithTheLine()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Limit(phase: SessionPhase.Asking, reply: Half).Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([Briefing.AfterLimit(3)], session.Told);
+        Assert.Contains("‖ #3 ran into a usage limit: You have hit your usage limit.", log.Lines);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("it is told that none will come", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task ATurnThatEndsWithoutSayingHowTheTaskWentIsToldToo()
     {
@@ -1668,6 +1810,22 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(1, result.Done);
         Assert.Equal([Briefing.Alone(5, "needs-owner")], session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
+    }
+
+    [Fact]
+    public async Task ASessionOfAnEarlierRunMarkedAsWaitingAfterItsReportIsToldOnceAndIsOverAtItsNextReply()
+    {
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        var session = assistant.Session(5).Asks("input needed", Half).Then().Asks("input needed", Half);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Partial);
+        Assert.Equal([Briefing.NoAnswer(5, "needs-owner")], session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
+        Assert.Contains("▲ #5 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · fake attach 5", log.Lines);
+        Assert.Null(state.Record);
     }
 
     [Fact]

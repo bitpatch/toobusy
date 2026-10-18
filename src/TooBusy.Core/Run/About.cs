@@ -193,6 +193,14 @@ public static class About
 
             A task is told so {policy.Messages} times at most, and it is left to the owner sooner when {policy.IdleMessages} such messages in a row brought no step of its own.
 
+            A session whose reply ends with the line for toobusy has reported, and is not left for the owner, even where Claude Code marks it as waiting for an answer, as it may mark a report that leaves something to the owner. A reply ends with the line when the last of its lines that is not empty is the line; a reply with a question after the line does not, and waits as a question does. Such a session is told this at once, with no countdown, and it counts as one of those messages:
+
+            ```text
+            {Briefing.NoAnswer(Sample.Number, label)}
+            ```
+
+            Once a session was told either message, a reply that ends with the line for toobusy ends the task, whatever Claude Code marks the session as, as told under “How a task ends”.
+
             ### After a usage limit
 
             No limit holds a task back: a task is started however much of a limit is used. A session that runs into a usage limit is stopped with its uncommitted changes left in the working copy. A run waits for a limit that resets soon. For one that does not, it leaves the task to the next run: the task gets {interrupted} and a comment that starts with `**Stopped by a usage limit**`, and goes back to {todo}. When the limit has reset, in the same run or in the next one, the same session is told:
@@ -235,7 +243,7 @@ public static class About
             {Briefing.WrapUp(Sample.Number)}
             ```
 
-            A session that works reads it after its next step, beside what that step gave, and its turn is not cut: a subagent may read it too, which is why it says what a subagent does. A session that has not wrapped up in {Spoken.Time(policy.AbortGrace)} has its turn cut and is told again, and so is one that waits for the owner, at once.
+            A session that works reads it after its next step, beside what that step gave, and its turn is not cut: a subagent may read it too, which is why it says what a subagent does. A session that has not wrapped up in {Spoken.Time(policy.AbortGrace)} has its turn cut and is told again, and so is one that waits for the owner, at once. A session whose reply ends with the line for toobusy ends the task then, whatever Claude Code marks it as, and is told nothing more.
 
             ## How a task ends
 
