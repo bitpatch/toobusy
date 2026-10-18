@@ -110,6 +110,55 @@ public sealed class SupervisorTests : IDisposable
         Assert.Null(state.Record);
         Assert.Contains($"✖ Stopped: {why} · #3 is not taken · the next task did not start · 0 done", log.Lines);
         Assert.Empty(Ended);
+
+        // A remote that refuses is not asked again.
+        Assert.Equal(1, workspace.Synced);
+    }
+
+    [Fact]
+    public async Task ARemoteThatDidNotAnswerIsFetchedAgainAfterAPause()
+    {
+        plan = plan with { Branch = "develop", Commands = Around };
+        workspace.State = OnDevelop;
+        workspace.Syncs.Enqueue(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: "fatal: unable to access 'https://github.com/acme/rocket/': Could not resolve host: github.com") { MayPass = true });
+        workspace.Sync = new BranchSync(SyncStatus.Moved, "origin/develop", 0, 3);
+        var paused = new List<RunStatus>();
+        clock.At(TimeSpan.FromSeconds(5), () => paused.Add(log.Statuses[^1]));
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal(2, workspace.Synced);
+        Assert.Equal(
+            ["▲ The remote did not answer: origin/develop is fetched again in 10 s", "  develop is moved forward by 3 commits to origin/develop", "  Running the command before #3: scripts/dev.sh ports free"],
+            log.Lines.Skip(1).Take(3));
+
+        // The page shows the task meanwhile, as it does while the branch is brought up to date.
+        Assert.Equal((RunPhase.Preparing, 3, "bringing the branch up to date"), (paused[0].Phase, paused[0].Task?.Number, paused[0].Step));
+    }
+
+    [Fact]
+    public async Task ARemoteThatDidNotAnswerThreeTimesStopsTheRunWithWhatGitSaidLast()
+    {
+        plan = plan with { Branch = "develop" };
+        workspace.State = OnDevelop;
+        workspace.Syncs.Enqueue(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: "fatal: early EOF") { MayPass = true });
+        workspace.Syncs.Enqueue(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: "git did not end in 2 min") { MayPass = true });
+        workspace.Sync = new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: "ssh: connect to host github.com port 22: Operation timed out") { MayPass = true };
+        var synced = new List<DateTimeOffset>();
+        workspace.Syncing = () => synced.Add(clock.Now);
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "origin/develop cannot be fetched: ssh: connect to host github.com port 22: Operation timed out · #3 is not taken"), result);
+        Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)], synced.Zip(synced.Skip(1), (before, after) => after - before));
+        Assert.Equal(
+            ["▲ The remote did not answer: origin/develop is fetched again in 10 s", "▲ The remote did not answer: origin/develop is fetched again in 30 s"],
+            log.Lines.Where(line => line.StartsWith('▲')));
+        Assert.Empty(tracker.Did);
+        Assert.Empty(assistant.Started);
     }
 
     [Theory]
@@ -1017,6 +1066,162 @@ public sealed class SupervisorTests : IDisposable
         tracker.Refused.Add("read");
 
         Assert.Equal("The tracker refused: read.", (await RunAsync()).Why);
+    }
+
+    [Theory]
+    [InlineData("read", "the open tasks are read")]
+    [InlineData("status 3 InProgress", "#3 is moved to In Progress")]
+    [InlineData("assign", "#3 is assigned to the current user")]
+    [InlineData("close", "#3 is closed")]
+    [InlineData("status 3 Done", "#3 is moved to Done")]
+    public async Task ACallOfTheTrackerThatDidNotAnswerIsMadeAgainAfterAPause(string silent, string again)
+    {
+        tracker.Add(3);
+        tracker.Unanswered[silent] = 1;
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([$"▲ GitHub did not answer: {again} again in 10 s"], log.Lines.Where(line => line.StartsWith('▲')));
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal(1, tracker.Silences);
+    }
+
+    [Fact]
+    public async Task TheLabelsTheStatusAndTheReadingOfATaskAreMadeAgainInTheWordsOfWhatTheyDo()
+    {
+        tracker.Add(3, labels: ["feature", "interrupted"]);
+        tracker.Unanswered["label 3 -interrupted"] = 1;
+        tracker.Unanswered["look"] = 1;
+        tracker.Unanswered["label 3 +needs-owner"] = 1;
+        tracker.Unanswered["status 3 Todo"] = 1;
+        assistant.Session(3).Works().Ends("Which key?\nTOOBUSY: owner");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 0), result);
+        Assert.Equal(
+            [
+                "▲ GitHub did not answer: the label interrupted is taken off #3 again in 10 s",
+                "▲ GitHub did not answer: #3 is read again in 10 s",
+                "▲ GitHub did not answer: the label needs-owner is put on #3 again in 10 s",
+                "▲ GitHub did not answer: #3 is moved to Todo again in 10 s",
+            ],
+            log.Lines.Where(line => line.StartsWith('▲')));
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 -interrupted", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+    }
+
+    [Fact]
+    public async Task ACallThatDidNotAnswerThreeTimesStopsTheRunWithTheWordsOfTheLastFailure()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        tracker.Unanswered["close"] = 3;
+        var tried = new List<DateTimeOffset>();
+        tracker.Doing = what =>
+        {
+            if (what == "close 3")
+                tried.Add(clock.Now);
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: close 3 (3)."), result);
+        Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)], tried.Zip(tried.Skip(1), (before, after) => after - before));
+        Assert.Equal(
+            ["▲ GitHub did not answer: #3 is closed again in 10 s", "▲ GitHub did not answer: #3 is closed again in 30 s"],
+            log.Lines.Where(line => line.StartsWith('▲')));
+        Assert.Contains("✖ Stopped: The tracker did not answer: close 3 (3). · the next task did not start · 0 done", log.Lines);
+        Assert.Single(assistant.Started);
+
+        // The task is left to the owner as over any tracker that refuses.
+        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+    }
+
+    [Fact]
+    public async Task AFailureThatStaysIsToldAtOnce()
+    {
+        tracker.Add(3);
+        tracker.Refused.Add("close");
+
+        var result = await RunAsync();
+
+        Assert.Equal("The tracker refused: close 3.", result.Why);
+        Assert.Single(tracker.Asked, asked => asked == "close 3");
+        Assert.DoesNotContain(log.Lines, line => line.Contains("did not answer", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ACommentThatDidNotAnswerIsNotWrittenAgain()
+    {
+        tracker.Add(3);
+        tracker.Unanswered["comment"] = 1;
+
+        var result = await RunAsync();
+
+        // Its answer may be lost and the comment written: the only one that is written for sure is the one that
+        // leaves the task to the owner.
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: comment 3 (1)."), result);
+        Assert.DoesNotContain(log.Lines, line => line.StartsWith('▲'));
+        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        Assert.StartsWith("**Failed.**", Assert.Single(tracker.Comments).Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AKillEndsAPauseAtOnce()
+    {
+        tracker.Add(3);
+        tracker.Unanswered["read"] = 1;
+        var paused = new List<RunStatus>();
+        clock.At(TimeSpan.FromSeconds(5), () =>
+        {
+            paused.Add(log.Statuses[^1]);
+            kill.Cancel();
+        });
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Killed, result.End);
+        Assert.Single(tracker.Read);
+        Assert.Empty(assistant.Started);
+        Assert.Contains("▲ GitHub did not answer: the open tasks are read again in 10 s", log.Lines);
+
+        // Between tasks the page says what the run does, as it did before the pause.
+        Assert.Equal((RunPhase.Preparing, "Reading the queue…", null), (paused[0].Phase, paused[0].Text, paused[0].Task));
+        Assert.Equal(RunPhase.Preparing, Assert.Single(sign.Written, written => written is not null)!.Phase);
+    }
+
+    [Fact]
+    public async Task AKillInAPauseWhileATaskIsTakenStopsItsSession()
+    {
+        tracker.Add(3);
+        tracker.Unanswered["assign"] = 1;
+        clock.At(TimeSpan.FromSeconds(5), kill.Cancel);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being taken, and the next run goes on with its session · fake attach 3"), result);
+        Assert.Equal(1, assistant.Session(3).Stopped);
+        Assert.Single(tracker.Asked, asked => asked == "assign 3");
+        Assert.Equal(Record(3), state.Record);
+    }
+
+    [Fact]
+    public async Task AfterAKillNothingIsMadeAgain()
+    {
+        tracker.Add(3);
+        tracker.Unanswered["label"] = 1;
+        assistant.Session(3).Works().Limit();
+        clock.At(TimeSpan.FromMinutes(10), kill.Cancel);
+
+        var result = await RunAsync();
+
+        // The owner waits for the pause of the task, so what is not answered then is said and not waited for.
+        Assert.Equal(RunEnd.Killed, result.End);
+        Assert.Single(tracker.Asked, asked => asked == "label 3 +interrupted");
+        Assert.DoesNotContain(log.Lines, line => line.StartsWith("▲ GitHub did not answer", StringComparison.Ordinal));
+        Assert.Contains("▲ The pause of #3 is not whole: The tracker did not answer: label 3 +interrupted (1). · set it right by hand before the next run", log.Lines);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
     }
 
     [Fact]

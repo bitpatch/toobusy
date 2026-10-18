@@ -78,6 +78,10 @@ public sealed record RunPolicy
 
     public TimeSpan KilledCommandTime { get; init; } = TimeSpan.FromSeconds(30);
 
+    // The pauses before a call of the tracker that did not answer is made again, and before a fetch of the branch
+    // that the remote did not answer is: one try more after each, and the failure of the last try stands.
+    public IReadOnlyList<TimeSpan> RetryPauses { get; init; } = [TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+
     public static RunPolicy Default { get; } = new();
 }
 

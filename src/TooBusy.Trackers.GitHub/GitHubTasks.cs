@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
 
@@ -9,7 +10,7 @@ namespace TooBusy.Trackers.GitHub;
 // it has one, through the GitHub command-line tool. The tool itself turns what GitHub answers into lines of
 // tab-separated fields. `statuses` are what the board calls the statuses a run knows, as the settings name them;
 // without them they are called as GitHub calls them.
-public sealed class GitHubTasks(IProcessRunner processes, string repository, string? board, BoardStatuses? statuses = null) : ITaskTracker
+public sealed partial class GitHubTasks(IProcessRunner processes, string repository, string? board, BoardStatuses? statuses = null) : ITaskTracker
 {
     readonly BoardStatuses statuses = statuses ?? BoardStatuses.Default;
 
@@ -170,7 +171,8 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
     public Task CloseAsync(int number, CancellationToken cancellationToken) =>
         AskAsync(["issue", "close", Text(number), "--repo", repository], $"#{number} could not be closed.", cancellationToken);
 
-    // What the tool prints when it does what it is asked; otherwise the tracker says that it did not.
+    // What the tool prints when it does what it is asked; otherwise the tracker says that it did not, and whether
+    // that may pass.
     async Task<string> AskAsync(string[] arguments, string failed, CancellationToken cancellationToken) =>
         Answer(await processes.RunAsync("gh", arguments, Patience, cancellationToken), failed);
 
@@ -180,13 +182,45 @@ public sealed class GitHubTasks(IProcessRunner processes, string repository, str
             return result.Output;
 
         var said = result.Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
-        throw new TrackerException(result.Status switch
-        {
-            ProcessStatus.NotFound => $"{failed} The GitHub command-line tool `gh` is not installed.",
-            ProcessStatus.TimedOut => $"{failed} GitHub did not answer.",
-            _ => said is null ? failed : $"{failed} {said}",
-        });
+        throw new TrackerException(
+            result.Status switch
+            {
+                ProcessStatus.NotFound => $"{failed} The GitHub command-line tool `gh` is not installed.",
+                ProcessStatus.TimedOut => $"{failed} GitHub did not answer.",
+                _ => said is null ? failed : $"{failed} {said}",
+            },
+            result.Status == ProcessStatus.TimedOut || (result.Status == ProcessStatus.Exited && Passing(result.Error)));
     }
+
+    // Whether what the tool said of a failure tells one that may pass. GitHub answered with a status of the 500s, a
+    // 429, or a 403 that names a rate limit; a rate limit of a query has no status. Or the tool did not reach GitHub.
+    // Every other status, as of a task that does not exist or a token without the scope, stays, and so does an error
+    // of a query, as of a label the repository does not have, and a login that is missing.
+    static bool Passing(string error)
+    {
+        var limited = error.Contains("rate limit", StringComparison.OrdinalIgnoreCase);
+        if (HttpStatus().Match(error) is { Success: true } status)
+            return int.Parse(status.Groups[1].ValueSpan, CultureInfo.InvariantCulture) switch
+            {
+                >= 500 or 429 => true,
+                403 => limited,
+                _ => false,
+            };
+
+        return limited || Unreached.Any(words => error.Contains(words, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // What the tool says when it does not reach GitHub: the name of the host is not found, the connection is refused
+    // or cut, or it takes too long.
+    static readonly string[] Unreached =
+    [
+        "error connecting to", "no such host", "connection refused", "connection reset", "network is unreachable",
+        "timeout", "timed out", "deadline exceeded", "unexpected EOF",
+    ];
+
+    // The status GitHub answered with, as the tool says it: `(HTTP 502)`, or `HTTP 502: Bad Gateway`.
+    [GeneratedRegex(@"\bHTTP ([1-5][0-9]{2})\b")]
+    private static partial Regex HttpStatus();
 
     (string Owner, string Name) Parts() =>
         repository.Split('/') is [var owner, var name] ? (owner, name) : throw new TrackerException($"{repository} is not a GitHub repository.");

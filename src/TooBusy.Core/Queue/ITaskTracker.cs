@@ -3,7 +3,7 @@ namespace TooBusy.Core.Queue;
 // The tasks of a project in its tracker: reading them for the queue and changing them as a run goes. The task of a
 // session is changed by the run, never by the assistant; a new task is made by the assistant, never by the run.
 // Everything throws TrackerException when the tracker refuses or does not answer; the message says why, in words
-// for the user.
+// for the user, and the exception whether the failure may pass when the call is made again.
 public interface ITaskTracker
 {
     // The open tasks of the milestone, or of the whole project when the milestone is null.

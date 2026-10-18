@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Run;
 
@@ -6,7 +7,7 @@ namespace TooBusy.Infrastructure.Git;
 
 // The working copy of a project, as git tells of it: the files that differ from what is committed, those it does
 // not know among them, the branch that is checked out, and the commits of the branch that its upstream does not have.
-public sealed class GitWorkspace(IProcessRunner processes, string root) : IWorkspace
+public sealed partial class GitWorkspace(IProcessRunner processes, string root) : IWorkspace
 {
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
@@ -27,7 +28,7 @@ public sealed class GitWorkspace(IProcessRunner processes, string root) : IWorks
 
         var fetched = await processes.RunAsync("git", ["-C", root, "fetch", "--quiet"], FetchPatience, cancellationToken);
         if (fetched is not { Status: ProcessStatus.Exited, ExitCode: 0 })
-            return new BranchSync(SyncStatus.Unreachable, upstream, Said: Said(fetched, FetchPatience));
+            return new BranchSync(SyncStatus.Unreachable, upstream, Said: Said(fetched, FetchPatience)) { MayPass = Passing(fetched) };
 
         // A branch whose upstream the remote does not have any more has no count of commits against it.
         if (await StatusAsync(cancellationToken) is not { } after)
@@ -76,6 +77,33 @@ public sealed class GitWorkspace(IProcessRunner processes, string root) : IWorks
         _ => (result.Error + "\n" + result.Output).Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0)
             ?? string.Create(CultureInfo.InvariantCulture, $"git exited with {result.ExitCode}"),
     };
+
+    // Whether a fetch failed in a way that may pass: it did not end in its time, git did not reach the remote, or the
+    // remote answered with a status of the 500s or a 429. A remote that refuses, as over a login or a repository that
+    // is not there, stays, whatever git says after that.
+    static bool Passing(ProcessResult result)
+    {
+        if (result.Status != ProcessStatus.Exited)
+            return result.Status == ProcessStatus.TimedOut;
+
+        var said = result.Error + "\n" + result.Output;
+        if (HttpStatus().Match(said) is { Success: true } status)
+            return int.Parse(status.Groups[1].ValueSpan, CultureInfo.InvariantCulture) is >= 500 or 429;
+
+        return Unreached.Any(words => said.Contains(words, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // What git and ssh say when they do not reach the remote: the name of the host is not found, the connection is
+    // refused, cut or closed, or it takes too long.
+    static readonly string[] Unreached =
+    [
+        "could not resolve host", "failed to connect", "couldn't connect", "connection refused", "connection reset",
+        "connection closed", "network is unreachable", "timed out", "timeout", "hung up unexpectedly", "early EOF",
+    ];
+
+    // The status the remote answered with, as git says it: `The requested URL returned error: 502`, or `HTTP 502`.
+    [GeneratedRegex(@"(?:returned error:|\bHTTP) ([1-5][0-9]{2})\b")]
+    private static partial Regex HttpStatus();
 
     // Ahead and Behind are null where the branch has no upstream to count against.
     sealed record Status(int Files, string? Branch, string? Upstream, int? Ahead, int? Behind);

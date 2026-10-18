@@ -86,18 +86,42 @@ public class GitWorkspaceTests
     }
 
     [Theory]
-    [InlineData(ProcessStatus.Exited, 128, "ssh: Could not resolve hostname github.com: nodename nor servname provided\nfatal: Could not read from remote repository.\n", "ssh: Could not resolve hostname github.com: nodename nor servname provided")]
-    [InlineData(ProcessStatus.Exited, 1, "", "git exited with 1")]
-    [InlineData(ProcessStatus.TimedOut, 0, "", "git did not end in 2 min")]
-    [InlineData(ProcessStatus.NotFound, 0, "", "git cannot be run")]
-    public async Task AFetchThatFailsLeavesTheBranchAsItIsAndSaysWhatGitSaid(ProcessStatus status, int exitCode, string error, string said)
+    [InlineData(ProcessStatus.Exited, 128, "ssh: Could not resolve hostname github.com: nodename nor servname provided\nfatal: Could not read from remote repository.\n", "ssh: Could not resolve hostname github.com: nodename nor servname provided", true)]
+    [InlineData(ProcessStatus.Exited, 1, "", "git exited with 1", false)]
+    [InlineData(ProcessStatus.TimedOut, 0, "", "git did not end in 2 min", true)]
+    [InlineData(ProcessStatus.NotFound, 0, "", "git cannot be run", false)]
+    public async Task AFetchThatFailsLeavesTheBranchAsItIsAndSaysWhatGitSaid(ProcessStatus status, int exitCode, string error, string said, bool mayPass)
     {
         var processes = new Answers(Exited(Behind), new ProcessResult(status, exitCode, "", error));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: said), sync);
+        Assert.Equal(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: said) { MayPass = mayPass }, sync);
         Assert.Equal(2, processes.Asked.Count);
+    }
+
+    // A remote that did not answer may answer a moment later; one that refused will refuse again.
+    [Theory]
+    [InlineData("fatal: unable to access 'https://github.com/acme/rocket/': Could not resolve host: github.com", true)]
+    [InlineData("fatal: unable to access 'https://github.com/acme/rocket/': Failed to connect to github.com port 443 after 75003 ms: Couldn't connect to server", true)]
+    [InlineData("fatal: unable to access 'https://github.com/acme/rocket/': Recv failure: Connection reset by peer", true)]
+    [InlineData("ssh: connect to host github.com port 22: Operation timed out\nfatal: Could not read from remote repository.", true)]
+    [InlineData("kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.", true)]
+    [InlineData("fatal: unable to access 'https://github.com/acme/rocket/': The requested URL returned error: 502", true)]
+    [InlineData("error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429\nfatal: the remote end hung up unexpectedly", true)]
+    [InlineData("error: RPC failed; curl 18 transfer closed with outstanding read data remaining\nfatal: early EOF", true)]
+    [InlineData("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", false)]
+    [InlineData("remote: Repository not found.\nfatal: repository 'https://github.com/acme/rocket/' not found", false)]
+    [InlineData("fatal: Authentication failed for 'https://github.com/acme/rocket/'", false)]
+    [InlineData("error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false)]
+    [InlineData("fatal: 'origin' does not appear to be a git repository", false)]
+    public async Task AFetchThatFailedMayPassWhenTheRemoteDidNotAnswer(string error, bool mayPass)
+    {
+        var processes = new Answers(Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", error));
+
+        var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal((SyncStatus.Unreachable, mayPass), (sync.Status, sync.MayPass));
     }
 
     [Fact]

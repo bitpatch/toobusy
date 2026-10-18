@@ -151,6 +151,15 @@ public class AboutTests
     }
 
     [Fact]
+    public void ATrackerThatDoesNotAnswerIsToldWithTheTriesOfThePolicy()
+    {
+        var text = About.Text(Rules, new RunPolicy { RetryPauses = [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)] });
+
+        Assert.Contains("A call of the tracker that GitHub does not answer, as when the network is away for a moment, is tried 3 times in all, with pauses of 5 s and 20 s between them, before the run stops over it; a comment is written once, as one whose answer was lost may be written already.", text, StringComparison.Ordinal);
+        Assert.Contains("a remote that refuses or does not answer stop the run, and the task is not touched; a remote that does not answer is asked again first, as the tracker is.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheCommandsOfTheProjectAroundATaskAreTold()
     {
         var text = About.Text(Rules, new RunPolicy { CommandTime = TimeSpan.FromMinutes(5), KilledCommandTime = TimeSpan.FromSeconds(20) }, commands: new("scripts/dev.sh ports free", "scripts/dev.sh server stop"));

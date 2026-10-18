@@ -69,6 +69,9 @@ public static class About
         var statuses = rules?.Statuses ?? BoardStatuses.Default;
         var (todo, progress, done) = ($"`{statuses.Todo}`", $"`{statuses.InProgress}`", $"`{statuses.Done}`");
 
+        // How often a call that GitHub does not answer is tried, and the pauses between the tries.
+        var tries = $"{policy.RetryPauses.Count + 1} times in all, with pauses of {string.Join(" and ", policy.RetryPauses.Select(Spoken.Time))} between them";
+
         var text = new StringBuilder();
         text.Append("""
             # How toobusy works
@@ -113,7 +116,7 @@ public static class About
 
             ## The task of a session is kept by toobusy
 
-            A session changes nothing of its own task: not its status, not its assignee and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to {progress}; once the session has started, it assigns the task to the user who runs it, with a board and without one, and takes {interrupted} off a task that had it. A tracker that refuses the assignment does not stop the run. After the session it does what the last line of the reply calls for, as told under “How a task ends”.
+            A session changes nothing of its own task: not its status, not its assignee and not its labels, and it does not comment on the task or close it. Before a session starts, toobusy moves the task to {progress}; once the session has started, it assigns the task to the user who runs it, with a board and without one, and takes {interrupted} off a task that had it. A tracker that refuses the assignment does not stop the run. After the session it does what the last line of the reply calls for, as told under “How a task ends”. A call of the tracker that GitHub does not answer, as when the network is away for a moment, is tried {tries}, before the run stops over it; a comment is written once, as one whose answer was lost may be written already.
 
             ## A session makes new tasks itself
 
@@ -148,7 +151,7 @@ public static class About
             A project may name the branch its tasks are done on, `workspace.branch` of its settings. {tasksBranch}
 
             - Before every task, where the working tree is checked, the working copy must be on that branch. On another one the run stops and says so: what is checked out is the owner's, and the run does not change it.
-            - Before a task is taken, and before the command before it, the branch is brought up to date with its upstream: what the remote has is fetched, and the branch is moved forward to it, so that the task starts from what the remote has. A branch that has commits its upstream lacks, one that has parted from it, and a remote that does not answer stop the run, and the task is not touched. A branch without an upstream has nothing to be brought up to date with.
+            - Before a task is taken, and before the command before it, the branch is brought up to date with its upstream: what the remote has is fetched, and the branch is moved forward to it, so that the task starts from what the remote has. A branch that has commits its upstream lacks, one that has parted from it, and a remote that refuses or does not answer stop the run, and the task is not touched; a remote that does not answer is asked again first, as the tracker is. A branch without an upstream has nothing to be brought up to date with.
             - A task that a run goes on with, whose session may have left its changes in the working tree, is checked for the branch as any other, and nothing is moved under it.
             - The branch may move while a session works, as when someone pushes to it meanwhile. Bringing it up to date before the push is the session's own: its first message tells it to do so as the instructions of the project say, by a rebase or by a merge, and to push again. toobusy checks the result only: a session that leaves commits its upstream lacks stops the run.
             - A demo checks nothing of it.

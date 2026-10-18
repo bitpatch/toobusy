@@ -45,6 +45,7 @@ public class GitHubTasksTests
         var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
 
         Assert.Equal("The milestone “v0.2.0” is not open any more.", gone.Message);
+        Assert.False(gone.MayPass);
     }
 
     [Fact]
@@ -147,6 +148,53 @@ public class GitHubTasksTests
         Assert.Equal("The tasks of acme/rocket cannot be read. gh: Not Found (HTTP 404)", refused.Message);
         Assert.Equal("The tasks of acme/rocket cannot be read. GitHub did not answer.", silent.Message);
         Assert.Equal("The tasks of acme/rocket cannot be read. The GitHub command-line tool `gh` is not installed.", missing.Message);
+        Assert.Equal((false, true, false), (refused.MayPass, silent.MayPass, missing.MayPass));
+    }
+
+    // A failure that may pass is one where GitHub was away for a moment: the same call may answer when it is made
+    // again. One that stays is told as it is.
+    [Theory]
+    [InlineData("gh: Server Error (HTTP 500)", true)]
+    [InlineData("gh: HTTP 502", true)]
+    [InlineData("HTTP 503: Service Unavailable (https://api.github.com/graphql)", true)]
+    [InlineData("gh: Too Many Requests (HTTP 429)", true)]
+    [InlineData("gh: API rate limit exceeded for user ID 1. (HTTP 403)", true)]
+    [InlineData("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)", true)]
+    [InlineData("gh: API rate limit exceeded for user ID 1.", true)]
+    [InlineData("error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com", true)]
+    [InlineData("Post \"https://api.github.com/graphql\": dial tcp 140.82.112.6:443: connect: connection refused", true)]
+    [InlineData("Post \"https://api.github.com/graphql\": read tcp 10.0.0.2:52144->140.82.112.6:443: read: connection reset by peer", true)]
+    [InlineData("Post \"https://api.github.com/graphql\": net/http: TLS handshake timeout", true)]
+    [InlineData("gh: Something went wrong while executing your query. This may be the result of a timeout, or it could be a GitHub bug.", true)]
+    [InlineData("gh: Not Found (HTTP 404)", false)]
+    [InlineData("gh: Bad credentials (HTTP 401)", false)]
+    [InlineData("gh: Resource not accessible by integration (HTTP 403)", false)]
+    [InlineData("gh: Validation Failed (HTTP 422)", false)]
+    [InlineData("GraphQL: Could not resolve to an Issue with the number of 12. (repository.issue)", false)]
+    [InlineData("gh: Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.", false)]
+    [InlineData("could not add label: 'needs owner' not found", false)]
+    [InlineData("To get started with GitHub CLI, please run:  gh auth login", false)]
+    public async Task AFailureThatMayPassIsToldApartFromOneThatStays(string error, bool mayPass)
+    {
+        processes.Answers.Enqueue(FakeProcesses.Failed(error));
+
+        var failed = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AssignAsync(12, TestContext.Current.CancellationToken));
+
+        Assert.Equal(mayPass, failed.MayPass);
+        Assert.Equal($"#12 could not be assigned to the current user. {error.Split('\n')[0]}", failed.Message);
+    }
+
+    [Fact]
+    public async Task ACallThatDoesNotAnswerInItsTimeMayPassAndAToolThatIsMissingStays()
+    {
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+
+        var silent = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CloseAsync(12, TestContext.Current.CancellationToken));
+        var missing = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CloseAsync(12, TestContext.Current.CancellationToken));
+
+        Assert.Equal(("#12 could not be closed. GitHub did not answer.", true), (silent.Message, silent.MayPass));
+        Assert.Equal(("#12 could not be closed. The GitHub command-line tool `gh` is not installed.", false), (missing.Message, missing.MayPass));
     }
 
     [Fact]
@@ -242,6 +290,7 @@ public class GitHubTasksTests
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Named().SetStatusAsync(12, BoardStatus.InProgress, TestContext.Current.CancellationToken));
 
         Assert.Equal("#12 could not be moved to Doing on the board. The board has no status “Doing”.", refused.Message);
+        Assert.False(refused.MayPass);
     }
 
     [Fact]

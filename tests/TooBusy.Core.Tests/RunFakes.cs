@@ -53,6 +53,15 @@ sealed class FakeTracker : ITaskTracker
     // What the tracker refuses, by the first word of what is done: `status`, `assign`, `close`, `read`, or `status 12 Done`.
     public HashSet<string> Refused { get; } = [];
 
+    // What the tracker does not answer, as GitHub that is away for a moment, by the first word of what is done or by
+    // the whole of it as Refused, with how many times in a row. Such a failure may pass, and says how many there were.
+    public Dictionary<string, int> Unanswered { get; } = [];
+
+    public int Silences { get; private set; }
+
+    // Everything that was asked, answered or not, in its order: a call that is made again is here once for each try.
+    public List<string> Asked { get; } = [];
+
     // What happens as something is done, before it is: a kill that comes in the middle of it, for one.
     public Action<string>? Doing { get; set; }
 
@@ -76,6 +85,7 @@ sealed class FakeTracker : ITaskTracker
     public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken)
     {
         Looked.Add(number);
+        Ask($"look {number}");
         if (Refused.Contains("look"))
             throw new TrackerException($"The tracker refused: look {number}.");
         return Task.FromResult(Closed.Find(task => task.Number == number));
@@ -137,10 +147,24 @@ sealed class FakeTracker : ITaskTracker
     void Do(string what)
     {
         Doing?.Invoke(what);
+        Ask(what);
         if (Refused.Contains(what) || Refused.Contains(what.Split(' ')[0]))
             throw new TrackerException($"The tracker refused: {what}.");
         if (what != "read")
             Did.Add(what);
+    }
+
+    void Ask(string what)
+    {
+        Asked.Add(what);
+        foreach (var key in (string[])[what, what.Split(' ')[0]])
+        {
+            if (Unanswered.TryGetValue(key, out var left) && left > 0)
+            {
+                Unanswered[key] = left - 1;
+                throw new TrackerException($"The tracker did not answer: {what} ({++Silences}).", mayPass: true);
+            }
+        }
     }
 
     void Change(int number, Func<QueueTask, QueueTask> change)
@@ -317,7 +341,7 @@ sealed class FakeSession(int task) : IAssistantSession
 }
 
 // The working copy as the test says it is: the states that are waiting are given one after another, and after them
-// the one that stands. A sync of its branch comes out as the test says, and is counted.
+// the one that stands. A sync of its branch comes out as the test says, in the same way, and is counted.
 sealed class FakeWorkspace : IWorkspace
 {
     public WorkspaceState? State { get; set; } = new(0, 0);
@@ -327,6 +351,8 @@ sealed class FakeWorkspace : IWorkspace
     public int Read { get; private set; }
 
     public BranchSync Sync { get; set; } = new(SyncStatus.Level, "origin/develop");
+
+    public Queue<BranchSync> Syncs { get; } = new();
 
     public int Synced { get; private set; }
 
@@ -343,7 +369,7 @@ sealed class FakeWorkspace : IWorkspace
     {
         Synced++;
         Syncing?.Invoke();
-        return Task.FromResult(Sync);
+        return Task.FromResult(Syncs.Count > 0 ? Syncs.Dequeue() : Sync);
     }
 }
 

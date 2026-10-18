@@ -137,7 +137,7 @@ public enum SyncStatus
     // Each has commits that the other lacks: the branch cannot simply be moved.
     Parted,
 
-    // What the remote has could not be fetched: it did not answer, or refused.
+    // What the remote has could not be fetched: it did not answer, or refused. MayPass tells the two apart.
     Unreachable,
 
     // Something else went wrong: the branch could not be read, its upstream is gone, or git refused to move it.
@@ -146,8 +146,12 @@ public enum SyncStatus
 
 // How the branch came out of its sync. Upstream is what it follows, as `origin/develop`; Ahead and Behind count the
 // commits of the branch that its upstream lacks and those of the upstream that it lacked, once the remote was fetched.
-// Said is what git said of a failure, in a line.
-public sealed record BranchSync(SyncStatus Status, string? Upstream = null, int Ahead = 0, int Behind = 0, string Said = "");
+// Said is what git said of a failure, in a line. MayPass says of a remote that could not be fetched that the failure
+// may pass by itself, as when the remote did not answer in time or the network was away: a sync made again may reach it.
+public sealed record BranchSync(SyncStatus Status, string? Upstream = null, int Ahead = 0, int Behind = 0, string Said = "")
+{
+    public bool MayPass { get; init; }
+}
 
 public interface IClock
 {
