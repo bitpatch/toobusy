@@ -45,7 +45,7 @@ public sealed record NewTasks(string Manual, IReadOnlyList<string> Take, string?
 public sealed record RunPolicy
 {
     // How often a session is looked at, and how often a run looks whether it was told something.
-    public TimeSpan Poll { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan Poll { get; init; } = TimeSpan.FromSeconds(10);
 
     public TimeSpan Tick { get; init; } = TimeSpan.FromMilliseconds(200);
 

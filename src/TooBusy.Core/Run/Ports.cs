@@ -308,7 +308,8 @@ public sealed record RunSign(RunPhase Phase)
 }
 
 // Where a run tells what happens: a line of its log for everything that happened, every task that is over, once,
-// and what is going on right now.
+// and what is going on right now. Trace is what only the log on disk keeps, as how the run sees its session as it
+// changes: a view that has no such log does nothing with it.
 public interface IRunView
 {
     void Say(RunLine line);
@@ -316,6 +317,10 @@ public interface IRunView
     void Report(TaskEnd ended);
 
     void Show(RunStatus status);
+
+    void Trace(string text)
+    {
+    }
 }
 
 // A run of the queue. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at

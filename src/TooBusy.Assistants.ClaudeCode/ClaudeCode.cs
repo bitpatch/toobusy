@@ -11,12 +11,21 @@ namespace TooBusy.Assistants.ClaudeCode;
 // writes. The commands must start at the root of the project: the runner is the one of that folder. Every session is
 // started in the permission mode of the settings, and goes on in it when it is told something, a session of an
 // earlier run too.
-public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode) : IAssistant
+//
+// The list of the sessions is a command that starts Claude Code, so a look at a session takes it from a list read no
+// longer than `listAge` ago, twenty seconds unless a test says otherwise; whatever changes a session, and whatever
+// must know how a session is now, reads it anew.
+public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, TimeSpan? listAge = null) : IAssistant
 {
     readonly IClock clock = clock;
     readonly ClaudeFolders folders = folders;
     readonly string root = root;
     readonly string permissionMode = permissionMode;
+    readonly TimeSpan listAge = listAge ?? TimeSpan.FromSeconds(20);
+
+    // The last list that was read, and when; null when there is none to go by.
+    List<Listed>? cached;
+    DateTimeOffset cachedAt;
 
     // How long a command of Claude Code is waited for.
     static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
@@ -42,6 +51,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         // The session may have said something by the time Claude Code answers: what counts starts now.
         var since = clock.Now;
         Forget();
+        cached = null;
         string[] model = start.Model.Name is { } named ? ["--model", named] : [];
         var result = await processes.RunAsync(
             "claude",
@@ -134,8 +144,20 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         }
     }
 
-    // The sessions Claude Code knows, by what is asked of them; null when the list cannot be read.
+    // The list of a look: the last one that was read, while it is younger than `listAge`, and a new one otherwise.
+    async Task<List<Listed>?> RecentAsync(CancellationToken cancellationToken) =>
+        cached is { } recent && clock.Now - cachedAt < listAge ? recent : await ListAsync(cancellationToken);
+
+    // The sessions Claude Code knows, by what is asked of them, read anew; null when the list cannot be read, and
+    // such a list is not kept.
     async Task<List<Listed>?> ListAsync(CancellationToken cancellationToken)
+    {
+        var listed = await ReadListAsync(cancellationToken);
+        (cached, cachedAt) = (listed, clock.Now);
+        return listed;
+    }
+
+    async Task<List<Listed>?> ReadListAsync(CancellationToken cancellationToken)
     {
         var result = await processes.RunAsync("claude", ["agents", "--json", "--all"], Patience, cancellationToken);
         if (result is not { Status: ProcessStatus.Exited, ExitCode: 0 })
@@ -206,7 +228,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             var now = claude.clock.Now;
             var phase = SessionPhase.Working;
             string? asks = null;
-            if (await claude.ListAsync(cancellationToken) is not { } listed)
+            if (await claude.RecentAsync(cancellationToken) is not { } listed)
             {
                 silent ??= now;
                 if (now - silent >= Tolerance)
@@ -303,6 +325,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         // The session is the one that woke from here on, and what it said before the message does not count.
         void GoOn(string woken, DateTimeOffset told)
         {
+            claude.cached = null;
             id = woken;
             silent = null;
             missing = null;
@@ -331,6 +354,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         public async Task StopAsync(CancellationToken cancellationToken)
         {
             claude.Forget();
+            claude.cached = null;
             if (id is not null)
                 await claude.AskAsync(["stop", id], cancellationToken);
         }

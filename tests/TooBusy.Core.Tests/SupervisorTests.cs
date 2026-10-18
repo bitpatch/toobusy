@@ -22,7 +22,8 @@ public sealed class SupervisorTests : IDisposable
     readonly CancellationTokenSource kill = new();
 
     RunPlan plan = new("v0.2.0", Rules, ModelChoice.AssistantsOwn, "high");
-    RunPolicy policy = RunPolicy.Default;
+    // The times the tests count in look at a session every three seconds, whatever a run of the tool does.
+    RunPolicy policy = RunPolicy.Default with { Poll = TimeSpan.FromSeconds(3) };
     Supervisor? run;
 
     public SupervisorTests() => shell = new FakeCommands(clock);
@@ -2660,6 +2661,37 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal("the session of #5 did not go on: it is deaf · fake attach 5 · the next run tries again", result.Why);
         Assert.Equal(Record(5, RecordState.Paused), state.Record);
         Assert.Empty(tracker.Did);
+    }
+
+    // A run looks at a session every ten seconds unless it is told otherwise.
+    [Fact]
+    public void ASessionIsLookedAtEveryTenSeconds() => Assert.Equal(TimeSpan.FromSeconds(10), RunPolicy.Default.Poll);
+
+    // How the run sees the session of its task goes into the log on disk when it changes, and not with every look.
+    [Fact]
+    public async Task HowTheSessionIsSeenIsTracedWhenItChanges()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works(3).Asks("input needed").Then().Works(2).Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal(
+            ["#3 session fake-3: working", "#3 session fake-3: working → asking (input needed)", "#3 session fake-3: asking (input needed) → working", "#3 session fake-3: working → ended"],
+            log.Traces);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("session fake-3:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheSessionOfAnEarlierRunIsTracedAtItsFirstLook()
+    {
+        state.Record = Record(5);
+        tracker.Add(5);
+        assistant.Session(5).Limit("You have hit your limit", SessionPhase.Lost).Then().Works().Ends(Done);
+
+        await RunAsync();
+
+        Assert.Equal("#5 session fake-5: lost (You have hit your limit)", log.Traces[0]);
     }
 
     // Claude Code may go on with a session as a copy, a new session with the whole conversation: the task is gone

@@ -195,6 +195,8 @@ public sealed class Supervisor(
                         // The session of a record that says more than that it worked did not end so.
                         var session = before.State == RecordState.Working ? await assistant.FindAsync(before.Session, kill) : null;
                         var look = session is null ? null : await session.LookAsync(kill);
+                        if (look is not null)
+                            Seen(before.Number, session!, look);
                         if (look?.Phase == SessionPhase.Unseen)
                             return Stop($"the sessions of the assistant cannot be read, so the session of #{closed.Number} is left as it is · {session!.Open} · the next run looks again");
 
@@ -451,6 +453,7 @@ public sealed class Supervisor(
     // earlier run that names the task: its session is gone on with, in the way it was left.
     async Task<RunResult?> TakeAsync(QueueTask task, TaskRecord? before, DateTimeOffset since, int queued, CancellationToken kill)
     {
+        seen = null;
         var number = task.Number;
         var again = task.Has(plan.Rules.Interrupted);
         Show(new RunStatus(RunPhase.Preparing, $"Starting #{number}…") { Task = task, Since = since, Queued = queued });
@@ -473,6 +476,7 @@ public sealed class Supervisor(
             if (message is null)
             {
                 var look = await found.LookAsync(kill);
+                Seen(number, found, look);
                 var stopped = look.Phase == SessionPhase.Lost || (look.Limit is not null && look.Phase != SessionPhase.Working);
                 if (look.Phase == SessionPhase.Unseen)
                     return Stop($"the sessions of the assistant cannot be read, so the session of #{number} is left as it is · {found.Open} · the next run looks again");
@@ -815,6 +819,7 @@ public sealed class Supervisor(
             {
                 // The status line of the session tells of the limits as it works, so they are read with every look.
                 look = await session.LookAsync(kill);
+                Seen(number, session, look);
                 limits = assistant.ReadLimits().At(clock.Now);
                 next = clock.Now + policy.Poll;
                 Remember(number, session);
@@ -1465,6 +1470,22 @@ public sealed class Supervisor(
 
     // What nobody foresaw, in a line: its kind and its words, for a report of the bug.
     static string Unforeseen(Exception failed) => $"an error toobusy did not foresee: {failed.GetType().Name}: {string.Join(' ', Lines(failed.Message))}";
+
+    // How the session of the task was seen last, in the words of the log on disk; null before its first look.
+    string? seen;
+
+    // Writes into the log on disk how the session of a task is seen, when that changed since its last look: what it
+    // is doing, and what it waits for or the limit it ran into. The screen does not show it.
+    void Seen(int number, IAssistantSession session, SessionLook look)
+    {
+        var now = look.Phase.ToString().ToLowerInvariant() + ((look.Asks ?? look.Limit) is { } why ? $" ({string.Join(' ', Lines(why))})" : "");
+        if (now == seen)
+            return;
+
+        var trace = session.Trace;
+        view.Trace($"#{number} session {trace.Id ?? trace.Conversation}: {(seen is null ? now : $"{seen} → {now}")}");
+        seen = now;
+    }
 
     // How a session that went on as a copy is said to go on: the copy is named after the session it was of.
     static string AsCopy(string? former) => former is null ? "as a copy of its session" : $"as a copy of {former}";

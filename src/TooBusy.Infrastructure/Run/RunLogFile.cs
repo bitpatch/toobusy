@@ -54,34 +54,74 @@ public sealed class RunLogFile : IDisposable
     // The time of the run, for whoever measures something it writes.
     public DateTimeOffset Now => clock.Now;
 
+    // How many texts were written: a writer can tell by it whether anything came between two of its own.
+    public long Written
+    {
+        get
+        {
+            lock (gate)
+                return written;
+        }
+    }
+
+    long written;
+
+    // A text that waits to be written until the next one is, or until the log is closed, and is replaced by the
+    // next one held meanwhile: the count of a command that is run again and again, which grows until something else
+    // happens. Holding it does not count as writing.
+    string? held;
+    DateTimeOffset heldAt;
+
     // A text of several lines stands under its first one, each line indented by the width of the time.
     public void Write(string text)
     {
-        var at = clock.Now.ToLocalTime().ToString(Stamp, CultureInfo.InvariantCulture);
         lock (gate)
         {
-            if (writer is null)
-                return;
-
-            try
-            {
-                var lines = text.Split('\n');
-                writer.WriteLine($"{at} {lines[0].TrimEnd('\r')}");
-                foreach (var line in lines.Skip(1))
-                    writer.WriteLine(Indent + line.TrimEnd('\r'));
-            }
-            catch (Exception unwritable) when (Failed(unwritable))
-            {
-                Unwritable ??= unwritable.Message;
-                Close();
-            }
+            Flush();
+            Put(clock.Now, text);
+            written++;
         }
+    }
+
+    public void Hold(string text)
+    {
+        lock (gate)
+            (held, heldAt) = (text, clock.Now);
     }
 
     public void Dispose()
     {
         lock (gate)
+        {
+            Flush();
             Close();
+        }
+    }
+
+    void Flush()
+    {
+        if (held is { } text)
+            Put(heldAt, text);
+        held = null;
+    }
+
+    void Put(DateTimeOffset at, string text)
+    {
+        if (writer is null)
+            return;
+
+        try
+        {
+            var lines = text.Split('\n');
+            writer.WriteLine($"{at.ToLocalTime().ToString(Stamp, CultureInfo.InvariantCulture)} {lines[0].TrimEnd('\r')}");
+            foreach (var line in lines.Skip(1))
+                writer.WriteLine(Indent + line.TrimEnd('\r'));
+        }
+        catch (Exception unwritable) when (Failed(unwritable))
+        {
+            Unwritable ??= unwritable.Message;
+            Close();
+        }
     }
 
     void Close()

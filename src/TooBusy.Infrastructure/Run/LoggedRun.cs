@@ -3,8 +3,8 @@ using TooBusy.Core.Run;
 namespace TooBusy.Infrastructure.Run;
 
 // A run with its log on disk: what it says goes to the view and into the log, and the log is closed when the run is
-// over, however it ended. After a run that stopped over a problem the log is named under the last line, so that the
-// owner knows where to look.
+// over, however it ended. The log is named under the last line of the run, however it ended, so that the owner knows
+// where to look.
 public sealed class LoggedRun(IQueueRun inner, RunLogFile log) : IQueueRun
 {
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
@@ -13,7 +13,7 @@ public sealed class LoggedRun(IQueueRun inner, RunLogFile log) : IQueueRun
         try
         {
             var result = await inner.RunAsync(logged, kill);
-            if (result.End == RunEnd.Problem && log.Unwritable is null)
+            if (log.Unwritable is null)
                 logged.Say(new RunLine(RunMark.Note, $"the log of the run: {log.DisplayPath}"));
             log.Write($"run ended: {result.End.ToString().ToLowerInvariant()}{(result.Why is null ? "" : $" · {result.Why}")} · {result.Done} done");
             return result;

@@ -360,12 +360,11 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync(Context(processes) with { Home = personal.FullName }, ["run", "--task", "40"]);
 
         // A run that stopped over a problem names its log, which holds what it said and every command it ran.
-        var log = $".toobusy/local/logs/run-{InstantClock.Start.ToLocalTime().ToString("yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture)}.log";
         Assert.Equal(1, exit);
-        Assert.Equal($"✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}  the log of the run: {log}{Environment.NewLine}", output);
+        Assert.Equal($"✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}  the log of the run: {Log}{Environment.NewLine}", output);
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments[0] == "issue");
-        var written = File.ReadAllText(Path.Combine(folder.FullName, log));
+        var written = File.ReadAllText(Path.Combine(folder.FullName, Log));
         Assert.Contains("✖ Stopped: #40 is not taken: it is not among the open tasks · no task was started", written, StringComparison.Ordinal);
         Assert.Contains(" $ gh api ", written, StringComparison.Ordinal);
         Assert.Contains("→ gh exited 0 in ", written, StringComparison.Ordinal);
@@ -1150,7 +1149,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.Equal(0, exit);
         Assert.Equal(
-            """
+            $$"""
             ✻ No milestone · 1 task in the queue · the assistant's own model · high effort · auto mode
             → #12 Export the data — started · a new session · claude attach abc12345
               #12 is assigned to the current user; the session is told that toobusy keeps its task
@@ -1158,9 +1157,16 @@ public sealed class CliAppTests : IDisposable
               #12 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
               Worked 0 s
+              the log of the run: {{Log}}
 
             """.ReplaceLineEndings(),
             output);
+
+        // The log holds how the session was seen, and none of what the list of the sessions answered.
+        var written = File.ReadAllText(Path.Combine(folder.FullName, Log));
+        Assert.Contains(" #12 session abc12345: ended", written, StringComparison.Ordinal);
+        Assert.Contains("$ claude agents --json --all", written, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"sessionId\"", written, StringComparison.Ordinal);
 
         var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
         Assert.Equal(["--bg", "--permission-mode", "auto"], started.Take(3));
@@ -3483,6 +3489,9 @@ public sealed class CliAppTests : IDisposable
         var file = new TooBusy.Infrastructure.Run.RunSignFile(TooBusy.Infrastructure.Run.LocalFolder.Ensure(folder.FullName));
         Assert.Null(file.Raise(sign));
     }
+
+    // The log a run of a test writes: its clock starts at the same moment every time.
+    static string Log => $".toobusy/local/logs/run-{InstantClock.Start.ToLocalTime().ToString("yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture)}.log";
 
     void GitRepository() => folder.CreateSubdirectory(".git");
 

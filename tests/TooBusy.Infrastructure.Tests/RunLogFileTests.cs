@@ -79,6 +79,24 @@ public sealed class RunLogFileTests : IDisposable
         Assert.Null(log.Unwritable);
     }
 
+    // A held text waits for the next one written, and is replaced by one held after it; the log writes it when it
+    // closes, too.
+    [Fact]
+    public void AHeldTextIsWrittenBeforeTheNextOneAndWhenTheLogCloses()
+    {
+        var log = new RunLogFile(folder.FullName, clock);
+
+        log.Hold("held 1");
+        log.Hold("held 2");
+        var before = log.Written;
+        log.Write("next");
+        log.Hold("held 3");
+        log.Dispose();
+
+        Assert.Equal(["held 2", "next", "held 3"], Logged.Lines(log));
+        Assert.Equal(before + 1, log.Written);
+    }
+
     [Fact]
     public async Task LinesFromManyThreadsLandWhole()
     {

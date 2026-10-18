@@ -25,6 +25,13 @@ public sealed class LoggedView(IRunView inner, RunLogFile log) : IRunView
 
     public void Show(RunStatus status) => inner.Show(status);
 
+    // What only the log keeps: the view it stands before is not told.
+    public void Trace(string text)
+    {
+        log.Write(text);
+        Complain();
+    }
+
     void Complain()
     {
         if (complained || log.Unwritable is not { } why)

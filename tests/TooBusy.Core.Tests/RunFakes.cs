@@ -571,4 +571,9 @@ sealed class Log : IRunView
     public void Report(TaskEnd ended) => Ends.Add((ended.Task.Number, ended.Mark, (int)ended.Took.TotalSeconds));
 
     public void Show(RunStatus status) => Statuses.Add(status);
+
+    // What only the log on disk keeps.
+    public List<string> Traces { get; } = [];
+
+    public void Trace(string text) => Traces.Add(text);
 }

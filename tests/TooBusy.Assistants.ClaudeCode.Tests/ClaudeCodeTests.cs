@@ -419,6 +419,52 @@ public sealed class ClaudeCodeTests : IDisposable
     // Claude Code may start a copy of the session all the same, and says so: a copy of a session that nothing has,
     // by the list, is the session from then on, with the conversation of its own and nothing of what the one before
     // said.
+    // The list of the sessions starts Claude Code: a look takes it from the last one read while that is younger than
+    // the time it is kept, and reads it anew after that.
+    [Fact]
+    public async Task ALookTakesTheListOfTheSessionsReadLessThanTwentySecondsAgo()
+    {
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "running"));
+        var session = await Assistant(listAge: TimeSpan.FromSeconds(20)).StartAsync(Start, TestContext.Current.CancellationToken);
+
+        await session.LookAsync(TestContext.Current.CancellationToken);
+        clock.Pass(TimeSpan.FromSeconds(10));
+        await session.LookAsync(TestContext.Current.CancellationToken);
+        clock.Pass(TimeSpan.FromSeconds(10));
+        await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, Lists());
+    }
+
+    [Fact]
+    public async Task ALookAfterASessionWasToldOrStoppedReadsTheListAnew()
+    {
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        claude.Answer = arguments => Exited(arguments[0] == "--bg" && arguments.Contains("--resume") ? "backgrounded · 15555bc6\n" : arguments[0] == "--bg" ? Backgrounded : "");
+        var session = await Assistant(listAge: TimeSpan.FromSeconds(20)).StartAsync(Start, TestContext.Current.CancellationToken);
+        await session.LookAsync(TestContext.Current.CancellationToken);
+
+        await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+        var told = Lists();
+        await session.LookAsync(TestContext.Current.CancellationToken);
+        await session.StopAsync(TestContext.Current.CancellationToken);
+        await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(told + 2, Lists());
+    }
+
+    [Fact]
+    public async Task AListThatCannotBeReadIsNotKept()
+    {
+        claude.List = new ProcessResult(ProcessStatus.Exited, 1, "", "");
+        var session = await Assistant(listAge: TimeSpan.FromSeconds(20)).StartAsync(Start, TestContext.Current.CancellationToken);
+
+        await session.LookAsync(TestContext.Current.CancellationToken);
+        await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, Lists());
+    }
+
     [Fact]
     public async Task ACopyOfASessionThatNothingHasIsTheSessionFromThenOn()
     {
@@ -734,11 +780,15 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal((Path.Combine("/local", "wrap-up.json"), Path.Combine("/local", "usage.json")), (plain.Request, plain.Usage));
     }
 
-    ClaudeCode Assistant(string permissionMode = "auto") => new(claude, clock, folders, "/work/rocket", permissionMode);
+    // An assistant that reads the list of the sessions anew at every look, unless a test gives it a time to keep it.
+    ClaudeCode Assistant(string permissionMode = "auto", TimeSpan? listAge = null) => new(claude, clock, folders, "/work/rocket", permissionMode, listAge ?? TimeSpan.Zero);
 
     void Write(params string[] lines) => File.AppendAllText(folders.Transcript(Conversation), string.Join('\n', lines) + "\n");
 
     static ProcessResult Exited(string output) => new(ProcessStatus.Exited, 0, output, "");
+
+    // How many times the list of the sessions was read.
+    int Lists() => claude.Asked.Count(arguments => arguments[0] == "agents");
 
     static string Listing(params string[] entries) => "[" + string.Join(',', entries) + "]";
 

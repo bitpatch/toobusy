@@ -54,7 +54,7 @@ public sealed class LoggedCommandsTests : IDisposable
 
         Assert.Equal(
             [
-                "$ make check", "→ the command exited 1 in 0 s", "a", "b",
+                "$ make check", "→ the command exited 1 in 0 ms", "a", "b",
                 "$ make check", "→ the command did not end in 5 min, and was stopped", "still going",
                 "$ make check", "→ the shell could not be run",
             ],

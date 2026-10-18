@@ -49,7 +49,7 @@ public sealed class LoggedRunTests : IDisposable
     }
 
     [Fact]
-    public async Task TheLogIsNamedOnlyAfterAProblemAndIsClosedWhenTheRunEnds()
+    public async Task TheLogIsNamedUnderEveryRunAndIsClosedWhenTheRunEnds()
     {
         var log = new RunLogFile(folder.FullName, clock);
         var run = new LoggedRun(new FakeRun(_ => Task.FromResult(new RunResult(RunEnd.Emptied, 2))), log);
@@ -57,8 +57,25 @@ public sealed class LoggedRunTests : IDisposable
         await run.RunAsync(view, TestContext.Current.CancellationToken);
         log.Write("after the run");
 
-        Assert.Empty(view.Lines);
-        Assert.Equal(["run ended: emptied · 2 done"], Logged.Lines(log));
+        Assert.Equal(["  the log of the run: " + log.DisplayPath], view.Lines.Select(line => line.ToString()));
+        Assert.Equal(["  the log of the run: " + log.DisplayPath, "run ended: emptied · 2 done"], Logged.Lines(log));
+    }
+
+    // How the run sees its session goes into the log and not to the screen.
+    [Fact]
+    public async Task ATraceGoesIntoTheLogOnly()
+    {
+        var log = new RunLogFile(folder.FullName, clock);
+        var run = new LoggedRun(new FakeRun(view =>
+        {
+            view.Trace("#12 session 1a2b3c4d: working → asking (input needed)");
+            return Task.FromResult(new RunResult(RunEnd.Stopped, 0));
+        }), log);
+
+        await run.RunAsync(view, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(view.Lines, line => line.Text.Contains("session", StringComparison.Ordinal));
+        Assert.Equal("#12 session 1a2b3c4d: working → asking (input needed)", Logged.Lines(log)[0]);
     }
 
     [Fact]
