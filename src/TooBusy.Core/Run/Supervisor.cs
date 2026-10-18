@@ -1276,7 +1276,7 @@ public sealed class Supervisor(
 
     void Show(RunStatus next)
     {
-        status = next with { Limits = limits, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
+        status = next with { Limits = limits, Behind = taken, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
         view.Show(status);
         if (told is not null && RunSign.Of(status) is var now && now != told)
             sign.Change(told = now);

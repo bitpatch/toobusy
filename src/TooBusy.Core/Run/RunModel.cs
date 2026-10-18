@@ -173,7 +173,8 @@ public enum RunPhase
 public sealed record TaskEnd(QueueTask Task, RunMark Mark, TimeSpan Took);
 
 // What a run is doing right now. Text says it in words when no task is being done. Since is when the task was
-// taken, Step what its session is doing, Context the size of its conversation, Queued how many tasks follow it.
+// taken, Step what its session is doing, Context the size of its conversation, Queued how many tasks follow it, as
+// the queue was read before it, and Behind how many tasks of the run came to an outcome before it.
 // Reply is what a session that waits for the owner said last, line by line; it is empty while nothing waits.
 // Plan is the plan the session keeps of the task, step by step; it is empty when it keeps none.
 public sealed record RunStatus(RunPhase Phase, string Text)
@@ -189,6 +190,8 @@ public sealed record RunStatus(RunPhase Phase, string Text)
     public IReadOnlyList<PlanStep> Plan { get; init; } = [];
 
     public int Queued { get; init; }
+
+    public int Behind { get; init; }
 
     public DateTimeOffset? Until { get; init; }
 

@@ -60,7 +60,7 @@ public sealed class RunScreenTests : IDisposable
             view.Say(new RunLine(RunMark.Done, "#2 Show the total — done in 84 s"));
             view.Report(new TaskEnd(Total, RunMark.Done, TimeSpan.FromSeconds(84)));
             view.Say(new RunLine(RunMark.Started, "#3 Export the data — started"));
-            view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 41.7, null), new UsageWindow("weekly", 12, null)) });
+            view.Show(Working with { Behind = 1, Limits = new UsageLimits(new UsageWindow("5-hour", 41.7, null), new UsageWindow("weekly", 12, null)) });
             Assert.Equal(RunCommand.Stop, await run.NextAsync());
             return new RunResult(RunEnd.Stopped, 1);
         });
@@ -75,8 +75,9 @@ public sealed class RunScreenTests : IDisposable
         Assert.Equal(result, screen.Result);
         Assert.Equal([new TaskEnd(Total, RunMark.Done, TimeSpan.FromSeconds(84))], screen.Ends);
         var bar = "  toobusy · ~/rocket" + new string(' ', 61) + "Running the queue";
-        terminal.AssertTaped(bar + "\n ✔ #2 Show the total  1:24\n ● #3 Export the data\n   1:24 · Edit src/Export.cs\n ❯ press / to show the menu\n"
-            + " ctrl+c stop the session and exit" + new string(' ', 43) + "5-hour 41% · weekly 12%");
+        terminal.AssertTaped(bar + "\n ✔ #2 Show the total  1:24\n ● #3 Export the data\n   1:24 · Edit src/Export.cs\n"
+            + " ❯ press / to show the menu" + new string(' ', 36) + "limits used: 5-hour 41% · weekly 12%\n"
+            + " ctrl+c stop the session and exit" + new string(' ', 55) + "task 2 of 4");
 
         // Nothing is said of a task that starts, and the page is left with how the run went under its tasks.
         Assert.DoesNotContain("started", terminal.Output.ToString(), StringComparison.Ordinal);
@@ -146,31 +147,115 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Fact]
-    public async Task TheRightEdgeShowsTheWindowsOfTheLastStatusAndNothingForOneThatIsNotKnown()
+    public async Task TheLineOfTheCommandsShowsTheWindowsOfTheLastStatusAndNothingForOneThatIsNotKnown()
     {
         var edges = new List<string>();
         var run = new ScriptedRun(async (run, view) =>
         {
             view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null)) });
             await SeenAsync("5-hour 11% · weekly 4%");
-            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+            edges.Add(Pointer());
 
             // A window whose reset has passed is not on the status, and nothing stands for it.
             view.Show(Working with { Limits = new UsageLimits(null, new UsageWindow("weekly", 4, null)) });
             await GoneAsync("5-hour");
-            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+            edges.Add(Pointer());
 
             view.Show(Working);
             await GoneAsync("weekly");
-            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+            edges.Add(Pointer());
             return new RunResult(RunEnd.Emptied, 0);
         });
 
         using var page = terminal.Open();
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
+        const string Menu = " ❯ press / to show the menu";
+        Assert.Equal([Menu + new string(' ', 37) + "limits used: 5-hour 11% · weekly 4%", Menu + new string(' ', 50) + "limits used: weekly 4%", Menu], edges);
+    }
+
+    [Theory]
+    [InlineData(60, 10, "5-hour 11% · weekly 4%")]
+    [InlineData(40, 0, "")]
+    public async Task InANarrowWindowTheWordsOfTheLimitsGiveWayFirstAndThenTheFigures(int width, int gap, string limits)
+    {
+        using var narrow = Live(width, height: 24);
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null)) });
+            while (!narrow.Tape.Text.Contains("press / to show the menu", StringComparison.Ordinal))
+                await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = narrow.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        narrow.AssertTaped(" ❯ press / to show the menu" + new string(' ', gap) + limits + "\n");
+    }
+
+    [Fact]
+    public async Task TheLimitsAreNotShownWhileTheMenuIsOpen()
+    {
+        var limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null));
+        var seen = new List<bool>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            // The menu that `/` opens, and the one a session that waits for the owner brings.
+            view.Show(Working with { Limits = limits });
+            await SeenAsync("❯ stop");
+            seen.Add(Has("5-hour"));
+            await SeenAsync("press / to show the menu");
+            seen.Add(Has("5-hour"));
+            view.Show(Waiting with { Limits = limits });
+            await SeenAsync("❯ hold");
+            seen.Add(Has("5-hour"));
+            Assert.Equal(RunCommand.Hold, await run.NextAsync());
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+        terminal.Keys
+            .Hold(() => Has("press / to show the menu")).Type("/")
+            .Hold(() => seen.Count == 1).Press(Keys.Escape)
+            .Hold(() => seen.Count == 3).Press(Keys.Enter);
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal([false, true, false], seen);
+    }
+
+    [Fact]
+    public async Task UnderTheSecondRuleStandsThePlaceOfTheTaskAmongTheTasksOfTheRun()
+    {
+        var edges = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            // Before the first task there is none.
+            view.Show(new RunStatus(RunPhase.Preparing, "Reading the queue…"));
+            await SeenAsync("Reading the queue…");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+
+            view.Show(Working with { Behind = 1 });
+            await SeenAsync("task 2 of 4");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+
+            // Between tasks it stays as it was, and the next task has it as the queue was read before it.
+            view.Report(new TaskEnd(Export, RunMark.Done, TimeSpan.FromSeconds(84)));
+            view.Show(new RunStatus(RunPhase.Preparing, "Reading the queue…"));
+            await SeenAsync("Reading the queue…");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+
+            view.Show(Working with { Task = Total, Behind = 2, Queued = 3 });
+            await SeenAsync("task 3 of 6");
+            edges.Add(terminal.Tape.Text.Split('\n')[^1]);
+            return new RunResult(RunEnd.Emptied, 1);
+        });
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
         const string Hints = " ctrl+c stop the session and exit";
-        Assert.Equal([Hints + new string(' ', 44) + "5-hour 11% · weekly 4%", Hints + new string(' ', 57) + "weekly 4%", Hints], edges);
+        Assert.Equal([Hints, Hints + new string(' ', 55) + "task 2 of 4", Hints + new string(' ', 55) + "task 2 of 4", Hints + new string(' ', 55) + "task 3 of 6"], edges);
     }
 
     // Waits until the terminal's own screen shows the text.
@@ -186,6 +271,9 @@ public sealed class RunScreenTests : IDisposable
         while (Has(text))
             await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
     }
+
+    // The line of the commands, with the pointer that shows where the menu opens.
+    string Pointer() => terminal.Tape.Text.Split('\n').First(row => row.Contains("press / to show the menu", StringComparison.Ordinal));
 
     // The line under the time and the step of the task that is worked on.
     string? Bar()

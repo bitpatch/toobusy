@@ -2944,8 +2944,25 @@ public sealed class SupervisorTests : IDisposable
         // still takes, and by no more.
         Assert.Equal(most, tracker.Read.Count);
         Assert.Equal(
-            Enumerable.Range(0, most).Reverse(),
-            log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Queued).Distinct());
+            Enumerable.Range(0, most).Select(behind => (behind, most - 1 - behind)),
+            log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => (status.Behind, status.Queued)).Distinct());
+    }
+
+    [Fact]
+    public async Task TheStatusCountsTheTasksOverBeforeATaskAndThoseThatFollowItAsTheQueueWasReadBeforeIt()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        assistant.Session(3).Works(and: () => tracker.Add(9)).Ends(Done);
+        assistant.Session(5).Works().Ends("Which key?\nTOOBUSY: owner");
+
+        await RunAsync();
+
+        // The task that the session of #3 makes is counted at the next task, and not while #3 is worked on. A task
+        // left to the owner is over as one that is done is.
+        Assert.Equal(
+            [(3, 0, 1), (5, 1, 1), (9, 2, 0)],
+            log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => (status.Task!.Number, status.Behind, status.Queued)).Distinct());
     }
 
     [Fact]

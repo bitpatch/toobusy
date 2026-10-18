@@ -1,3 +1,4 @@
+using System.Globalization;
 using TooBusy.Core.Run;
 
 namespace TooBusy.Cli.Terminal;
@@ -14,8 +15,9 @@ namespace TooBusy.Cli.Terminal;
 // Under the task is the place of the commands, between two rules. Nothing is typed there: a pointer blinks where
 // the menu opens, and `/` opens the menu of the commands that mean something at the moment, the arrows move, Enter
 // runs one and Escape closes the menu. A session that waits for the owner brings the two commands that are for it
-// without being asked. Under the second rule stand the keys and, at their right, how much of the usage limits is
-// used.
+// without being asked. At the right of the pointer stands how much of the usage limits is used, `limits used:
+// 5-hour 41% · weekly 12%`, and nothing while the menu is open. Under the second rule stand the keys and, at their right, the place of the task among the tasks
+// of the run: `task 4 of 9`, as the queue was read before the task.
 //
 // The run goes on by itself while the page waits for a key: the page looks for one again and again and draws what
 // has changed. When the run is over the page writes how it went, rolls the tape up and gives the result: it does
@@ -64,10 +66,12 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
         // Whether the menu was opened with `/`, whether the commands that a waiting session brought were put away,
         // and the row the pointer is on. Whether anything is settled on the tape yet: the foot keeps a line off it.
+        // The place of the task among the tasks of the run stays as it was between tasks, when no task is worked on.
         var open = false;
         var away = false;
         var at = 0;
         var any = false;
+        var counted = "";
         var drawn = "";
         try
         {
@@ -81,9 +85,11 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                 List<Entry> offered = [.. Commands.Where(entry => status.Available.HasFlag(entry.Flag))];
                 var listed = open ? offered : waits && !away ? [.. offered.Where(entry => ForOwner.HasFlag(entry.Flag))] : [];
                 at = Math.Clamp(at, 0, Math.Max(0, listed.Count - 1));
+                if (status.Task is not null)
+                    counted = Counted(status);
 
                 // A foot that shows nothing new is not drawn again: the times it shows change once in a second.
-                var foot = Foot(status, listed, at, any, tape);
+                var foot = Foot(status, listed, at, any, counted, tape);
                 var showing = string.Join('\n', foot.Lines.Select(Told).Append($"{foot.Chosen}").Append(string.Join(' ', foot.Lit ?? [])));
                 if (settled.Count > 0 || showing != drawn)
                 {
@@ -166,7 +172,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     }
 
     // The foot of the tape: what the run is doing, the place of the commands between its rules, and the keys.
-    Strip Foot(RunStatus status, List<Entry> listed, int at, bool spaced, Tape tape)
+    Strip Foot(RunStatus status, List<Entry> listed, int at, bool spaced, string counted, Tape tape)
     {
         var width = tape.Width;
         var rule = Line.Of(new string('─', width - 2), Tone.Muted);
@@ -189,7 +195,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         {
             // Nothing is typed here: the pointer only shows where the menu opens, and blinks as it does in it.
             chosen = lines.Count;
-            lines.Add(new Line(new Part("❯", Tone.Accent), new Part(" press / to show the menu", Tone.Muted)));
+            lines.Add(Edged(new Line(new Part("❯", Tone.Accent), new Part(" press / to show the menu", Tone.Muted)), width, Limits(status)));
         }
         else
         {
@@ -199,7 +205,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         }
 
         lines.Add(rule);
-        lines.Add(Keys(status, listed.Count > 0, width));
+        lines.Add(Edged(Keys(listed.Count > 0), width, counted));
         return new Strip(lines, mark, Chosen: chosen, Lit: lit);
     }
 
@@ -267,15 +273,36 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
             yield return new Line(new Part("  answer it in its session: ", Tone.Muted), new Part(open, Tone.Quiet));
     }
 
-    // The line under the second rule: the keys or, when a key that leaves was pressed once, what is asked; and at
-    // the right edge how much of the usage limits is used, when it is known and there is room.
-    Line Keys(RunStatus status, bool menu, int width)
+    // The keys under the second rule or, when a key that leaves was pressed once, what is asked.
+    Line Keys(bool menu) =>
+        page.Asking is { } asking ? Line.Of(asking, Tone.Warning)
+        : Page.Hints(menu ? "↑↓ move · enter run · esc close" : $"ctrl+c {page.Leaving}");
+
+    // How much of the usage limits is used, of the windows that are known: with the words that say what the figures
+    // are, and the figures alone for a line that has no room for the words.
+    static string[] Limits(RunStatus status)
     {
-        var keys = page.Asking is { } asking ? Line.Of(asking, Tone.Warning)
-            : Page.Hints(menu ? "↑↓ move · enter run · esc close" : $"ctrl+c {page.Leaving}");
-        var limits = string.Join(" · ", ((UsageWindow?[])[status.Limits.Near, status.Limits.Far]).OfType<UsageWindow>().Select(window => $"{window.Name} {Spoken.Percent(window.Used)}"));
-        var gap = width - 2 - keys.Parts.Sum(part => part.Text.Length) - limits.Length;
-        return limits.Length == 0 || gap < 2 ? keys : new Line([.. keys.Parts, new Part(new string(' ', gap)), new Part(limits, Tone.Muted)]);
+        var figures = string.Join(" · ", ((UsageWindow?[])[status.Limits.Near, status.Limits.Far]).OfType<UsageWindow>().Select(window => $"{window.Name} {Spoken.Percent(window.Used)}"));
+        return figures.Length == 0 ? [] : [$"limits used: {figures}", figures];
+    }
+
+    // The place of the task that is worked on among the tasks of the run: those that are over before it, it, and
+    // those that follow it as the queue was read before it.
+    static string Counted(RunStatus status) =>
+        string.Create(CultureInfo.InvariantCulture, $"task {status.Behind + 1} of {status.Behind + 1 + status.Queued}");
+
+    // The line with a text at its right edge, muted: the first of the texts that has room there, or none.
+    static Line Edged(Line line, int width, params string[] rights)
+    {
+        var taken = line.Parts.Sum(part => part.Text.Length);
+        foreach (var right in rights)
+        {
+            var gap = width - 2 - taken - right.Length;
+            if (right.Length > 0 && gap >= 2)
+                return new Line([.. line.Parts, new Part(new string(' ', gap)), new Part(right, Tone.Muted)]);
+        }
+
+        return line;
     }
 
     static string Told(Line line) => string.Concat(line.Parts.Select(part => part.Text));
