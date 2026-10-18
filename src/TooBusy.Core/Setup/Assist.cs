@@ -367,11 +367,12 @@ public static class Assist
 
             - that an assistant that works with the owner looks at `toobusy status` before it commits: a run works in the working copy itself, and a commit made beside it lands in the middle of its task. `toobusy status` exits with 3 while a run goes on. The rule is not for a session that toobusy started;
             - where they tell an assistant to move its task, to assign it, to label it, to comment on it or to close it: that in a session of a run the task is kept by toobusy, and the session does none of that;
+            - where they describe another way of running the tasks of the project without its owner, a script of the project, the sessions it started, the line it read at the end of a reply, the labels and the statuses it set: they are changed to describe toobusy, or taken out;
             - how a session brings its branch up to date when the branch has moved on the remote by the time it pushes: by a rebase or by a merge. Its first message tells it to do so as the instructions say, and to push again;
             - what a session without the owner does in another way than one with them. The skill of step 6 is the place for that, when the project has one.
             """);
-        Part(text, "Look at", "`CLAUDE.md`, `AGENTS.md`, the skills and the commands in `.claude/`, `CONTRIBUTING.md` and whatever else tells an assistant how the work of this project is done.");
-        Part(text, "Ask the owner", $"what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `{Command(2)}`.{(owner is null ? "" : $" A single task that waits for the owner gets the `{owner}` label.")} Show the owner the changes of the instructions before they are kept.");
+        Part(text, "Look at", "`CLAUDE.md`, `AGENTS.md`, the skills and the commands in `.claude/`, `CONTRIBUTING.md` and whatever else tells an assistant how the work of this project is done. Where the project ran its tasks without its owner before, the old way is found in a script of the project that starts sessions of the assistant, a section of its process on it, a folder of its state, and tasks of the tracker that are about it: `gh issue list --search \"<the name of the script>\"`.");
+        Part(text, "Ask the owner", $"what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `{Command(2)}`.{(owner is null ? "" : $" A single task that waits for the owner gets the `{owner}` label.")} Where the project has an old way of running its tasks without the owner: whether the script, its state and its instructions are taken out of the project, and what becomes of the tasks about it. Nothing is deleted without the owner. Show the owner the changes of the instructions before they are kept.");
         Part(text, "Set it", "no command of toobusy sets this step: the instructions are edited as any file of the project.");
         Part(text, "Check", "read `toobusy about` once more against the instructions as they are now: nothing in them tells a session of a run to do what toobusy does.");
     }
@@ -379,6 +380,9 @@ public static class Assist
     static void Skill(StringBuilder text, AssistGround ground)
     {
         var settings = Stated(ground);
+
+        // A skill that is written may be one that sessions of another way of running the tasks started with.
+        var written = settings?.Skill is not null && ground.Skill is { Found: true, Place: var place } ? place : null;
         Part(text, "As things are", (settings, ground.Skill) switch
         {
             (null, _) => $"{Unstated(ground)}.",
@@ -393,9 +397,20 @@ public static class Assist
             - It needs one when work without the owner differs from work with them: checks a session runs by itself, what it does where the owner would have looked, the language of the report, which other tasks it makes. A project whose instructions say all of that already needs none.
             - `toobusy about` tells, under “A session starts with the skill of the project”, what the first message of a session says already, which the skill does not say again or against, and what is the skill's to say.
             - The skill is a file of the project, and toobusy does not make it: `.claude/skills/<name>/SKILL.md`. To be loaded by its command, `/<name>`, the file begins with a front matter between two lines of `---` that has `name: <name>`, the name of its folder, and `description:`, a line on what the skill is for; the instructions follow it. `{ProposedSkill}` is the name a first setup proposes.
-            """);
+            """ + (written is null ? "" : $"""
+
+
+            The skill is written already, and it may be older than toobusy: one that the sessions of a script of the project or of another tool started with. Read {written} against `toobusy about`, under “A session starts with the skill of the project”, and change it so:
+
+            - what the first message says already is taken out of it: that nobody answers, that the task is read in the tracker and kept by toobusy, the working copy and the plan of the work, what becomes of what cannot be done without the owner, and how the last reply ends;
+            - what says against the first message is taken out or changed: a line a session ends its reply with for another tool, commands that move, assign, label, comment on or close the task of the session, asking the owner, and a worktree;
+            - what is the project's stays: how the work is done and checked without the owner, what is done before the work and after it but for what the run does itself with the branch and the commands of step 7, the language of the report, and the other tasks a session makes;
+            - where it names another tool, its script, its files or its commands, it names toobusy and its commands instead, as `toobusy queue` and `toobusy status`, or leaves them out.
+            """));
         Part(text, "Look at", "the skills the project has already in `.claude/skills/` and its commands in `.claude/commands/`, and the instructions of step 5.");
-        Part(text, "Ask the owner", "whether the project gets a skill, and show them the skill before it is kept: it says how their tasks are done without them.");
+        Part(text, "Ask the owner", written is null
+            ? "whether the project gets a skill, and show them the skill before it is kept: it says how their tasks are done without them."
+            : "whether the project keeps its skill, and show them the skill as it will be before it is kept, with what is taken out of it and why: it says how their tasks are done without them.");
 
         var rest = ground.Settings is null ? " --no-board" : "";
         Set(text, [$"toobusy init --yes{rest} --skill <name>", $"toobusy init --yes{rest} --no-skill"]);
@@ -403,7 +418,8 @@ public static class Assist
         text.Append(ground.Settings is null
             ? " `--no-board` stands there only because nothing is set yet: step 3 sets it. The labels are then those a first setup proposes, which step 2 decides.\n\n"
             : " What the command does not name stays as it is.\n\n");
-        Part(text, "Check", "`toobusy doctor` passes `skill` and says where it found the skill, or skips it for a project that names none. `toobusy about` shows the first message of a session with the command of the skill at its head.");
+        Part(text, "Check", "`toobusy doctor` passes `skill` and says where it found the skill, or skips it for a project that names none. `toobusy about` shows the first message of a session with the command of the skill at its head."
+            + (written is null ? "" : " The skill says nothing that `toobusy about` lists under what the first message says already, and nothing against it."));
     }
 
     static void Commands(StringBuilder text, AssistGround ground)
@@ -483,7 +499,8 @@ public static class Assist
 
             - `{ground.Path}`;
             - {skill};
-            - the instructions that were changed in step 5, and the settings of Claude Code that were changed in step 8.
+            - the instructions that were changed in step 5, and the settings of Claude Code that were changed in step 8;
+            - what was taken out of the project in steps 5 and 6, the script of the old way of running the tasks, its state and its instructions, where the owner agreed to it.
 
             The choices of the owner, the milestone, the model and the effort, are not in the project and are not committed.
             """);

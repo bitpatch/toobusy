@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
@@ -356,6 +357,26 @@ public class AssistTests
     }
 
     [Fact]
+    public void TheStepOfTheInstructionsTellsWhatBecomesOfAnOldWayOfRunningTheTasksWithoutTheOwner()
+    {
+        var text = Assist.Step(5, Set());
+
+        Assert.Contains(
+            "- where they describe another way of running the tasks of the project without its owner, a script of the project, the sessions it started, the line it read at the end of a reply, the labels and the statuses it set: they are changed to describe toobusy, or taken out;\n"
+            + "- how a session brings its branch up to date",
+            text,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Where the project ran its tasks without its owner before, the old way is found in a script of the project that starts sessions of the assistant, a section of its process on it, a folder of its state, and tasks of the tracker that are about it: `gh issue list --search \"<the name of the script>\"`.\n",
+            text,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Where the project has an old way of running its tasks without the owner: whether the script, its state and its instructions are taken out of the project, and what becomes of the tasks about it. Nothing is deleted without the owner. Show the owner the changes of the instructions before they are kept.\n",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheStepOfTheSkillSaysWhetherItIsNamedAndWritten()
     {
         const string Place = ".claude/skills/task-auto/SKILL.md";
@@ -378,6 +399,41 @@ public class AssistTests
         Assert.Contains("As things are: not set: there are no settings yet.\n", unset, StringComparison.Ordinal);
         Assert.Contains("    toobusy init --yes --no-board --skill <name>\n    toobusy init --yes --no-board --no-skill\n", unset, StringComparison.Ordinal);
         Assert.Contains("`--no-board` stands there only because nothing is set yet: step 3 sets it.", unset, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OverASkillThatIsWrittenTheStepOfTheSkillTellsToReadItAgainstAboutAndWhatIsTakenOutOfIt()
+    {
+        const string Place = ".claude/skills/task-auto/SKILL.md";
+
+        var text = Assist.Step(6, Set(skill: "task-auto") with { Skill = new SkillLook(true, Place) });
+
+        Assert.Contains(
+            $"""
+            `task-auto` is the name a first setup proposes.
+
+            The skill is written already, and it may be older than toobusy: one that the sessions of a script of the project or of another tool started with. Read {Place} against `toobusy about`, under “A session starts with the skill of the project”, and change it so:
+
+            - what the first message says already is taken out of it: that nobody answers, that the task is read in the tracker and kept by toobusy, the working copy and the plan of the work, what becomes of what cannot be done without the owner, and how the last reply ends;
+            - what says against the first message is taken out or changed: a line a session ends its reply with for another tool, commands that move, assign, label, comment on or close the task of the session, asking the owner, and a worktree;
+            - what is the project's stays: how the work is done and checked without the owner, what is done before the work and after it but for what the run does itself with the branch and the commands of step 7, the language of the report, and the other tasks a session makes;
+            - where it names another tool, its script, its files or its commands, it names toobusy and its commands instead, as `toobusy queue` and `toobusy status`, or leaves them out.
+
+            Look at:
+            """.ReplaceLineEndings("\n"),
+            text,
+            StringComparison.Ordinal);
+        Assert.Contains("Ask the owner: whether the project keeps its skill, and show them the skill as it will be before it is kept, with what is taken out of it and why: it says how their tasks are done without them.\n", text, StringComparison.Ordinal);
+        Assert.Contains("`toobusy about` shows the first message of a session with the command of the skill at its head. The skill says nothing that `toobusy about` lists under what the first message says already, and nothing against it.\n", text, StringComparison.Ordinal);
+
+        // A skill that is not written, one of a plugin and none keep the step as it was.
+        foreach (var ground in (AssistGround[])[Set(skill: "task-auto") with { Skill = new SkillLook(false, Place) }, Set(skill: "toolbox:task-auto") with { Skill = new SkillLook(null, "") }, Set() with { Skill = new SkillLook(true, Place) }, Unset])
+        {
+            var step = Assist.Step(6, ground);
+            Assert.DoesNotContain("The skill is written already", step, StringComparison.Ordinal);
+            Assert.Contains("Ask the owner: whether the project gets a skill, and show them the skill before it is kept: it says how their tasks are done without them.\n", step, StringComparison.Ordinal);
+            Assert.Contains("with the command of the skill at its head.\n", step, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -448,7 +504,13 @@ public class AssistTests
     {
         var text = Assist.Step(9, Set(skill: "task-auto") with { Skill = new SkillLook(true, ".claude/skills/task-auto/SKILL.md") });
 
-        Assert.Contains("- `.toobusy/settings.toml`;\n- the skill `task-auto`, .claude/skills/task-auto/SKILL.md;\n- the instructions that were changed in step 5, and the settings of Claude Code that were changed in step 8.", text, StringComparison.Ordinal);
+        Assert.Contains(
+            "- `.toobusy/settings.toml`;\n"
+            + "- the skill `task-auto`, .claude/skills/task-auto/SKILL.md;\n"
+            + "- the instructions that were changed in step 5, and the settings of Claude Code that were changed in step 8;\n"
+            + "- what was taken out of the project in steps 5 and 6, the script of the old way of running the tasks, its state and its instructions, where the owner agreed to it.\n\n",
+            text,
+            StringComparison.Ordinal);
         Assert.Contains("made as the instructions of the project say a commit is made", text, StringComparison.Ordinal);
         Assert.Contains("tell them in a few lines what was set", text, StringComparison.Ordinal);
         Assert.Contains("and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try.", text, StringComparison.Ordinal);
@@ -456,6 +518,32 @@ public class AssistTests
         Assert.EndsWith("Next: `toobusy init --assist 10`\n", text, StringComparison.Ordinal);
 
         Assert.Contains("- the skill, when the project has one;", Assist.Step(9, Set()), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(Numbers))]
+    public void NoStepNamesAProjectAnotherToolOrItsScript(int step)
+    {
+        // Projects with nothing of their own to name: no repository, no commands, and a skill or none.
+        AssistGround[] grounds =
+        [
+            Unset with { Repository = null },
+            Set() with { Repository = null },
+            Set(skill: "task-auto") with { Repository = null, Skill = new SkillLook(true, ".claude/skills/task-auto/SKILL.md") },
+        ];
+
+        foreach (var ground in grounds)
+        {
+            var text = Assist.Step(step, ground);
+
+            Assert.DoesNotContain("acme", text, StringComparison.OrdinalIgnoreCase);
+            foreach (var quoted in Regex.Matches(text, "`([^`]+)`").Select(match => match.Groups[1].Value))
+            {
+                // Neither the line another tool reads at the end of a reply nor a script.
+                Assert.DoesNotMatch(@"^[A-Z][A-Z_]*:", quoted);
+                Assert.DoesNotMatch(@"\.(cs|sh|py|ps1|js|ts|rb)\b", quoted);
+            }
+        }
     }
 
     [Fact]

@@ -3630,7 +3630,8 @@ public sealed class CliAppTests : IDisposable
     }
 
     // The projects the steps are told over: one that toobusy has never seen, one whose settings do not validate,
-    // and one that is set up, with a board, a skill and commands around a task, and with labels that need quotes.
+    // and one that is set up, with a board, a skill that is written and commands around a task, and with labels
+    // that need quotes.
     public static TheoryData<string> ProjectsOfAssist =>
     [
         "",
@@ -3646,6 +3647,8 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         if (settings.Length > 0)
             WriteSettings(settings);
+        if (settings.Contains(SkillOfTheProject, StringComparison.Ordinal))
+            WriteSkill("task-auto");
         var processes = GitHubForAssist(labels: "bug\nfeature\n", milestones: "v1\t\t3\n");
         var root = CliApp.CreateRootCommand(Context(null));
 
@@ -3664,6 +3667,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains(commands, command => command.EndsWith(" --branch <name> --before \"<command>\" --after \"<command>\"", StringComparison.Ordinal));
         Assert.Contains(commands, command => command.EndsWith(" --no-branch --no-before --no-after", StringComparison.Ordinal));
         Assert.Contains("toobusy queue --json", commands);
+        if (settings.Contains(SkillOfTheProject, StringComparison.Ordinal))
+            Assert.Contains(texts, text => text.Contains("The skill is written already", StringComparison.Ordinal));
         foreach (var command in commands)
         {
             var parsed = root.Parse([.. System.CommandLine.Parsing.CommandLineParser.SplitCommandLine(command).Skip(1)]);
