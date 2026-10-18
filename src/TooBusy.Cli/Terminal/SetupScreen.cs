@@ -57,42 +57,8 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
         Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);
 
-    public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
-    {
-        var chosen = new SortedSet<int>(proposed);
-        var at = chosen.FirstOrDefault();
-        var top = 0;
-        var widest = options.Select(option => option.Length).DefaultIfEmpty().Max();
-
-        // After the options stands `Back`, where there is somewhere to go back to: Enter on it goes back.
-        var back = options.Count > 0 && Picker.GoesBack(page);
-        var rows = options.Count + (back ? 1 : 0);
-        while (true)
-        {
-            var lines = new List<Line>();
-            if (options.Count == 0)
-                lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
-            top = Window(lines, rows, at, top, Picker.Rows, out var pointer, index => index == options.Count
-                ? Picker.BackRow(index == at)
-                : Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
-            page.Draw(Head(label, hint), lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer, back: back);
-
-            var key = page.Read();
-            if (key.Key == ConsoleKey.Enter)
-                return at < options.Count || options.Count == 0 ? [.. chosen] : null;
-            if (key.Key == ConsoleKey.Escape)
-                return null;
-            if (options.Count == 0)
-                continue;
-
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
-                at = (at + rows - 1) % rows;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
-                at = (at + 1) % rows;
-            else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !chosen.Remove(at))
-                chosen.Add(at);
-        }
-    }
+    public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) =>
+        Picker.PickMany(page, Head(label, hint), options, proposed);
 
     public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse);
 

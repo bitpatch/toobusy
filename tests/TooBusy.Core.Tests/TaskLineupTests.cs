@@ -93,6 +93,47 @@ public class TaskLineupTests
     }
 
     [Fact]
+    public void ATaskWithALabelThisRunSkipsIsHeldWithTheTasksThatWaitForIt()
+    {
+        var rules = Rules with { Skip = ["Design", "sketch"] };
+
+        var lineup = TaskLineup.Arrange([Task(3, labels: ["feature", "design"]), Task(5, blockedBy: [3]), Task(7), Task(9, labels: ["bug", "Sketch"])], rules);
+
+        // A label is compared whatever its case, and named as the task has it.
+        Assert.Equal([7], lineup.Ready.Select(task => task.Number));
+        Assert.Equal(
+            [(3, "it has the design label, which this run skips"), (5, "it waits for #3 (it has the design label, which this run skips)"), (9, "it has the Sketch label, which this run skips")],
+            Held(lineup));
+        Assert.Equal("it has the design label, which this run skips", lineup.Holds(3));
+    }
+
+    [Fact]
+    public void ALabelThatKeepsATaskOutForGoodIsSaidBeforeALabelToSkip()
+    {
+        var rules = Rules with { Skip = ["design", "nobody-has-it"] };
+
+        var lineup = TaskLineup.Arrange([Task(3, labels: ["feature", "design", "manual"]), Task(5, labels: ["docs", "design"]), Task(7)], rules);
+
+        // A label to skip that no task has skips nothing.
+        Assert.Equal([7], lineup.Ready.Select(task => task.Number));
+        Assert.Equal([(3, "it has the manual label"), (5, "it has none of the labels to take: feature, bug")], Held(lineup));
+    }
+
+    [Fact]
+    public void ATaskThatARunHasASessionForIsGoneOnWithWhateverLabelsTheRunSkips()
+    {
+        var rules = Rules with { Skip = ["design"] };
+        QueueTask[] open = [Task(3), Task(5, BoardStatus.InProgress, "In Progress", labels: ["feature", "design"])];
+
+        var (recorded, why) = TaskLineup.Recorded(open, rules, 5);
+        var lineup = TaskLineup.Arrange(open, rules);
+
+        Assert.Null(why);
+        Assert.Equal([5, 3], lineup.Taking(recorded!).Ready.Select(task => task.Number));
+        Assert.Empty(lineup.Taking(recorded!).Held);
+    }
+
+    [Fact]
     public void ATaskThatWaitsForTheOwnerIsHeld()
     {
         var lineup = TaskLineup.Arrange([Task(3, labels: ["feature", "needs-owner"])], Rules);
@@ -213,6 +254,7 @@ public class TaskLineupTests
         Assert.Equal(["manual"], rules.Blocking);
         Assert.Equal(["bug"], rules.Take);
         Assert.Equal(("ask", "paused", false), (rules.Owner, rules.Interrupted, rules.Board));
+        Assert.Empty(rules.Skip);
         Assert.True(QueueRules.Of(settings with { Tracker = new Settings.TrackerSettings("github", "https://github.com/orgs/acme/projects/1") }).Board);
     }
 

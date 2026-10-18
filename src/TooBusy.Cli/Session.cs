@@ -17,6 +17,9 @@ public sealed class Session(Page page, Workbench bench)
     MilestoneStanding standing = MilestoneStanding.Of(null, null);
     bool read;
 
+    // The labels whose tasks the runs of the menu leave out: chosen on the page, and kept nowhere.
+    IReadOnlyList<string> skipped = [];
+
     // The last setup that was gone through; null when there was none.
     public SetupResult? Setup { get; private set; }
 
@@ -38,7 +41,8 @@ public sealed class Session(Page page, Workbench bench)
     // on, no model or no effort chooses them; leaving any of these leaves the page. A run that is opened from the
     // menu comes back to it when it is over, with how it went said above the menu. No run is opened while one goes on in the working copy. Before it is opened the checks
     // of `doctor` are made, as `toobusy run` makes them: while one fails no run is opened, and the failures stand
-    // above the menu with their fixes. A demo has it all and checks nothing.
+    // above the menu with their fixes. A demo has it all and checks nothing. The labels to skip that are chosen in
+    // the menu hold for every run it opens, until the page is closed.
     public async Task HomeAsync(CancellationToken cancellationToken)
     {
         if (bench.Settings.Load()?.Settings is null)
@@ -60,14 +64,14 @@ public sealed class Session(Page page, Workbench bench)
         // The tasks are counted for the menu over what is set and chosen at the moment, and anew after everything
         // that may have changed their number.
         var tasks = new TaskCount(async () => bench.Settings.Load()?.Settings is { } settings && standing.Choice is { } choice
-            ? await bench.OutlookAsync(settings, choice.Title, cancellationToken)
+            ? await bench.OutlookAsync(settings, choice.Title, skipped, cancellationToken)
             : null);
         string? note = null;
         IReadOnlyList<CheckResult> failed = [];
         while (true)
         {
             Clear("", note, failed);
-            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks);
+            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, skipped, tasks);
             failed = [];
             if (action == HomeAction.Run && bench.Going() is { } going)
             {
@@ -88,7 +92,7 @@ public sealed class Session(Page page, Workbench bench)
             switch (action)
             {
                 case HomeAction.Run:
-                    note = bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!) is { } run
+                    note = bench.OpenRun(bench.Settings.Load()!.Settings!, standing.Choice!.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, skip: skipped) is { } run
                         ? await RunAsync(run, cancellationToken)
                         : "The `origin` remote is not a GitHub repository, so there are no tasks to take.";
                     tasks.Forget();
@@ -103,6 +107,10 @@ public sealed class Session(Page page, Workbench bench)
                     break;
                 case HomeAction.Settings:
                     note = Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+                    tasks.Forget();
+                    break;
+                case HomeAction.SkipLabels:
+                    note = await ChooseSkippedAsync(cancellationToken) ? null : "The labels to skip are left as they were.";
                     tasks.Forget();
                     break;
                 default:
@@ -122,7 +130,7 @@ public sealed class Session(Page page, Workbench bench)
         try
         {
             Clear("", null);
-            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, tasks, checks);
+            var action = await HomeScreen.AskAsync(page, Assistant(), standing.Name, skipped, tasks, checks);
             return (action, action == HomeAction.Run ? checks.Failed : []);
         }
         finally
@@ -200,6 +208,23 @@ public sealed class Session(Page page, Workbench bench)
 
         bench.Personal.SaveEffort(effort);
         ChosenEffort = effort;
+        return true;
+    }
+
+    // Asks for the labels whose tasks the runs of the menu leave out, after they are read, and remembers the answer
+    // for as long as the page is open; false when the user went back instead, before the labels were read too.
+    async Task<bool> ChooseSkippedAsync(CancellationToken cancellationToken)
+    {
+        Clear("Choosing the labels to skip", null);
+        var (done, read) = await page.WaitAsync(
+            "Reading the labels",
+            stopping => bench.ReadLabelsAsync(bench.Settings.Load()!.Settings!, stopping),
+            cancellationToken,
+            Picker.Head(SkipScreen.Label, SkipScreen.Hint));
+        if (!done || SkipScreen.Ask(page, read.Labels, read.Unread, skipped) is not { } chosen)
+            return false;
+
+        skipped = chosen;
         return true;
     }
 
@@ -310,6 +335,8 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Model", ModelScreen.Describe(model)));
         if (bench.Personal.LoadEffort() is { } effort)
             body.Add(Picker.Answer("Effort", effort));
+        if (skipped.Count > 0)
+            body.Add(Picker.Answer("Skipped labels", string.Join(", ", skipped)));
 
         if (note is not null)
             body.AddRange([Line.Empty, .. (failed ?? []).SelectMany(check => CheckList.Told(check, page.Width)), Line.Of(note, Tone.Muted)]);

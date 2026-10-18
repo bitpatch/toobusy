@@ -679,6 +679,27 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ARunThatSkipsLabelsNamesThemAndHoldsTheirTasksWithThoseThatWaitForThemForTheWholeRun()
+    {
+        plan = plan with { Rules = Rules with { Skip = ["design", "sketch"] } };
+        tracker.Add(3, labels: ["feature", "Design"]);
+        tracker.Add(4, blockedBy: [3]);
+        tracker.Add(5);
+
+        // The queue is read anew before every task, and the skip holds there too.
+        assistant.Session(5).Works(and: () => tracker.Add(6, labels: ["bug", "sketch"])).Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([5], assistant.Started.Select(start => start.Task));
+        Assert.Equal("✻ v0.2.0 · 1 task in the queue · skips design, sketch · the assistant's own model · high effort · auto mode", log.Lines[0]);
+        Assert.Equal("  Held: #3 it has the Design label, which this run skips · #4 it waits for #3 (it has the Design label, which this run skips)", log.Lines[1]);
+        Assert.Contains("  Held: #3 it has the Design label, which this run skips · #4 it waits for #3 (it has the Design label, which this run skips) · #6 it has the sketch label, which this run skips", log.Lines);
+        Assert.All(tracker.Did, did => Assert.Equal("5", did.Split(' ')[1]));
+    }
+
+    [Fact]
     public async Task ATaskDoneInPartIsCountedApartFromThoseThatAreDone()
     {
         tracker.Add(3);
@@ -2725,6 +2746,38 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(log.Ends);
         Assert.Equal([$"✖ Stopped: #{number} is not taken: {why} · no task was started", "  Worked 0 s"], log.Lines);
         Assert.Equal([$"Stopped: #{number} is not taken: {why}"], machine.Notified);
+    }
+
+    [Fact]
+    public async Task ARunOfOneTaskDoesNotTakeATaskWithALabelItSkips()
+    {
+        plan = plan with { Only = 3, Rules = Rules with { Skip = ["design"] } };
+        tracker.Add(3, labels: ["feature", "design"]);
+        tracker.Add(5);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 is not taken: it has the design label, which this run skips"), result);
+        Assert.Empty(assistant.Started);
+        Assert.Equal(["✖ Stopped: #3 is not taken: it has the design label, which this run skips · no task was started", "  Worked 0 s"], log.Lines);
+    }
+
+    [Fact]
+    public async Task ATaskOfTheRecordIsGoneOnWithWhateverLabelsTheRunSkips()
+    {
+        plan = plan with { Rules = Rules with { Skip = ["design"] } };
+        state.Record = Record(5);
+        tracker.Add(5, labels: ["feature", "design"], status: BoardStatus.InProgress);
+        tracker.Add(7, labels: ["feature", "design"]);
+        assistant.Session(5).Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Empty(assistant.Started);
+        Assert.Contains("→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5", log.Lines);
+        Assert.Contains("  Held: #7 it has the design label, which this run skips", log.Lines);
+        Assert.Null(state.Record);
     }
 
     [Fact]

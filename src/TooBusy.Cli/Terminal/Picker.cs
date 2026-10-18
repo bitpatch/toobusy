@@ -65,6 +65,45 @@ public static class Picker
         }
     }
 
+    // Asks to choose any of the options, one under another, with those that are proposed chosen at first: Space
+    // chooses the option under the pointer or leaves it, and Enter gives the indexes of those that are chosen.
+    // Escape gives null. Where there is somewhere to go back to the options end with `Back`, and Enter on it goes
+    // back; a list without options says so, and Enter there gives nothing chosen.
+    public static IReadOnlyList<int>? PickMany(Page page, IReadOnlyList<Line> question, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
+    {
+        var chosen = new SortedSet<int>(proposed);
+        var at = chosen.FirstOrDefault();
+        var top = 0;
+        var widest = options.Select(option => option.Length).DefaultIfEmpty().Max();
+        var back = options.Count > 0 && GoesBack(page);
+        var rows = options.Count + (back ? 1 : 0);
+        while (true)
+        {
+            var lines = new List<Line>();
+            if (options.Count == 0)
+                lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
+            top = Window(lines, rows, at, top, Rows, out var pointer, index => index == options.Count
+                ? BackRow(index == at)
+                : Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
+            page.Draw(question, lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer, back: back);
+
+            var key = page.Read();
+            if (key.Key == ConsoleKey.Enter)
+                return at < options.Count || options.Count == 0 ? [.. chosen] : null;
+            if (key.Key == ConsoleKey.Escape)
+                return null;
+            if (options.Count == 0)
+                continue;
+
+            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
+                at = (at + rows - 1) % rows;
+            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
+                at = (at + 1) % rows;
+            else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !chosen.Remove(at))
+                chosen.Add(at);
+        }
+    }
+
     // A row of a list: the pointer when it is on the row, the name, and after it what explains the name and what is
     // to be noticed about it.
     public static Line Row(bool pointed, string name, string detail = "", string note = "") => Row(pointed, new Choice(name, detail, note), name);

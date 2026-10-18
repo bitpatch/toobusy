@@ -173,12 +173,15 @@ toobusy run
 
 Either way a run starts with the checks of `toobusy doctor`: while one fails it does not start, and says what failed and how to fix it.
 
-A run takes tasks until none is left. Two options of `toobusy run` make it shorter:
+A run takes tasks until none is left. Three options of `toobusy run` make it shorter:
 
 ```sh
-toobusy run --task 12    # task #12 and no other; a task that a run would not take now is not started, and the run says why
-toobusy run --max 3      # three tasks at most, then it stops as after `stop`
+toobusy run --task 12             # task #12 and no other; a task that a run would not take now is not started, and the run says why
+toobusy run --max 3               # three tasks at most, then it stops as after `stop`
+toobusy run --skip-label design   # not the tasks with the label, nor those that wait for them; give it again, or several names separated by commas
 ```
+
+A skipped label holds its tasks for that run alone, as when the assistant cannot do them this time; the task an earlier run left with a session is gone on with whatever its labels. `Skip labels` in the menu of `toobusy` chooses the same for the runs it opens, until `toobusy` is closed, and `toobusy queue --skip-label design` shows the queue of such a run.
 
 `toobusy queue` shows what a run would do before you start one, and changes nothing:
 

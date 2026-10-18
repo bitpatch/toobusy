@@ -102,11 +102,12 @@ public sealed record Workbench(
     // the repository, Claude Code does them in the working copy, and what the run leaves on this machine is kept in
     // the local folder of the project. Null when the project has no tasks to take: its `origin` remote is not a
     // GitHub repository. `only` is the one task the run does and `most` how many it takes at most; without them it
-    // is a run of the whole queue. A demo of a run of one task has no task that a run was killed over, unless it is
-    // the one: the record of that task would keep the run from any other.
-    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null)
+    // is a run of the whole queue. `skip` are the labels whose tasks the run leaves out. A demo of a run of one task
+    // has no task that a run was killed over, unless it is the one: the record of that task would keep the run from
+    // any other.
+    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch, PermissionMode = settings.Assistant.SessionMode };
+        var plan = new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch, PermissionMode = settings.Assistant.SessionMode };
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules, killed: only is null or ImitatedTasks.Killed), remembered);
         if (Repository is null)
@@ -153,15 +154,16 @@ public sealed record Workbench(
 
     // What a run over these settings and this milestone would take as things are: how many tasks, those that are
     // ready and those that open after them, and the one it goes on with first: the task of the record an earlier
-    // run left, or one that was interrupted before. Null when the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
-    public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    // run left, or one that was interrupted before. `skip` are the labels whose tasks the run leaves out. Null when
+    // the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
+    public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
     {
         try
         {
             if (Demo)
                 await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
 
-            if (await ReadQueueAsync(settings, milestone, cancellationToken) is not var (lineup, recorded))
+            if (await ReadQueueAsync(settings, milestone, skip, cancellationToken) is not var (lineup, recorded))
                 return null;
 
             var outlook = lineup.Outlook(QueueRules.Of(settings));
@@ -175,12 +177,12 @@ public sealed record Workbench(
 
     // The queue as a run over these settings and this milestone reads it before a task, and nothing is changed by
     // it: the lineup, with the task an earlier run left with a session before the others, and that task, null when
-    // there is none or the run would not go on with it. In a demo the tasks are its made-up ones. Null when the
-    // project has no tasks to read: its `origin` remote is not a GitHub repository. Throws TrackerException when
-    // the tracker refuses.
-    public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    // there is none or the run would not go on with it. `skip` are the labels whose tasks the run leaves out. In a
+    // demo the tasks are its made-up ones. Null when the project has no tasks to read: its `origin` remote is not a
+    // GitHub repository. Throws TrackerException when the tracker refuses.
+    public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
     {
-        var rules = QueueRules.Of(settings);
+        var rules = QueueRules.Of(settings) with { Skip = skip };
         ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses);
         if (tasks is null)
             return null;
@@ -237,6 +239,23 @@ public sealed record Workbench(
         return reading == AssistReading.Labels
             ? ground with { Labels = await Machine.ReadLabelsAsync(Repository, cancellationToken) }
             : ground with { Milestones = await ReadMilestonesAsync(cancellationToken) };
+    }
+
+    // The labels a run may be told to skip, read as `init` reads them for its questions: those of the repository and,
+    // after them, those of the settings that it lacks. Null when they cannot be read, with why: without `gh`, logged
+    // in, or a GitHub `origin` remote. A demo has its made-up labels.
+    public async Task<(IReadOnlyList<string>? Labels, string? Unread)> ReadLabelsAsync(ProjectSettings settings, CancellationToken cancellationToken)
+    {
+        if (Repository is null)
+            return (null, "The `origin` remote is not a GitHub repository, so there are no labels to choose from.");
+        if (!await Machine.HasAsync(Tool.GitHubCli, cancellationToken))
+            return (null, "The GitHub command-line tool `gh` is not installed, so the labels cannot be read.");
+        if (!await Machine.TrackerLoggedInAsync(cancellationToken))
+            return (null, "`gh` is not logged in to github.com, so the labels cannot be read.");
+
+        var named = settings.Queue.Labels;
+        string[] ofSettings = [.. named.Blocking, .. named.Take, named.Owner, named.Interrupted];
+        return ([.. (await Tracker.ReadLabelsAsync(Repository, cancellationToken)).Concat(ofSettings).Distinct(StringComparer.OrdinalIgnoreCase)], null);
     }
 
     // The open milestones of the repository; null when they cannot be read.

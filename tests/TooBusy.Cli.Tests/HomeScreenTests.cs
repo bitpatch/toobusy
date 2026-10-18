@@ -26,14 +26,15 @@ public sealed class HomeScreenTests : IDisposable
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => counted.Task)));
         terminal.AssertSaw("""
              What to do
-             ❯ Run        •••••••••••
-               Assistant  own model · high
-               Milestone  v0.3.0
+             ❯ Run          •••••••••••
+               Assistant    own model · high
+               Milestone    v0.3.0
                Settings
-               Exit       esc
+               Skip labels  none
+               Exit         esc
              ↑↓ move · enter choose · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
-        terminal.AssertSaw(" ❯ Run        5 tasks\n   Assistant  own model · high");
+        terminal.AssertSaw(" ❯ Run          5 tasks\n   Assistant    own model · high");
     }
 
     [Fact]
@@ -43,8 +44,8 @@ public sealed class HomeScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter, Keys.Enter);
 
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult(counts.Dequeue()))));
-        terminal.AssertSaw(" ❯ Run        no tasks\n");
-        terminal.AssertSaw(" ❯ Run        1 task\n");
+        terminal.AssertSaw(" ❯ Run          no tasks\n");
+        terminal.AssertSaw(" ❯ Run          1 task\n");
         Assert.Empty(counts);
     }
 
@@ -54,7 +55,7 @@ public sealed class HomeScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(null))));
-        terminal.AssertSaw(" ❯ Run        the tasks cannot be read\n");
+        terminal.AssertSaw(" ❯ Run          the tasks cannot be read\n");
     }
 
     [Fact]
@@ -76,12 +77,12 @@ public sealed class HomeScreenTests : IDisposable
         }).Press(Keys.Enter);
 
         using var page = terminal.Open(palette: palette);
-        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", new TaskCount(() => counted.Task));
+        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", [], new TaskCount(() => counted.Task));
 
         // The last thing written is the light on the dots: they stand after the edge, the pointer, the name as wide
         // as the widest, and two spaces. The row itself is muted, and nothing of it blinks.
-        Assert.Matches(@"\u001b\[\d+;15H(\u001b\[[0-9;]*m•\u001b\[0m){11}$", waiting);
-        Assert.Contains(palette.Paint(Tone.Muted, "❯ Run      "), waiting, StringComparison.Ordinal);
+        Assert.Matches(@"\u001b\[\d+;17H(\u001b\[[0-9;]*m•\u001b\[0m){11}$", waiting);
+        Assert.Contains(palette.Paint(Tone.Muted, "❯ Run        "), waiting, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -90,7 +91,7 @@ public sealed class HomeScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Interrupted("Export the data")))));
-        terminal.AssertSaw(" ❯ Run        interrupted: #12 Export the data\n   Assistant  own model · high");
+        terminal.AssertSaw(" ❯ Run          interrupted: #12 Export the data\n   Assistant    own model · high");
     }
 
     [Fact]
@@ -100,7 +101,7 @@ public sealed class HomeScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter);
 
         using var page = terminal.Open(palette: palette);
-        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", new TaskCount(() => Task.FromResult<QueueOutlook?>(Interrupted("Export the data"))));
+        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", [], new TaskCount(() => Task.FromResult<QueueOutlook?>(Interrupted("Export the data"))));
 
         var written = terminal.Output.ToString();
         Assert.Contains(palette.Paint(Tone.Warning, "  interrupted: #12 Export the data"), written, StringComparison.Ordinal);
@@ -114,9 +115,9 @@ public sealed class HomeScreenTests : IDisposable
         narrow.Keys.Press(Keys.Enter);
 
         using var page = narrow.Open();
-        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", new TaskCount(() => Task.FromResult<QueueOutlook?>(Interrupted("Export the data of all the orders"))));
+        await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", [], new TaskCount(() => Task.FromResult<QueueOutlook?>(Interrupted("Export the data of all the orders"))));
 
-        narrow.AssertSaw(" ❯ Run        interrupted: #12 Export …\n");
+        narrow.AssertSaw(" ❯ Run          interrupted: #12 Expor…\n");
     }
 
     [Fact]
@@ -144,14 +145,15 @@ public sealed class HomeScreenTests : IDisposable
         Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
         terminal.AssertSaw("""
              What to do
-             ❯ Run        checking: git  •••••••••••
-               Assistant  own model · high
-               Milestone  v0.3.0
+             ❯ Run          checking: git  •••••••••••
+               Assistant    own model · high
+               Milestone    v0.3.0
                Settings
-               Exit       esc
+               Skip labels  none
+               Exit         esc
              ↑↓ move · enter choose · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
-        terminal.AssertSaw(" ❯ Run        checking: GitHub login  •••••••••••\n");
+        terminal.AssertSaw(" ❯ Run          checking: GitHub login  •••••••••••\n");
     }
 
     [Fact]
@@ -186,12 +188,28 @@ public sealed class HomeScreenTests : IDisposable
     [InlineData(1, HomeAction.Assistant)]
     [InlineData(2, HomeAction.Milestone)]
     [InlineData(3, HomeAction.Settings)]
-    [InlineData(4, HomeAction.Exit)]
+    [InlineData(4, HomeAction.SkipLabels)]
+    [InlineData(5, HomeAction.Exit)]
     public async Task TheOtherRowsAreChosenAsInAnyList(int down, HomeAction expected)
     {
         terminal.Keys.Press([.. Enumerable.Repeat(Keys.Down, down), Keys.Enter]);
 
         Assert.Equal(expected, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(3)))));
+    }
+
+    [Fact]
+    public async Task SkipLabelsSaysTheLabelsThatAreChosenAndNoneInAMutedColourWithoutThem()
+    {
+        var palette = Palette.Dark;
+        terminal.Keys.Press(Keys.Escape, Keys.Escape);
+
+        using (var page = terminal.Open(palette: palette))
+            await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", [], new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(3))));
+        Assert.Contains(palette.Paint(Tone.Muted, "  none"), terminal.Output.ToString(), StringComparison.Ordinal);
+
+        terminal.Keys.Press(Keys.Escape, Keys.Escape);
+        Assert.Equal(HomeAction.Exit, await AskAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(3))), skipped: ["design", "sketch"]));
+        terminal.AssertSaw("   Settings\n   Skip labels  design, sketch\n   Exit         esc\n");
     }
 
     [Fact]
@@ -208,9 +226,9 @@ public sealed class HomeScreenTests : IDisposable
     static QueueOutlook Interrupted(string title) =>
         new(3, new QueueTask(12, title, "https://github.com/acme/rocket/issues/12", ["interrupted"], BoardStatus.Todo, "Todo", [], []));
 
-    async Task<HomeAction> AskAsync(TaskCount tasks, RunChecks? checks = null)
+    async Task<HomeAction> AskAsync(TaskCount tasks, RunChecks? checks = null, IReadOnlyList<string>? skipped = null)
     {
         using var page = terminal.Open();
-        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", tasks, checks);
+        return await HomeScreen.AskAsync(page, "own model · high", "v0.3.0", skipped ?? [], tasks, checks);
     }
 }

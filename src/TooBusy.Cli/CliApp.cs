@@ -445,7 +445,8 @@ public static class CliApp
     {
         var task = new Option<int?>("--task") { Description = "Do this task and no other: the number of an open task that a run would take now.", HelpName = "number" };
         var max = new Option<int?>("--max") { Description = "Take so many tasks at most, then stop.", HelpName = "count" };
-        var command = new Command("run", "Takes the tasks of the queue one after another.") { task, max };
+        var skip = SkipOption("Leave out the tasks with this label for this run, and the tasks that wait for them; give it again for every such label, or several names separated by commas.");
+        var command = new Command("run", "Takes the tasks of the queue one after another.") { task, max, skip };
         command.SetAction(async (result, cancellationToken) =>
         {
             var (only, most) = (result.GetValue(task), result.GetValue(max));
@@ -496,7 +497,7 @@ public static class CliApp
                 return Fail(context, "Run `toobusy effort` to choose it.");
             }
 
-            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, only, most) is not { } run)
+            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, only, most, Labels(result.GetValue(skip))) is not { } run)
                 return Fail(context, NoTasks);
             if (context.Terminal is { } terminal)
                 return await OnPageAsync(context, terminal, bench, session => session.RunAsync(run, cancellationToken), cancellationToken);
@@ -515,8 +516,10 @@ public static class CliApp
     static Command CreateQueueCommand(CliContext context, Option<bool> demo)
     {
         var json = new Option<bool>("--json") { Description = "Print the queue as JSON, for an assistant or a script." };
+        var skip = SkipOption("Show the queue of a run that leaves out the tasks with this label; give it again for every such label, or several names separated by commas.");
         var command = new Command("queue", "Shows the tasks a run would take, those that open later and those that are held, and changes nothing.");
         command.Options.Add(json);
+        command.Options.Add(skip);
         command.SetAction(async (result, cancellationToken) =>
         {
             // A demo shows the queue in any project: where there are no settings it makes them up.
@@ -535,7 +538,7 @@ public static class CliApp
 
             try
             {
-                if (await bench.ReadQueueAsync(settings, milestone.Title, cancellationToken) is not var (lineup, recorded))
+                if (await bench.ReadQueueAsync(settings, milestone.Title, Labels(result.GetValue(skip)), cancellationToken) is not var (lineup, recorded))
                     return Fail(context, NoTasks);
 
                 var rules = QueueRules.Of(settings);
@@ -558,6 +561,14 @@ public static class CliApp
         });
         return command;
     }
+
+    // The labels a run leaves out, as `run` and `queue` take them: the option given again for every label, or with
+    // several names separated by commas, as `--blocking-label` of `init` takes them.
+    static Option<string[]> SkipOption(string description) => new("--skip-label") { Description = description, HelpName = "name" };
+
+    // The names the options give, each once whatever its case.
+    static List<string> Labels(string[]? given) =>
+        [.. (given ?? []).SelectMany(names => names.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)).Distinct(StringComparer.OrdinalIgnoreCase)];
 
     // Says whether a run is going on in the working copy, and changes nothing: the task it works on and how its
     // session is opened, or, without a run, the task an earlier run left with a session. It needs a project and

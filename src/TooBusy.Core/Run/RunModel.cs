@@ -5,8 +5,8 @@ using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Run;
 
-// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, and the model
-// and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
+// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, with the
+// labels the run was told to skip, and the model and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
 // a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
 // with, null where the project names none. Only is the number of the one task the run does, and Most how many tasks
 // it takes at most; null is a run of the whole queue. A run is given one of the two at most. Commands are the

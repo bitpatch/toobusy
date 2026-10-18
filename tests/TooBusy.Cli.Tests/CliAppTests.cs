@@ -365,6 +365,61 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task ARunLeavesOutTheTasksWithTheLabelsItSkipsAndGoesOnWithTheTaskOfTheRecord()
+    {
+        GitRepository();
+
+        // The option is given again, and with several names at once.
+        var (exit, output, _) = await RunAsync("run", "--demo", "--skip-label", "docs", "--skip-label", "Feature, chore");
+
+        Assert.Equal(0, exit);
+        var lines = output.Split(Environment.NewLine);
+        Assert.Equal("✻ v0.1.0 (made up) · 2 tasks in the queue · skips docs, Feature, chore · the assistant's own model · high effort · auto mode", lines[1]);
+        Assert.Equal(
+            "  Held: #101 it has the feature label, which this run skips · #102 it has the feature label, which this run skips · #104 it has the chore label, which this run skips"
+            + " · #105 it has the docs label, which this run skips · #106 it has the manual label · #107 it has the feature label, which this run skips",
+            lines[2]);
+
+        // The task an earlier run left with a session has a label the run skips, and is gone on with all the same.
+        Assert.Contains("→ #100 Rename the settings page — taken again · its session was stopped, and goes on", output, StringComparison.Ordinal);
+        Assert.Contains("→ #103 Fix the rounding of a discount — started", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("→ #101", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("→ #104", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("→ #105", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARunOfATaskWithALabelItSkipsDoesNotTakeItButGoesOnWithTheTaskOfTheRecord()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("run", "--demo", "--task", "102", "--skip-label", "FEATURE");
+
+        Assert.Equal(1, exit);
+        Assert.Equal(
+            $"Demo: nothing is changed.{Environment.NewLine}✖ Stopped: #102 is not taken: it has the feature label, which this run skips · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}",
+            output);
+
+        (exit, output, _) = await RunAsync("run", "--demo", "--task", "100", "--skip-label", "chore");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✻ v0.1.0 (made up) · #100 and no other task · skips chore · the assistant's own model · high effort · auto mode", output, StringComparison.Ordinal);
+        Assert.Contains("‖ Stopped after #100, as you asked · 1 done", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheHelpOfRunAndOfQueueTellOfTheLabelsToSkip()
+    {
+        var (_, run, _) = await RunAsync("run", "--help");
+        var (_, queue, _) = await RunAsync("queue", "--help");
+
+        Assert.Contains("--skip-label <name>", run, StringComparison.Ordinal);
+        Assert.Contains("Leave out the tasks with this label for this run, and the tasks that wait for them", run, StringComparison.Ordinal);
+        Assert.Contains("--skip-label <name>", queue, StringComparison.Ordinal);
+        Assert.Contains("Show the queue of a run that leaves out the tasks with this label", queue, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ADemoOfARunOfANumberOfTasksStopsAfterThem()
     {
         GitRepository();
@@ -941,6 +996,46 @@ public sealed class CliAppTests : IDisposable
         using var queue = System.Text.Json.JsonDocument.Parse(json);
         Assert.Equal(100, queue.RootElement.GetProperty("ready")[0].GetProperty("number").GetInt32());
         Assert.Equal("session", queue.RootElement.GetProperty("ready")[0].GetProperty("first").GetString());
+    }
+
+    [Fact]
+    public async Task QueueShowsTheQueueOfARunThatSkipsLabelsAsTextAndAsJson()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunAsync("queue", "--demo", "--skip-label", "feature,docs");
+
+        // The task of the record has no label the run skips.
+        Assert.Equal(0, exit);
+        Assert.StartsWith(
+            """
+            Ready
+              #100 Rename the settings page                  left with a session
+              #103 Fix the rounding of a discount
+              #104 Update the dependencies
+
+            Later
+              no tasks
+
+            Held
+              #101 Show the total of an order in its header  it has the feature label, which this run skips
+              #102 Export the orders as a file               it has the feature label, which this run skips
+              #105 Describe the export in the manual         it has the docs label, which this run skips
+              #106 Move the site to the new hosting          it has the manual label
+              #107 Add a dark theme                          it has the feature label, which this run skips
+
+            """.ReplaceLineEndings(),
+            output,
+            StringComparison.Ordinal);
+
+        // What waits for a task that is skipped is held with it.
+        (_, output, _) = await RunAsync("queue", "--demo", "--skip-label", "feature", "--json");
+
+        using var queue = System.Text.Json.JsonDocument.Parse(output);
+        Assert.Equal([100, 103, 104], queue.RootElement.GetProperty("ready").EnumerateArray().Select(task => task.GetProperty("number").GetInt32()));
+        var held = queue.RootElement.GetProperty("held").EnumerateArray().ToDictionary(task => task.GetProperty("number").GetInt32(), task => task.GetProperty("reason").GetString());
+        Assert.Equal("it has the feature label, which this run skips", held[101]);
+        Assert.Equal("it waits for #102 (it has the feature label, which this run skips)", held[105]);
     }
 
     [Fact]
@@ -1521,7 +1616,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("Model   the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("Model   opus", output, StringComparison.Ordinal);
         Assert.Contains("Effort  xhigh", output, StringComparison.Ordinal);
-        Assert.Contains("Assistant  opus · xhigh", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant    opus · xhigh", output, StringComparison.Ordinal);
         Assert.Contains("  haiku\u001b[K\r\n   Other…", output, StringComparison.Ordinal);
         Assert.Contains("Back", output, StringComparison.Ordinal);
         Assert.Contains("The model is left as it was.", output, StringComparison.Ordinal);
@@ -1648,8 +1743,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         Assert.Contains("What to do", output, StringComparison.Ordinal);
-        Assert.Contains("Assistant  fable · high", output, StringComparison.Ordinal);
-        Assert.Contains("Milestone  v0.2.0", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant    fable · high", output, StringComparison.Ordinal);
+        Assert.Contains("Milestone    v0.2.0", output, StringComparison.Ordinal);
         Assert.Equal(
             [
                 $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}",
@@ -1696,7 +1791,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Milestone        none: tasks are taken whatever their milestone", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
-        Assert.Contains("Assistant  own model · high", output, StringComparison.Ordinal);
+        Assert.Contains("Assistant    own model · high", output, StringComparison.Ordinal);
         Assert.Contains("Setting up this project", output, StringComparison.Ordinal);
         Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
         Assert.Contains("press esc again to exit", output, StringComparison.Ordinal);
@@ -1772,7 +1867,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("❯ Run        2 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          2 tasks", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1796,7 +1891,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("❯ Run        interrupted: #13 Describe the export", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          interrupted: #13 Describe the export", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1811,7 +1906,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Enter, Keys.Up, Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("❯ Run        no tasks", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          no tasks", output, StringComparison.Ordinal);
         Assert.DoesNotContain("Running the queue", output, StringComparison.Ordinal);
         Assert.Equal(2, processes.Asked.Count(asked => asked.Command == "gh" && asked.Arguments[1] == "graphql"));
     }
@@ -1880,7 +1975,7 @@ public sealed class CliAppTests : IDisposable
                fix: gh label create "interrupted" --repo acme/rocket
              The run did not start. `toobusy doctor` checks all of it again.
              What to do
-             ❯ Run        1 task
+             ❯ Run          1 task
             """.ReplaceLineEndings("\n").TrimEnd(' '));
         Assert.False(terminal.Saw("Running the queue"));
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
@@ -1915,10 +2010,97 @@ public sealed class CliAppTests : IDisposable
                fix: say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board
              The run did not start. `toobusy doctor` checks all of it again.
              What to do
-             ❯ Run        1 task
+             ❯ Run          1 task
             """.ReplaceLineEndings("\n").TrimEnd(' '));
         Assert.False(terminal.Saw("Running the queue"));
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+    }
+
+    [Fact]
+    public async Task SkipLabelsOfTheMenuChoosesTheLabelsWhoseTasksTheRunsOfTheMenuLeaveOut()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // A task to take, one that opens after it, one that a label of the settings holds and one with a label to skip.
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        {
+            "git" => "https://github.com/acme/rocket.git\n",
+            "gh" when arguments[0] == "label" => "feature\ndesign\nmanual\n",
+            "gh" when arguments is ["api", "graphql", ..] => "total\t4\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n"
+                + "13\tDescribe the export\thttps://github.com/acme/rocket/issues/13\t\t12\t\t\n14\tMove the site\thttps://github.com/acme/rocket/issues/14\t\t\t\t\tmanual\n"
+                + "15\tDraw the logo\thttps://github.com/acme/rocket/issues/15\t\t\t\t\tdesign\n",
+            _ => "",
+        }, ""));
+
+        // `Skip labels`, where `design` is chosen; the list again, left with Escape; then the last of the menu.
+        var keys = new Keys().Press(
+            Keys.Up, Keys.Up, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter,
+            Keys.Up, Keys.Up, Keys.Enter, Keys.Escape,
+            Keys.Up, Keys.Enter);
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("❯ Run          3 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("Skip labels  none", output, StringComparison.Ordinal);
+
+        // The labels of the repository and, after them, those of the settings it lacks, nothing chosen at first.
+        Assert.Contains("Reading the labels", output, StringComparison.Ordinal);
+        Assert.Contains("❯ ◯ feature    \u001b[K\r\n   ◯ design     \u001b[K\r\n   ◯ manual     \u001b[K\r\n   ◯ interrupted\u001b[K\r\n   Back  esc\u001b[K\r\n", output, StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "list", "--repo", "acme/rocket", "--limit", "1000", "--json", "name", "--jq", ".[].name"]));
+
+        // The choice stands above the menu and at its row, and the tasks are counted again without those it skips.
+        Assert.Contains("✔ Skipped labels   design", output, StringComparison.Ordinal);
+        Assert.Contains("Skip labels  design", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          2 tasks", output, StringComparison.Ordinal);
+
+        // The list opens with the choice, and Escape leaves it as it was.
+        Assert.Contains(" ❯ ◉ design     ", output, StringComparison.Ordinal);
+        Assert.Contains("The labels to skip are left as they were.", output, StringComparison.Ordinal);
+        Assert.True(output.LastIndexOf("✔ Skipped labels   design", StringComparison.Ordinal) > output.LastIndexOf(" ❯ ◉ design", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("", "The `origin` remote is not a GitHub repository, so there are no labels to choose from.")]
+    [InlineData("https://github.com/acme/rocket.git\n", "The GitHub command-line tool `gh` is not installed, so the labels cannot be read.")]
+    public async Task SkipLabelsOfTheMenuSaysWhyTheLabelsCannotBeReadAndOffersBackAlone(string origin, string why)
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = new FakeProcesses((command, _) => command == "gh"
+            ? new ProcessResult(ProcessStatus.NotFound, 0, "", "")
+            : new ProcessResult(ProcessStatus.Exited, 0, origin, ""));
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Up, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter), processes, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains($"{why}\u001b[K\r\n", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Back  esc", output, StringComparison.Ordinal);
+        Assert.Contains("The labels to skip are left as they were.", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoSkipsTheChosenLabelsOfItsMenuInTheRunsItOpens()
+    {
+        GitRepository();
+
+        // `feature` and `docs` among the made-up labels; the run, which goes on with the task of the record and
+        // takes none with them; the menu it comes back to counts the tasks made up anew without them; and out.
+        var keys = new Keys()
+            .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Up, Keys.Up, Keys.Enter)
+            .Hold(() => Shown("◯ question")).Press(Keys.Down, Keys.Space, Keys.Down, Keys.Down, Keys.Space, Keys.Enter)
+            .Hold(() => Shown("Skip labels  feature, docs")).Press(Keys.Enter)
+            .Hold(() => Shown("❯ Run          2 tasks")).Press(Keys.Up, Keys.Enter);
+
+        var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("✔ Skipped labels   feature, docs", output, StringComparison.Ordinal);
+        var rows = Scroll.Read(output).Rows.Where(row => row.StartsWith(" ✔ #", StringComparison.Ordinal) || row.StartsWith(" ◐ #", StringComparison.Ordinal)).ToList();
+        Assert.Equal([" ✔ #100 Rename the settings page  0:06", " ◐ #103 Fix the rounding of a discount  0:11", " ✔ #104 Update the dependencies  0:16"], rows);
     }
 
     [Fact]
@@ -1960,10 +2142,10 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
-        Assert.Contains("❯ Run        interrupted: #100 Rename the settings page", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          interrupted: #100 Rename the settings page", output, StringComparison.Ordinal);
 
         // The menu that the run comes back to says how the run went, and counts the tasks that are made up anew.
-        Assert.Contains("❯ Run        5 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          5 tasks", output, StringComparison.Ordinal);
         Assert.Contains("6 tasks in 70 s · 5 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
 
         // The screen is left for the run and entered again for the menu; the tasks of the run stay in the history
@@ -3196,7 +3378,7 @@ public sealed class CliAppTests : IDisposable
         terminal.AssertSaw("""
              A run is going on here already: #12 Export the orders as a file · claude attach 1a2b3c4d
              What to do
-             ❯ Run        1 task
+             ❯ Run          1 task
             """.ReplaceLineEndings("\n").TrimEnd(' '));
         Assert.False(terminal.Saw("Running the queue"));
 

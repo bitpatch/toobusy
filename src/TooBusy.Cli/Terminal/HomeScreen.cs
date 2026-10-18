@@ -10,6 +10,7 @@ public enum HomeAction
     Assistant,
     Milestone,
     Settings,
+    SkipLabels,
     Exit,
 }
 
@@ -106,7 +107,8 @@ public sealed class RunChecks : ICheckupView
 // its effort chosen.
 public static class HomeScreen
 {
-    // `assistant` is the chosen model and effort, and `milestone` the chosen milestone, in a few words. `Run` says
+    // `assistant` is the chosen model and effort, `milestone` the chosen milestone, and `skipped` the labels whose
+    // tasks the runs of the menu leave out, empty for none. `Run` says
     // how many tasks a run would take: while they are counted the dots of a wait run there and Enter does nothing,
     // and it does not open a run that would take none either: it counts again, for what has changed meanwhile. A
     // task that was interrupted is said there instead of the number, in the colour of a warning: it is the one a
@@ -116,7 +118,7 @@ public static class HomeScreen
     // `checks` are the checks before a run that `Run` has asked for: while they go on the check that is running
     // stands at `Run` before the dots of a wait, Enter does nothing there, and the other rows are chosen as ever.
     // When the checks are over the menu gives `Run` by itself.
-    public static async Task<HomeAction> AskAsync(Page page, string assistant, string milestone, TaskCount tasks, RunChecks? checks = null)
+    public static async Task<HomeAction> AskAsync(Page page, string assistant, string milestone, IReadOnlyList<string> skipped, TaskCount tasks, RunChecks? checks = null)
     {
         page.EscapeLeaves = true;
         page.Keys = "";
@@ -126,6 +128,7 @@ public static class HomeScreen
             new("Assistant", Note: assistant),
             new("Milestone", Note: milestone),
             new("Settings"),
+            skipped.Count == 0 ? new("Skip labels", Note: "none", NoteTone: Tone.Muted) : new("Skip labels", Note: string.Join(", ", skipped)),
             new("Exit", Picker.BackKey),
         ];
 
@@ -143,9 +146,9 @@ public static class HomeScreen
         return picked is { } index ? (HomeAction)index : HomeAction.Exit;
     }
 
-    // What stands before the note of `Run`: the margin, the pointer, the widest name, `Assistant`, the two spaces
+    // What stands before the note of `Run`: the margin, the pointer, the widest name, `Skip labels`, the two spaces
     // after it, and the column that is kept free at the edge.
-    const int BeforeNote = 1 + 2 + 9 + 2 + 1;
+    const int BeforeNote = 1 + 2 + 11 + 2 + 1;
 
     static Choice Run(Task<QueueOutlook?> counting, int width) => counting switch
     {

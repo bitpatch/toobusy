@@ -3,10 +3,14 @@ using TooBusy.Core.Settings;
 namespace TooBusy.Core.Queue;
 
 // The rules a task is taken by: the labels of the settings, and whether the project has a board, on which a task
-// must stand as one to do. Statuses are what that board calls the statuses a run knows.
+// must stand as one to do. Statuses are what that board calls the statuses a run knows. Skip are the labels this run
+// was told to leave out, whatever the settings say: a task with one of them is held for this run, as one with a
+// blocking label is, but the task a run has a session for already is gone on with all the same.
 public sealed record QueueRules(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Owner, string Interrupted, bool Board)
 {
     public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
+
+    public IReadOnlyList<string> Skip { get; init; } = [];
 
     public static QueueRules Of(ProjectSettings settings) => new(
         settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Owner, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null)
@@ -70,7 +74,8 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
         recorded is null ? new(Ready.Count + Later.Count, Interrupted(rules)) : Taking(recorded).Outlook(rules) with { Interrupted = recorded };
 
     // Why a task that a run has a session for already is not gone on with; null when nothing speaks against it.
-    // Its status on the board and what it waits for do not: it was a run that took it and moved it.
+    // Its status on the board and what it waits for do not: it was a run that took it and moved it. Nor does a label
+    // this run skips: the skip is about the tasks a run takes anew, and a session that was started is finished.
     public static string? Keeps(QueueTask task, QueueRules rules)
     {
         if (rules.Blocking.FirstOrDefault(task.Has) is { } blocking)
@@ -106,11 +111,14 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
 
     static List<int> Before(QueueTask task) => [.. task.BlockedBy.Concat(task.Parts).Distinct().Order()];
 
-    // Why the task is not taken whatever closes before it; null when nothing speaks against it.
+    // Why the task is not taken whatever closes before it; null when nothing speaks against it. A label to skip is
+    // named as the task has it, as it may be given in another case.
     static string? Refusal(QueueTask task, QueueRules rules)
     {
         if (Keeps(task, rules) is { } kept)
             return kept;
+        if (rules.Skip.FirstOrDefault(task.Has) is { } skipped)
+            return $"it has the {task.Labels.First(label => label.Equals(skipped, StringComparison.OrdinalIgnoreCase))} label, which this run skips";
         if (!rules.Board || task.Status == BoardStatus.Todo)
             return null;
         return task.Status == BoardStatus.Missing ? "it is not on the board" : $"its status is {task.StatusName}";
