@@ -8,12 +8,15 @@ namespace TooBusy.Assistants.ClaudeCode;
 // Claude Code as the assistant of a run. A task is done by a background session, `claude --bg`: it goes on by itself
 // in the working copy, the owner can open it with `claude attach`, and it is kept when the run ends. What a session
 // is doing is read from the list of the sessions, `claude agents --json --all`, and from the conversation Claude Code
-// writes. The commands must start at the root of the project: the runner is the one of that folder.
-public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root) : IAssistant
+// writes. The commands must start at the root of the project: the runner is the one of that folder. Every session is
+// started in the permission mode of the settings, and goes on in it when it is told something, a session of an
+// earlier run too.
+public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode) : IAssistant
 {
     readonly IClock clock = clock;
     readonly ClaudeFolders folders = folders;
     readonly string root = root;
+    readonly string permissionMode = permissionMode;
 
     // How long a command of Claude Code is waited for.
     static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
@@ -38,7 +41,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         string[] model = start.Model.Name is { } named ? ["--model", named] : [];
         var result = await processes.RunAsync(
             "claude",
-            ["--bg", "--permission-mode", "auto", "--permission-prompts", "none", "--settings", SessionSettings.Json(folders), .. model, "--effort", start.Effort, "-n", start.Name, start.Message],
+            ["--bg", "--permission-mode", permissionMode, "--permission-prompts", "none", "--settings", SessionSettings.Json(folders), .. model, "--effort", start.Effort, "-n", start.Name, start.Message],
             Patience,
             cancellationToken);
         var said = result.Output + "\n" + result.Error;
@@ -231,7 +234,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 if (Conversation is not { } known)
                     return false;
 
-                var result = await claude.AskAsync(["--bg", "--resume", known, message], cancellationToken);
+                var result = await claude.AskAsync(["--bg", "--resume", known, "--permission-mode", claude.permissionMode, message], cancellationToken);
                 var said = result.Output + "\n" + result.Error;
                 if (Started(said) is not { } woken)
                     return false;

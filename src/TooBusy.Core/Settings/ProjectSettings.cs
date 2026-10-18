@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Settings;
@@ -41,4 +42,12 @@ public sealed record QueueSettings(LabelSettings Labels);
 // taken first.
 public sealed record LabelSettings(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Owner, string Interrupted);
 
-public sealed record AssistantSettings(string Type);
+public sealed record AssistantSettings(string Type)
+{
+    // The permission mode of the assistant a session is started in, as the assistant writes it; null when the
+    // project names none.
+    public string? PermissionMode { get; init; }
+
+    // The mode a session is started in: the one the settings name, or `auto` where they name none.
+    public string SessionMode => PermissionMode ?? ClaudeCodeOptions.DefaultPermissionMode;
+}

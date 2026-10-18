@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
@@ -15,9 +16,10 @@ public static class About
 
     // `rules` are those of the project the text is asked in; null where no settings are read, and then the labels
     // are spoken of without their names. `skill` is the skill the settings name for a session to start with; null
-    // where they name none, and where none are read. `commands` are the commands of the settings around a task, and
-    // `branch` the branch they name for the tasks to be done on.
-    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null, string? branch = null)
+    // where they name none, and where none are read. `commands` are the commands of the settings around a task,
+    // `branch` the branch they name for the tasks to be done on, and `permissionMode` the permission mode they name
+    // for a session to be started in.
+    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null, string? branch = null, string? permissionMode = null)
     {
         var owner = rules is null ? "the label of the owner" : $"the `{rules.Owner}` label";
 
@@ -52,6 +54,14 @@ public static class About
             (null, _) => "No settings are read here, so it is not said whether this project names one.",
             (_, { } name) => $"This project names `{name}`.",
             _ => "This project names none: its tasks are done on whatever is checked out, as it stands. `toobusy init --branch <name>` names one.",
+        };
+
+        // What is said of the permission mode a session of this project is started in.
+        var mode = (rules, permissionMode) switch
+        {
+            (null, _) => $"A session is started in the permission mode `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, {Checks(ClaudeCodeOptions.DefaultPermissionMode)}, unless the settings of a project name another as `{SettingsKeys.PermissionMode}`. No settings are read here, so it is not said whether this project names one.",
+            (_, { } chosen) => $"This project names the permission mode `{chosen}` of Claude Code in its settings, `{SettingsKeys.PermissionMode}`: a session is started in it, {Checks(chosen)}.",
+            _ => $"This project names no permission mode, so a session is started in `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, {Checks(ClaudeCodeOptions.DefaultPermissionMode)}. `toobusy init --permission-mode <mode>` names one: {string.Join(" or ", ClaudeCodeOptions.PermissionModes.Select(known => $"`{known}`"))}.",
         };
 
         // What the board calls the statuses a run knows: as the settings name them, and as GitHub does where none
@@ -98,7 +108,7 @@ public static class About
             - `toobusy queue` shows which tasks a run takes as things are, in the order it takes them, those that open later and those that are held, each with the reason, and changes nothing. `toobusy queue --json` prints the same for an assistant.
             - `toobusy status` says whether a run is going on in the working copy, with the task it works on and the command that opens its session, and changes nothing. A run works in the working copy itself, so a commit made beside it lands in the middle of its task: the instructions of a project can tell an assistant that works with the owner to look before it commits. The session of a run commits while its run goes on, so such a rule is not for a session that toobusy started. It exits with 0 when no run is going on and with 3 while one is, and `toobusy status --json` prints the same for an assistant. A second run does not start in a working copy while one goes on.
             - One task is done at a time, in the working copy of the project itself. The working copy must be clean before a task, and it must be clean after it.
-            - Each task is done by a session of the assistant of its own, which goes on by itself in the background. Nobody answers its questions or its permission prompts.
+            - Each task is done by a session of the assistant of its own, which goes on by itself in the background. Nobody answers its questions or its permission prompts. {mode} What a session is allowed and refused in particular is said where Claude Code keeps it, in the settings of the project in `.claude/`, and toobusy does not say it again.
             - A task is gone on with by the same session whatever stopped the run over it, as told under “When a run goes on with a session”.
 
             ## The task of a session is kept by toobusy
@@ -261,6 +271,11 @@ public static class About
             """);
         return text.ToString();
     }
+
+    // What a permission mode of Claude Code checks of what a session does.
+    static string Checks(string mode) => mode == "dontAsk"
+        ? "where whatever the settings of Claude Code do not allow is refused"
+        : "where a model of Claude Code looks at every action before it is done";
 
     static string Labels(IReadOnlyList<string> labels, string one, string many) =>
         $"{(labels.Count == 1 ? one : many)} {string.Join(", ", labels.Select(label => $"`{label}`"))}";

@@ -47,6 +47,31 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal("none", settings.RootElement.GetProperty("worktree").GetProperty("bgIsolation").GetString());
     }
 
+    // The mode of the settings is what a session is started in, argument for argument as in any other mode.
+    [Fact]
+    public async Task ASessionIsStartedInThePermissionModeOfTheSettings()
+    {
+        await Assistant("dontAsk").StartAsync(Start, TestContext.Current.CancellationToken);
+
+        var arguments = Assert.Single(claude.Asked);
+        Assert.Equal(["--bg", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--settings"], arguments.Take(6));
+        Assert.Equal(["--model", "opus", "--effort", "high", "-n", "#12 Export the data", "Do the task."], arguments.Skip(7));
+    }
+
+    // A session of an earlier run goes on in the mode of the settings as they are now, whatever it was started in.
+    [Fact]
+    public async Task ASessionGoesOnInThePermissionModeOfTheSettings()
+    {
+        Write(Said("I was stopped by the limit.\nTOOBUSY: interrupted"));
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        var session = await Assistant("dontAsk").FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+
+        Assert.True(await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken));
+
+        Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "dontAsk", "The limit has reset."], claude.Asked[^1]);
+    }
+
     [Fact]
     public async Task TheAssistantsOwnModelIsNotNamed()
     {
@@ -61,7 +86,7 @@ public sealed class ClaudeCodeTests : IDisposable
     {
         var odd = new ClaudeFolders("/work/it's here/local", folders.Transcripts);
 
-        await new ClaudeCode(claude, clock, odd, "/work/rocket").StartAsync(Start, TestContext.Current.CancellationToken);
+        await new ClaudeCode(claude, clock, odd, "/work/rocket", "auto").StartAsync(Start, TestContext.Current.CancellationToken);
 
         using var settings = JsonDocument.Parse(claude.Asked[0][6]);
         Assert.Equal(
@@ -319,7 +344,7 @@ public sealed class ClaudeCodeTests : IDisposable
 
         Assert.True(told);
         Assert.Equal(
-            [["agents", "--json", "--all"], ["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"], ["--bg", "--resume", Conversation, "Go on alone."]],
+            [["agents", "--json", "--all"], ["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"], ["--bg", "--resume", Conversation, "--permission-mode", "auto", "Go on alone."]],
             claude.Asked.Skip(1));
         Assert.Equal(TimeSpan.FromMilliseconds(500), clock.Passed);
         Assert.Equal(Conversation, session.Trace.Conversation);
@@ -441,7 +466,7 @@ public sealed class ClaudeCodeTests : IDisposable
 
         Assert.Equal((SessionPhase.Lost, "I was stopped by the limit.\nTOOBUSY: interrupted"), (before.Phase, before.Reply));
         Assert.True(told);
-        Assert.Equal(["--bg", "--resume", Conversation, "The limit has reset."], claude.Asked[^1]);
+        Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "auto", "The limit has reset."], claude.Asked[^1]);
         Assert.Equal(new SessionTrace(Id, Conversation, clock.Now), session.Trace);
 
         // What it said before it was told does not count any more, and a request that waited for it is forgotten.
@@ -523,7 +548,7 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal((Path.Combine("/local", "wrap-up.json"), Path.Combine("/local", "usage.json")), (plain.Request, plain.Usage));
     }
 
-    ClaudeCode Assistant() => new(claude, clock, folders, "/work/rocket");
+    ClaudeCode Assistant(string permissionMode = "auto") => new(claude, clock, folders, "/work/rocket", permissionMode);
 
     void Write(params string[] lines) => File.AppendAllText(folders.Transcript(Conversation), string.Join('\n', lines) + "\n");
 

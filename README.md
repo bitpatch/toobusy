@@ -22,7 +22,7 @@ What does not, yet:
 - No installer and no released binaries.
 - GitHub is the only tracker and Claude Code the only assistant. Codex, OpenCode and other trackers are planned behind the same interfaces.
 - Only macOS is tried by hand. The code is meant for Linux and Windows too, but keeping the machine awake and the notifications of a run are done on macOS only.
-- The settings hold the board, the labels, the skill a session starts with, the commands a run runs around a task and the branch the tasks are done on, and nothing else to choose: the tracker and the assistant are named there, with one value each. What the board calls its statuses is named there too, where it is not what GitHub calls them. The messages a session gets and the permissions of the assistant are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
+- The settings hold the board, the labels, the skill a session starts with, the commands a run runs around a task, the branch the tasks are done on and the permission mode a session works in, and nothing else to choose: the tracker and the assistant are named there, with one value each. What the board calls its statuses is named there too, where it is not what GitHub calls them. The messages a session gets are not settings yet: a run knows three statuses of a board, the one to do, the one in progress and the one for what is done, and takes one task at a time.
 
 ## The idea
 
@@ -103,7 +103,7 @@ A status that is not named there is called as GitHub calls it, and a name is the
 
 The skill is yours to write: toobusy names it and does not make it. It is a skill of Claude Code in your project, `.claude/skills/task-auto/SKILL.md`, that says what belongs to the project: how a task is done and checked there without you, what is done before and after it, the language of the report, and which other tasks a session makes. How a run works it need not say: the first message of a session does. `toobusy about` tells what that message says already and what is left to the skill, for you and for the assistant that writes it. While the settings name a skill that is not there, `toobusy doctor` fails and no run starts; `toobusy init --no-skill` names none.
 
-Three settings are not asked for. Two are the commands a run runs around every task, for what must not depend on a session remembering it. Options of `init` set them, `toobusy init --before "scripts/dev.sh ports free" --after "scripts/dev.sh server stop"`, and `--no-before` and `--no-after` take them away; the last page shows what changes before it is saved.
+Four settings are not asked for. Two are the commands a run runs around every task, for what must not depend on a session remembering it. Options of `init` set them, `toobusy init --before "scripts/dev.sh ports free" --after "scripts/dev.sh server stop"`, and `--no-before` and `--no-after` take them away; the last page shows what changes before it is saved.
 
 ```toml
 [task]
@@ -121,6 +121,16 @@ branch = "develop"    # the working copy must be on it, and it is brought up to 
 ```
 
 Before every task the run checks that the working copy is on that branch, and stops on another one: what is checked out is yours, and it does not change it. Then it fetches what the remote has and moves the branch forward to it, so that the task starts from there; a branch with commits its upstream lacks, one that has parted from it, and a remote that does not answer stop the run before the task is touched. A session that finds the branch moved when it pushes brings it up to date as the instructions of your project say, by a rebase or by a merge, and pushes again. Without a branch, a run does the tasks on whatever is checked out, as it stands.
+
+The fourth is the permission mode of Claude Code a session works in: `toobusy init --permission-mode dontAsk` names it.
+
+```toml
+[assistant]
+type = "claude-code"
+permission-mode = "dontAsk"    # `auto` when it is not named
+```
+
+Nobody answers the prompts of a session, so it works in a mode that goes on without an answer and still checks what it does: `auto`, where a model of Claude Code looks at every action before it is done, and which a session is started in when the settings name none; or `dontAsk`, where whatever the settings of Claude Code in your project do not allow is refused. A mode that asks, as `manual`, `acceptEdits` and `plan`, is refused, as a session in it would wait for ever, and so is `bypassPermissions`, which checks nothing. What a session is allowed and refused in particular stays in the settings of Claude Code in your project, `.claude/settings.json`.
 
 Commit `.toobusy/settings.toml`. It holds nothing personal, and everyone who clones the project gets the same settings. Running `init` again proposes the current values, so the settings are changed in the same way.
 
@@ -202,7 +212,7 @@ What to know before the first run:
 
 - **Which tasks are taken.** The open issues of your milestone that have a label to take, no blocking label and not the owner's label. A task that a run had to stop is taken first, then the lowest number first; a task that waits for others, those that block it and its own sub-issues, is taken after them. In a project with a board a task is taken only from the status `Todo`.
 - **The working tree must be clean.** A run does the tasks in the working copy itself, one at a time, and stops when it finds changes that are not its own. Where the settings name a branch, the working copy must be on it, and the run brings it up to date with the remote before a task.
-- **Each task gets a session of Claude Code of its own**, a background one in the permission mode `auto`, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
+- **Each task gets a session of Claude Code of its own**, a background one in the permission mode of the settings, `auto` unless they name `dontAsk`, with nobody to answer its prompts. The lines of a run that call for a look at a session name the command that opens it: `claude attach <id>`.
 - **The session does the work as the instructions of your project say** (`CLAUDE.md`, `AGENTS.md`), and starts with the skill of your project when the settings name one: it changes the code, checks it, commits and pushes. toobusy keeps the task: it moves it on the board, assigns it to you, writes the report of the session into it as a comment, and closes it. New tasks are the session's to make: the one of what is left for you, and those the instructions of your project call for.
 - **The commands of your project run around every task**, when the settings have them: one before a task is taken and one after its session, however the task went. A command that fails stops the run.
 - **A task that needs you is not guessed at.** What can be done without you is done, and of what is left the session makes a new task with the owner's label and the questions for you. Answer in it, take the label off, and a later run takes it.

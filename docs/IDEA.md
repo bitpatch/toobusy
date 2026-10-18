@@ -21,7 +21,7 @@ The folder lives in the project's repository and holds everything that is specif
 
 - the task tracker and the board in it; the repository is not named there: it is the one the project is cloned from;
 - the queue rules: which labels mark a task type, which labels keep a task out, which status means "ready", how tasks are ordered, what blocks a task;
-- the assistant and how it is started: its permissions;
+- the assistant and how it is started: the permission mode of its sessions;
 - the prompts the assistant gets, as editable templates;
 - the checks of the working copy before a task and after it: branch, clean tree, sync with the remote;
 - the commands of the project a run runs before a task and after it;
@@ -44,7 +44,7 @@ What is one person's own is not in the folder: the milestone to work on, and the
 
 ## Principles
 
-- **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board, what it calls its statuses, the labels, the branch the tasks are done on and the commands around a task come from `.toobusy/`, and later the prompts do.
+- **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board, what it calls its statuses, the labels, the branch the tasks are done on, the commands around a task and the permission mode of a session come from `.toobusy/`, and later the prompts do.
 - **Trackers and assistants are replaceable.** The first version supports GitHub Issues with GitHub Projects, and Claude Code. Codex, OpenCode and other trackers come later behind the same interfaces.
 - **One task at a time in the shared working copy** in the first version. The design must not prevent running several sessions in parallel in separate git worktrees later.
 - **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it.
@@ -63,7 +63,7 @@ toobusy grows out of a single-file .NET script that runs the task queue of one p
 
 ## Open questions for the specification
 
-The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, the commands with their options, and the checks of the working copy around a task: its branch, its sync with the remote and the commands of the project. What is still open:
+The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, the commands with their options, the checks of the working copy around a task: its branch, its sync with the remote and the commands of the project, and the permissions of the assistant: the permission mode a session works in is a setting, and what it is allowed and refused in particular stays in the settings of the assistant in the project. What is still open:
 
-- The rest of the schema of the settings in `.toobusy/`: the prompts as templates, the permissions of the assistant. What a board calls the three statuses a run knows is answered; more than one status to take tasks from, and statuses beyond the three, as one for a review, are open.
+- The rest of the schema of the settings in `.toobusy/`: the prompts as templates. What a board calls the three statuses a run knows is answered; more than one status to take tasks from, and statuses beyond the three, as one for a review, are open. Whether a project may choose a permission mode that checks nothing, as `bypassPermissions` of Claude Code, is open.
 - How installation and updates work on each platform.

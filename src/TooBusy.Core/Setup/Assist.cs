@@ -98,7 +98,7 @@ public static class Assist
 
             A setup is made of three things:
 
-            - the settings of the project, `.toobusy/settings.toml`: which tasks a run takes, the board, the skill a session starts with, the branch of the tasks and the commands around a task. They are committed, and everyone who clones the project gets the same;
+            - the settings of the project, `.toobusy/settings.toml`: which tasks a run takes, the board, the skill a session starts with, the branch of the tasks, the commands around a task and the permission mode a session works in. They are committed, and everyone who clones the project gets the same;
             - the choices of the owner: the milestone to work on, the model and the effort. They are kept on the owner's machine and are not committed;
             - what is the project's own: its instructions, its skill and its commands around a task.
 
@@ -127,7 +127,7 @@ public static class Assist
             "the project's own; toobusy does not read them",
             SkillInShort(ground),
             Stated(ground) is { } kept ? $"branch: {Quoted(kept.Branch)}; before: {Quoted(kept.Commands.Before)}; after: {Quoted(kept.Commands.After)}" : Unstated(ground),
-            "the settings of Claude Code in the project; toobusy does not read them",
+            Stated(ground) is { } mode ? $"permission mode: {ModeInShort(mode)}; the settings of Claude Code in the project are not read by toobusy" : Unstated(ground),
             "`toobusy doctor` passes every check",
         ];
         for (var index = 0; index < Steps.Count; index++)
@@ -173,7 +173,7 @@ public static class Assist
                 Commands(text, ground);
                 break;
             case 8:
-                Permissions(text);
+                Permissions(text, ground);
                 break;
             default:
                 LastCheck(text, ground);
@@ -446,19 +446,30 @@ public static class Assist
         Part(text, "Check", "`git status --short --branch` shows the branch, and after it the upstream it follows, as `## develop...origin/develop`: a branch without one is not brought up to date. Run each command by hand once, at the root of the working copy and with a task in its environment, as `TOOBUSY_TASK=1 sh -c \"<command>\"; echo $?`: it prints 0, and `git status --short` prints nothing after it.");
     }
 
-    static void Permissions(StringBuilder text)
+    static void Permissions(StringBuilder text, AssistGround ground)
     {
-        Part(text, "As things are", "toobusy does not read the settings of Claude Code: they are yours to read.");
-        Part(text, "Decide", """
-            what a session is allowed to do. A session of a run is a background session of Claude Code in the permission mode `auto`, and nobody answers its prompts: what it is refused is not done, and the task is left to the owner or done without it.
+        var settings = Stated(ground);
+        Part(text, "As things are", settings is null
+            ? $"the permission mode is {Unstated(ground)}. toobusy does not read the settings of Claude Code: they are yours to read."
+            : $"the permission mode is {ModeInShort(settings)}. toobusy does not read the settings of Claude Code: they are yours to read.");
+        Part(text, "Decide", $"""
+            what a session is allowed to do, and in which permission mode of Claude Code it works. A session of a run is a background session of Claude Code, and nobody answers its prompts: what it is refused is not done, and the task is left to the owner or done without it.
 
-            - What every task needs must be allowed in the settings of Claude Code in the project: the build, the tests and the other checks of the project, `git` with its commit and its push, and `gh`.
+            - **The mode**, `{SettingsKeys.PermissionMode}` of the settings. `auto` is the mode a session is started in when the settings name none: a model of Claude Code looks at every action before it is done, and refuses what goes beyond the task or looks dangerous. In `dontAsk` whatever the settings of Claude Code do not allow is refused, so a session does only what is allowed there: for a project that wants to say exactly what a session may do. A mode that asks or waits for a plan to be approved, as `manual`, `acceptEdits` and `plan`, is not taken: a session in it would wait for an answer that never comes. Nor is `bypassPermissions`, which checks nothing.
+            - What every task needs must be allowed in the settings of Claude Code in the project: the build, the tests and the other checks of the project, `git` with its commit and its push, and `gh`. In `dontAsk` nothing else is done.
             - What waits for a person does not work: a hook that asks, a server that needs a login in a browser, a command that prompts.
+            - What a session is allowed and refused in particular stays where Claude Code keeps it, in the settings of the project in `.claude/`: toobusy does not say it again.
             """);
         Part(text, "Look at", "`.claude/settings.json` and `.claude/settings.local.json` of the project, with their permissions and their hooks, `.mcp.json`, and the commands the instructions of the project tell an assistant to run.");
-        Part(text, "Ask the owner", "before anything more is allowed: what a session may do on their machine with nobody watching is theirs to decide.");
-        Part(text, "Set it", "no command of toobusy sets this step: the settings of Claude Code are edited as any file of the project.");
-        Part(text, "Check", "every command the instructions and the skill tell a session to run is allowed there, and nothing there waits for a person.");
+        Part(text, "Ask the owner", "which mode a session works in, and before anything more is allowed: what a session may do on their machine with nobody watching is theirs to decide.");
+
+        var rest = ground.Settings is null ? " --no-board --no-skill" : "";
+        Set(text, [$"toobusy init --yes{rest} --permission-mode <mode>"]);
+        text.Append("The mode is `auto` or `dontAsk`; what the command does not name stays as it is. The settings of Claude Code are edited as any file of the project: no command of toobusy sets them.");
+        text.Append(ground.Settings is null
+            ? " `--no-board` and `--no-skill` stand there only because nothing is set yet: steps 3 and 6 set them. The labels are then those a first setup proposes, which step 2 decides.\n\n"
+            : "\n\n");
+        Part(text, "Check", "`toobusy about` names the mode under “A run”. Every command the instructions and the skill tell a session to run is allowed in the settings of Claude Code, and nothing there waits for a person.");
     }
 
     static void LastCheck(StringBuilder text, AssistGround ground)
@@ -466,7 +477,7 @@ public static class Assist
         var skill = Stated(ground)?.Skill is { } name && ground.Skill is { Found: not null } look ? $"the skill `{name}`, {look.Place}" : "the skill, when the project has one";
         Part(text, "As things are", "`toobusy doctor` tells: it checks everything a run needs, and changes nothing.");
         Part(text, "Look at", $"what `toobusy doctor` prints. A check that fails goes back to its step: the tools, the logins and the repository to `{Command(1)}`, the settings and the labels to `{Command(2)}`, the board and its statuses to `{Command(3)}`, the skill to `{Command(6)}`.");
-        Part(text, "Ask the owner", "nothing but the commit of the setup, where the instructions of the project say that a commit is asked for. When the step is done, tell them in a few lines what was set: which tasks a run takes, the board, their own choices, the skill, the branch, the commands around a task and what was changed in the instructions; and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try. A run is theirs to start.");
+        Part(text, "Ask the owner", "nothing but the commit of the setup, where the instructions of the project say that a commit is asked for. When the step is done, tell them in a few lines what was set: which tasks a run takes, the board, their own choices, the skill, the branch, the commands around a task, the permission mode and what was changed in the instructions; and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try. A run is theirs to start.");
         Part(text, "Set it", $"""
             no command of toobusy: what is left is the commit of the setup, made as the instructions of the project say a commit is made. What is to be committed:
 
@@ -517,6 +528,10 @@ public static class Assist
         ({ Skill: { } name }, { Found: false }) => $"`{name}`, not written yet",
         ({ Skill: { } name }, _) => $"`{name}`, a skill of a plugin",
     };
+
+    static string ModeInShort(ProjectSettings settings) => settings.Assistant.PermissionMode is { } named
+        ? $"`{named}`"
+        : $"`{settings.Assistant.SessionMode}`, as the settings name none";
 
     static string MilestoneInShort(MilestoneChoice? choice) => choice switch
     {

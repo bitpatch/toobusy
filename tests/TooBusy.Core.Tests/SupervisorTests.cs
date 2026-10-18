@@ -226,7 +226,7 @@ public sealed class SupervisorTests : IDisposable
             shell.Told[0].OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => (pair.Key, pair.Value)));
         Assert.Equal(
             """
-            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort
+            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · auto mode
               Running the command before #3: scripts/dev.sh ports free
               the command before #3 passed in 2 s
             → #3 Task 3 — started · a new session · fake attach 3
@@ -516,7 +516,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Equal(
             """
-            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort
+            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · auto mode
             → #3 Task 3 — started · a new session · fake attach 3
               #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #3 Task 3 — done in 3 s
@@ -610,7 +610,7 @@ public sealed class SupervisorTests : IDisposable
         await RunAsync();
 
         Assert.Equal([5, 3], assistant.Started.Select(start => start.Task));
-        Assert.Contains("✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort", log.Lines);
+        Assert.Contains("✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort · auto mode", log.Lines);
         Assert.Contains("  Opens later: #3 after #5", log.Lines);
     }
 
@@ -700,8 +700,19 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 0), result);
-        Assert.Equal(["✻ v0.2.0 · 0 tasks in the queue · the assistant's own model · high effort", "✔ No task is left · 0 done", "  Worked 0 s"], log.Lines);
+        Assert.Equal(["✻ v0.2.0 · 0 tasks in the queue · the assistant's own model · high effort · auto mode", "✔ No task is left · 0 done", "  Worked 0 s"], log.Lines);
         Assert.Equal(["No task is left: 0 done"], machine.Notified);
+    }
+
+    [Fact]
+    public async Task TheLogSaysThePermissionModeOfTheSessionsWhereItSaysTheModelAndTheEffort()
+    {
+        plan = plan with { PermissionMode = "dontAsk" };
+        tracker.Add(3);
+
+        await RunAsync();
+
+        Assert.Equal("✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · dontAsk mode", log.Lines[0]);
     }
 
     [Fact]
@@ -713,7 +724,7 @@ public sealed class SupervisorTests : IDisposable
         await RunAsync();
 
         Assert.All(tracker.Read, Assert.Null);
-        Assert.Equal("✻ No milestone · 1 task in the queue · opus · max effort", log.Lines[0]);
+        Assert.Equal("✻ No milestone · 1 task in the queue · opus · max effort · auto mode", log.Lines[0]);
         Assert.DoesNotContain(log.Lines, line => line.Contains("on the board", StringComparison.Ordinal));
     }
 
@@ -1576,7 +1587,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(["status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(5));
         Assert.Equal(
             [
-                "✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort",
+                "✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort · auto mode",
                 "→ #5 Task 5 — taken again · its session still works, and is watched again · fake attach 5",
             ],
             log.Lines.Take(2));
@@ -1838,7 +1849,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Null(state.Record);
         Assert.Equal(
             """
-            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort
+            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · auto mode
             → #5 Task 5 — taken again · it was closed since, and its session ended while nobody watched · fake attach 5
             ✔ #5 Task 5 — done in 0 s
               #5 was closed already, and has the report of the session as its comment
@@ -2277,7 +2288,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([5], assistant.Started.Select(start => start.Task));
         Assert.Equal(
             """
-            ✻ v0.2.0 · #5 and no other task · the assistant's own model · high effort
+            ✻ v0.2.0 · #5 and no other task · the assistant's own model · high effort · auto mode
             → #5 Task 5 — started · a new session · fake attach 5
               #5 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #5 Task 5 — done in 3 s
@@ -2445,7 +2456,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Stopped, most, $"Stopped after {tasks}, as you asked"), result);
         Assert.Equal(most == 1 ? [3] : [3, 5], assistant.Started.Select(start => start.Task));
-        Assert.Equal($"✻ v0.2.0 · 3 tasks in the queue, {most} at most · the assistant's own model · high effort", log.Lines[0]);
+        Assert.Equal($"✻ v0.2.0 · 3 tasks in the queue, {most} at most · the assistant's own model · high effort · auto mode", log.Lines[0]);
         Assert.Equal($"‖ Stopped after {tasks}, as you asked · {most} done", log.Lines[^2]);
         Assert.Equal([$"Stopped after {tasks}, as you asked: {most} done"], machine.Notified);
 

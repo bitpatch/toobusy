@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Settings;
 
@@ -28,8 +29,8 @@ public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer
     // before it was refused.
     public IReadOnlyList<string> Done { get; init; } = [];
 
-    // The settings no question asks for, the commands around a task and the branch, that the options set, changed or
-    // took away, each as it was and as it is now; they are not among the answers.
+    // The settings no question asks for, the commands around a task, the branch and the permission mode, that the
+    // options set, changed or took away, each as it was and as it is now; they are not among the answers.
     public IReadOnlyList<SetupAnswer> Unasked { get; init; } = [];
 }
 
@@ -54,10 +55,11 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string SkillLabel = "Skill";
     const string SkillHint = "A session starts with this skill of the project. Leave empty to start without one.";
 
-    // The commands around a task and the branch, which no step asks for: the options name them.
+    // The commands around a task, the branch and the permission mode, which no step asks for: the options name them.
     const string BeforeLabel = "Before a task";
     const string AfterLabel = "After a task";
     const string BranchLabel = "Branch";
+    const string PermissionModeLabel = "Permission mode";
 
     // The last choice of a label: one that the repository does not have yet.
     const string NewLabel = "New label…";
@@ -114,9 +116,11 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The name of the skill; empty for a project that names none.
     string? skill;
 
-    // The commands around a task and the branch: those of the settings, but for what the options say of them.
+    // The commands around a task, the branch and the permission mode: those of the settings, but for what the
+    // options say of them.
     TaskCommands commands = TaskCommands.None;
     string? branch;
+    string? permissionMode;
 
     // What is said of a board that is chosen and lacks a status a run would know it by; empty when nothing is.
     IReadOnlyList<SetupNote> lacking = [];
@@ -165,6 +169,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 Offered(proposals.Before, current?.Commands.Before, "--before"),
                 Offered(proposals.After, current?.Commands.After, "--after"));
             branch = OfferedBranch(proposals.Branch, current?.Branch);
+            permissionMode = OfferedPermissionMode(proposals.PermissionMode, current?.Assistant.PermissionMode);
             if (machine.TrackerReachable)
             {
                 Show(0);
@@ -282,6 +287,19 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             Reject($"--branch: “{name}” {reason}.");
         else
             return name;
+        return now;
+    }
+
+    // The permission mode a session is started in: the one the option names, as Claude Code writes it whatever the
+    // case of its letters, or the one of the settings when no option names one. A mode a session cannot be started
+    // in is refused as the settings refuse it, and the mode stays as it is.
+    string? OfferedPermissionMode(string? proposed, string? now)
+    {
+        if (proposed is null)
+            return now;
+        if (ClaudeCodeOptions.FindPermissionMode(proposed) is { } mode)
+            return mode;
+        Reject($"--permission-mode: “{proposed.Trim()}” {ClaudeCodeOptions.RefusePermissionMode(proposed.Trim())}.");
         return now;
     }
 
@@ -704,7 +722,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         }
         else if (writing)
         {
-            // No answer above names a command or the branch of the options: a first setup says them under them.
+            // No answer above names a command, the branch or the permission mode of the options: a first setup says
+            // them under them.
             coming.Add(new SetupNote(SetupTone.Plain, $"The answers above will be written to {store.DisplayPath}."));
             coming.AddRange(UnaskedChanges().Select(change => new SetupNote(SetupTone.Change, $"{change.Label}: {change.Value}")));
         }
@@ -784,17 +803,20 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         ];
     }
 
-    // The commands around a task and the branch that differ from those of the settings, each as `before → after`.
+    // The commands around a task, the branch and the permission mode that differ from those of the settings, each
+    // as `before → after`. A permission mode that is not named is not none: a session is started in `auto` then.
     List<SetupAnswer> UnaskedChanges()
     {
         var before = current?.Commands ?? TaskCommands.None;
-        (string Name, string? Before, string? After)[] unasked =
+        const string unnamed = $"{ClaudeCodeOptions.DefaultPermissionMode} by default";
+        (string Name, string? Before, string? After, string None)[] unasked =
         [
-            (BeforeLabel, before.Before, commands.Before),
-            (AfterLabel, before.After, commands.After),
-            (BranchLabel, current?.Branch, branch),
+            (BeforeLabel, before.Before, commands.Before, "none"),
+            (AfterLabel, before.After, commands.After, "none"),
+            (BranchLabel, current?.Branch, branch, "none"),
+            (PermissionModeLabel, current?.Assistant.PermissionMode, permissionMode, unnamed),
         ];
-        return [.. unasked.Where(setting => setting.Before != setting.After).Select(setting => new SetupAnswer(setting.Name, $"{setting.Before ?? "none"} → {setting.After ?? "none"}"))];
+        return [.. unasked.Where(setting => setting.Before != setting.After).Select(setting => new SetupAnswer(setting.Name, $"{setting.Before ?? setting.None} → {setting.After ?? setting.None}"))];
     }
 
     // A board as people know it: by its title when it is known, with its address.
@@ -806,12 +828,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     ProjectSettings Settings(string? address) => new(
         new TrackerSettings(SettingsKeys.GitHubTracker, address) { Statuses = board is BoardAnswer.Existing ? statuses : BoardStatuses.Default },
         new QueueSettings(new LabelSettings(blocking!, take!, owner!, interrupted!)),
-        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
+        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant) { PermissionMode = permissionMode })
     {
         Skill = skill is { Length: > 0 } ? skill : null,
 
-        // The commands around a task and the branch are not asked for: they are those of the file, but for what the
-        // options say.
+        // The commands around a task, the branch and the permission mode are not asked for: they are those of the
+        // file, but for what the options say.
         Commands = commands,
         Branch = branch,
     };

@@ -331,6 +331,29 @@ public class SettingsTomlTests
     }
 
     [Fact]
+    public void ThePermissionModeIsKeptInTheSectionOfTheAssistant()
+    {
+        var named = Settings with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+
+        var added = SettingsToml.Write(named, Example);
+
+        Assert.Equal(Example.Replace("type = \"claude-code\"\n", "type = \"claude-code\"\npermission-mode = \"dontAsk\"\n", StringComparison.Ordinal), added);
+        AssertSame(named, SettingsToml.Read(added).Settings!);
+        Assert.Contains("[assistant]\ntype = \"claude-code\"\npermission-mode = \"dontAsk\"\n", SettingsToml.Write(named), StringComparison.Ordinal);
+        Assert.Equal(Example, SettingsToml.Write(Settings, added));
+        Assert.Null(SettingsToml.Read(Example).Settings!.Assistant.PermissionMode);
+    }
+
+    [Fact]
+    public void AModeThatASessionCannotBeStartedInIsRefusedWithItsLine()
+    {
+        var result = SettingsToml.Read(Example.Replace("type = \"claude-code\"\n", "type = \"claude-code\"\npermission-mode = \"plan\"\n", StringComparison.Ordinal));
+
+        Assert.Null(result.Settings);
+        Assert.Equal(("assistant.permission-mode", 15), (Assert.Single(result.Errors).Key, result.Errors[0].Line));
+    }
+
+    [Fact]
     public void ANameThatIsNotABranchIsRefusedWithItsLine()
     {
         var result = SettingsToml.Read(Example + "\n[workspace]\nbranch = \"my branch\"\n");

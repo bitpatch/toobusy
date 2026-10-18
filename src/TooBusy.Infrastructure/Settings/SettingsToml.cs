@@ -103,6 +103,7 @@ public static class SettingsToml
         (SettingsKeys.OwnerLabel, settings.Queue.Labels.Owner),
         (SettingsKeys.InterruptedLabel, settings.Queue.Labels.Interrupted),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
+        (SettingsKeys.PermissionMode, settings.Assistant.PermissionMode),
         (SettingsKeys.SessionSkill, settings.Skill),
         (SettingsKeys.TaskBefore, settings.Commands.Before),
         (SettingsKeys.TaskAfter, settings.Commands.After),

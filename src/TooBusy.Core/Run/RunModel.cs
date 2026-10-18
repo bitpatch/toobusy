@@ -12,6 +12,8 @@ namespace TooBusy.Core.Run;
 // it takes at most; null is a run of the whole queue. A run is given one of the two at most. Commands are the
 // commands of the project the run runs around a task. Branch is the branch the tasks are done on, null where the
 // project names none: the working copy is checked to be on it and brought up to date with its upstream.
+// PermissionMode is the permission mode of the assistant its sessions work in, the one of the settings or the one
+// a session is started in when they name none.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
@@ -25,6 +27,8 @@ public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Mo
     public TaskCommands Commands { get; init; } = TaskCommands.None;
 
     public string? Branch { get; init; }
+
+    public string PermissionMode { get; init; } = ClaudeCodeOptions.DefaultPermissionMode;
 }
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs

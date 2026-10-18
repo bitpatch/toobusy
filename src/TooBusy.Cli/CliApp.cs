@@ -81,6 +81,11 @@ public static class CliApp
         var noAfter = new Option<bool>("--no-after") { Description = "No command after a task." };
         var branch = new Option<string?>("--branch") { Description = "The branch the tasks are done on: before a task a run checks that the working copy is on it and brings it up to date with its upstream.", HelpName = "name" };
         var noBranch = new Option<bool>("--no-branch") { Description = "No branch: a run does the tasks on whatever is checked out, as it stands." };
+        var permissionMode = new Option<string?>("--permission-mode")
+        {
+            Description = "The permission mode of Claude Code a session is started in: `auto`, where a model of Claude Code looks at every action, or `dontAsk`, where whatever the settings of Claude Code do not allow is refused. `auto` while the settings name none.",
+            HelpName = "mode",
+        };
         var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
         var assist = new Option<string?>("--assist")
         {
@@ -90,7 +95,7 @@ public static class CliApp
         };
         var command = new Command("init", $"Sets the project up: asks what it needs and writes the settings. {ForAnAssistant}")
         {
-            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, yes, assist,
+            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes, assist,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -98,7 +103,7 @@ public static class CliApp
             // nothing of it: it changes nothing as it is.
             if (result.GetResult(assist) is { Implicit: false })
             {
-                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, yes];
+                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes];
                 if (others.Any(other => result.GetResult(other) is { Implicit: false }))
                 {
                     Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
@@ -146,6 +151,7 @@ public static class CliApp
                 InProgressStatus = result.GetValue(inProgressStatus),
                 DoneStatus = result.GetValue(doneStatus),
                 Branch = result.GetValue(noBranch) ? new BranchProposal(null) : result.GetValue(branch) is { } name ? new BranchProposal(name) : null,
+                PermissionMode = result.GetValue(permissionMode),
             };
 
             if (FindProject(context) is not { } root)
@@ -637,7 +643,7 @@ public static class CliApp
         command.SetAction(_ =>
         {
             var settings = ProjectLocator.FindRoot(context.Folder) is { } root ? new SettingsFile(root).Load()?.Settings : null;
-            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill, settings?.Commands, settings?.Branch));
+            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill, settings?.Commands, settings?.Branch, settings?.Assistant.PermissionMode));
             return ExitCode.Done;
         });
         return command;
@@ -694,8 +700,8 @@ public static class CliApp
         foreach (var answer in setup.Answers)
             context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
 
-        // No question asks for the commands around a task and the branch: what the options made of them is said after
-        // the answers.
+        // No question asks for the commands around a task, the branch and the permission mode: what the options made of
+        // them is said after the answers.
         foreach (var setting in setup.Unasked)
             context.Output.WriteLine($"{palette.Success("✔")} {setting.Label,-16} {setting.Value}");
 

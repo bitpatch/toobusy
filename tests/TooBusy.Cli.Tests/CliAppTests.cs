@@ -159,6 +159,18 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task AboutNamesThePermissionModeOfAProject()
+    {
+        GitRepository();
+        WriteSettings(Settings + "\npermission-mode = \"dontAsk\"\n");
+
+        var (exit, output, _) = await RunAsync("about");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("This project names the permission mode `dontAsk` of Claude Code in its settings, `assistant.permission-mode`: a session is started in it", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ADemoOfARunRunsNoCommandOfTheProject()
     {
         GitRepository();
@@ -310,7 +322,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             """
             Demo: nothing is changed.
-            ✻ v0.1.0 (made up) · #101 and no other task · the assistant's own model · high effort
+            ✻ v0.1.0 (made up) · #101 and no other task · the assistant's own model · high effort · auto mode
             → #101 Show the total of an order in its header — started · a new session with the skill task-auto · claude attach 4f2a101 (made up)
               #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #101 Show the total of an order in its header — done in 9 s
@@ -359,7 +371,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("run", "--demo", "--max", "2");
 
         Assert.Equal(0, exit);
-        Assert.Contains("✻ v0.1.0 (made up) · 6 tasks in the queue, 2 at most · the assistant's own model · high effort", output, StringComparison.Ordinal);
+        Assert.Contains("✻ v0.1.0 (made up) · 6 tasks in the queue, 2 at most · the assistant's own model · high effort · auto mode", output, StringComparison.Ordinal);
         Assert.Contains("✔ #100 Rename the settings page — done", output, StringComparison.Ordinal);
         Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
         Assert.DoesNotContain("#102 Export the orders as a file —", output, StringComparison.Ordinal);
@@ -1037,6 +1049,39 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task ASessionIsStartedInThePermissionModeOfTheSettingsAndTheLogSaysIt()
+    {
+        GitRepository();
+        WriteSettings(Settings + "\npermission-mode = \"dontAsk\"\n");
+        await ChooseAllAsync();
+
+        var closed = false;
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        {
+            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
+            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
+            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
+            _ => "",
+        }, ""));
+        var context = Context(processes) with { Home = personal.FullName };
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.StartsWith("✻ No milestone · 1 task in the queue · the assistant's own model · high effort · dontAsk mode" + Environment.NewLine, output, StringComparison.Ordinal);
+        var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
+        Assert.Equal(["--bg", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--settings"], started.Take(6));
+    }
+
+    [Fact]
     public async Task InAProjectWithASkillClaudeCodeIsStartedWithItsCommandAtTheHeadOfTheMessage()
     {
         GitRepository();
@@ -1190,7 +1235,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Equal(
             """
-            ✻ No milestone · 1 task in the queue · the assistant's own model · high effort
+            ✻ No milestone · 1 task in the queue · the assistant's own model · high effort · auto mode
             → #12 Export the data — started · a new session · claude attach abc12345
               #12 is assigned to the current user; the session is told that toobusy keeps its task
             ✔ #12 Export the data — done in 0 s
@@ -1202,6 +1247,7 @@ public sealed class CliAppTests : IDisposable
             output);
 
         var started = processes.Asked.Single(asked => asked.Command == "claude" && asked.Arguments[0] == "--bg").Arguments;
+        Assert.Equal(["--bg", "--permission-mode", "auto"], started.Take(3));
         Assert.Equal(["--effort", "high", "-n", "#12 Export the data"], started.Skip(7).Take(4));
         Assert.Equal(Briefing.Task(new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []), new NewTasks("manual", [], null, null), interrupted: false), started[^1]);
 
@@ -1935,7 +1981,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(
             """
             Demo: nothing is changed.
-            ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort
+            ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort · auto mode
               Opens later: #105 after #102
               Held: #106 it has the manual label · #107 its status is In Progress
             → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
@@ -2108,7 +2154,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("init", "--help");
 
         Assert.Equal(0, exit);
-        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "--branch <name>", "--no-branch", "-y, --yes"])
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "--branch <name>", "--no-branch", "--permission-mode <mode>", "-y, --yes"])
             Assert.Contains(option, output, StringComparison.Ordinal);
     }
 
@@ -2245,6 +2291,26 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("✔ Branch           develop → none" + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.DoesNotContain("branch =", File.ReadAllText(file), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesTheOptionOfThePermissionModeNamesItInTheSectionOfTheAssistant()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill", "--permission-mode", "dontAsk"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Assistant        Claude Code" + Environment.NewLine + "✔ Permission mode  auto by default → dontAsk" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains("[assistant]\ntype = \"claude-code\"\npermission-mode = \"dontAsk\"\n", File.ReadAllText(file), StringComparison.Ordinal);
+
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--permission-mode", "plan"]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith("✘ --permission-mode: “plan” must be `auto` or `dontAsk`: in `plan` a session waits for an answer, and nobody answers a session of a run. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.Contains("permission-mode = \"dontAsk\"", File.ReadAllText(file), StringComparison.Ordinal);
     }
 
     [Fact]

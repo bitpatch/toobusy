@@ -211,6 +211,75 @@ public class SettingsValidatorTests
     }
 
     [Fact]
+    public void ThePermissionModeIsOptional()
+    {
+        var unnamed = SettingsValidator.Validate(Document()).Settings!.Assistant;
+        var named = SettingsValidator.Validate(Document((SettingsKeys.PermissionMode, "dontAsk")));
+
+        Assert.Null(unnamed.PermissionMode);
+        Assert.Equal("auto", unnamed.SessionMode);
+        Assert.Empty(named.Errors);
+        Assert.Equal(new AssistantSettings("claude-code") { PermissionMode = "dontAsk" }, named.Settings!.Assistant);
+        Assert.Equal("dontAsk", named.Settings.Assistant.SessionMode);
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("dontAsk")]
+    public void AModeOfClaudeCodeInWhichASessionGoesOnWithNobodyIsTaken(string mode)
+    {
+        Assert.Equal(mode, SettingsValidator.Validate(Document((SettingsKeys.PermissionMode, mode))).Settings!.Assistant.PermissionMode);
+    }
+
+    // A session in such a mode would wait for an answer that never comes.
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("default")]
+    [InlineData("acceptEdits")]
+    [InlineData("plan")]
+    public void AModeThatWaitsForAnAnswerIsRefused(string mode)
+    {
+        var error = OnlyError(Document((SettingsKeys.PermissionMode, mode)));
+
+        Assert.Equal(
+            new SettingsError(SettingsKeys.PermissionMode, LineOf(SettingsKeys.PermissionMode), $"must be `auto` or `dontAsk`: in `{mode}` a session waits for an answer, and nobody answers a session of a run"),
+            error);
+    }
+
+    [Fact]
+    public void AModeThatChecksNothingIsRefused()
+    {
+        var error = OnlyError(Document((SettingsKeys.PermissionMode, "bypassPermissions")));
+
+        Assert.Equal("must be `auto` or `dontAsk`: `bypassPermissions` checks nothing a session does, and toobusy starts no session in it", error.Message);
+    }
+
+    // The file names a mode as Claude Code writes it.
+    [Theory]
+    [InlineData("")]
+    [InlineData("Auto")]
+    [InlineData("dont-ask")]
+    [InlineData("yolo")]
+    public void AnythingElseIsNotAPermissionMode(string mode)
+    {
+        var error = OnlyError(Document((SettingsKeys.PermissionMode, mode)));
+
+        Assert.Equal(
+            new SettingsError(SettingsKeys.PermissionMode, LineOf(SettingsKeys.PermissionMode), "must be `auto` or `dontAsk`, a permission mode of Claude Code in which a session goes on with nobody to answer it"),
+            error);
+        Assert.Equal("must be a string", OnlyError(Document((SettingsKeys.PermissionMode, 1L))).Message);
+    }
+
+    // The modes are known by the assistant: of one that toobusy does not know, nothing more is said than that.
+    [Fact]
+    public void ThePermissionModeIsOneOfTheAssistantTheSettingsName()
+    {
+        var error = OnlyError(Document((SettingsKeys.AssistantType, "codex"), (SettingsKeys.PermissionMode, "plan")));
+
+        Assert.Equal(SettingsKeys.AssistantType, error.Key);
+    }
+
+    [Fact]
     public void TheBranchOfTheTasksIsOptional()
     {
         Assert.Null(SettingsValidator.Validate(Document()).Settings!.Branch);
@@ -463,7 +532,7 @@ public class SettingsValidatorTests
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter, "workspace", SettingsKeys.WorkspaceBranch];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter, "workspace", SettingsKeys.WorkspaceBranch, SettingsKeys.PermissionMode];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

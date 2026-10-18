@@ -21,12 +21,12 @@ public class AssistTests
     static readonly AssistGround Broken = new(
         new SettingsValidation(null, [new SettingsError("tracker.type", 4, "must be `github`"), new SettingsError(null, null, "the file is not TOML")]), File, "acme/rocket");
 
-    static AssistGround Set(string? board = null, string? skill = null, TaskCommands? commands = null, string[]? take = null, string[]? blocking = null, string? branch = null) => new(
+    static AssistGround Set(string? board = null, string? skill = null, TaskCommands? commands = null, string[]? take = null, string[]? blocking = null, string? branch = null, string? mode = null) => new(
         new SettingsValidation(
             new ProjectSettings(
                 new TrackerSettings("github", board),
                 new QueueSettings(new LabelSettings(blocking ?? ["question"], take ?? ["feature", "bug"], "needs-owner", "interrupted")),
-                new AssistantSettings("claude-code"))
+                new AssistantSettings("claude-code") { PermissionMode = mode })
             {
                 Skill = skill,
                 Commands = commands ?? TaskCommands.None,
@@ -67,7 +67,7 @@ public class AssistTests
             5. **The instructions of the project.** The project's own; toobusy does not read them.
             6. **The skill a session starts with.** Not set: there are no settings yet.
             7. **The branch and the commands around a task.** Not set: there are no settings yet.
-            8. **What a session may do.** The settings of Claude Code in the project; toobusy does not read them.
+            8. **What a session may do.** Not set: there are no settings yet.
             9. **The last check.** `toobusy doctor` passes every check.
 
             `toobusy init --assist <n>` tells step `n` alone. The first one follows.
@@ -419,14 +419,28 @@ public class AssistTests
     }
 
     [Fact]
-    public void TheStepOfWhatASessionMayDoNamesTheModeOfASessionAndNoCommandThatSetsIt()
+    public void TheStepOfWhatASessionMayDoNamesTheSettingOfTheModeAndItsOption()
     {
         var text = Assist.Step(8, Set());
 
-        Assert.Contains("A session of a run is a background session of Claude Code in the permission mode `auto`, and nobody answers its prompts: what it is refused is not done", text, StringComparison.Ordinal);
+        Assert.Contains("As things are: the permission mode is `auto`, as the settings name none. toobusy does not read the settings of Claude Code", text, StringComparison.Ordinal);
+        Assert.Contains("A session of a run is a background session of Claude Code, and nobody answers its prompts: what it is refused is not done", text, StringComparison.Ordinal);
+        Assert.Contains("- **The mode**, `assistant.permission-mode` of the settings. `auto` is the mode a session is started in when the settings name none", text, StringComparison.Ordinal);
+        Assert.Contains("In `dontAsk` whatever the settings of Claude Code do not allow is refused", text, StringComparison.Ordinal);
+        Assert.Contains("as `manual`, `acceptEdits` and `plan`, is not taken: a session in it would wait for an answer that never comes. Nor is `bypassPermissions`, which checks nothing.", text, StringComparison.Ordinal);
         Assert.Contains("the build, the tests and the other checks of the project, `git` with its commit and its push, and `gh`.", text, StringComparison.Ordinal);
-        Assert.Contains("Ask the owner: before anything more is allowed", text, StringComparison.Ordinal);
-        Assert.Contains("Set it: no command of toobusy sets this step", text, StringComparison.Ordinal);
+        Assert.Contains("Ask the owner: which mode a session works in, and before anything more is allowed", text, StringComparison.Ordinal);
+        Assert.Contains("Set it:\n\n    toobusy init --yes --permission-mode <mode>\n\nThe mode is `auto` or `dontAsk`; what the command does not name stays as it is.", text, StringComparison.Ordinal);
+        Assert.Contains("Check: `toobusy about` names the mode under “A run”.", text, StringComparison.Ordinal);
+
+        Assert.Contains("As things are: the permission mode is `dontAsk`. toobusy", Assist.Step(8, Set(mode: "dontAsk")), StringComparison.Ordinal);
+        Assert.Contains("8. **What a session may do.** Permission mode: `dontAsk`; the settings of Claude Code in the project are not read by toobusy.", Assist.Introduction(Set(mode: "dontAsk")), StringComparison.Ordinal);
+
+        // A project without settings is told why the command names more than its step.
+        var first = Assist.Step(8, Unset);
+        Assert.Contains("As things are: the permission mode is not set: there are no settings yet.", first, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --no-board --no-skill --permission-mode <mode>\n", first, StringComparison.Ordinal);
+        Assert.Contains("`--no-board` and `--no-skill` stand there only because nothing is set yet", first, StringComparison.Ordinal);
     }
 
     [Fact]

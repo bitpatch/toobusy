@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Settings;
@@ -63,6 +64,7 @@ public static partial class SettingsValidator
             var statuses = ReadStatuses(board is not null);
             var labels = ReadLabels();
             var assistantType = OneOf(SettingsKeys.AssistantType, [SettingsKeys.ClaudeCodeAssistant]);
+            var mode = PermissionMode(assistantType);
             var skill = String(SettingsKeys.SessionSkill, required: false);
             if (skill is not null && RefuseSkill(skill.Value.Text) is { } reason)
                 Refuse(skill.Value.Entry, reason);
@@ -73,12 +75,30 @@ public static partial class SettingsValidator
             return new ProjectSettings(
                 new TrackerSettings(trackerType ?? "", board?.Text) { Statuses = statuses },
                 new QueueSettings(labels),
-                new AssistantSettings(assistantType ?? ""))
+                new AssistantSettings(assistantType ?? "") { PermissionMode = mode })
             {
                 Skill = skill?.Text,
                 Commands = new TaskCommands(Command(SettingsKeys.TaskBefore), Command(SettingsKeys.TaskAfter)),
                 Branch = branch?.Text,
             };
+        }
+
+        // The permission mode is one of the assistant the settings name: its modes are known by it. Where the
+        // assistant is not one toobusy knows, its error is enough.
+        string? PermissionMode(string? assistant)
+        {
+            if (String(SettingsKeys.PermissionMode, required: false) is not { } value)
+                return null;
+
+            var refused = assistant switch
+            {
+                SettingsKeys.ClaudeCodeAssistant => ClaudeCodeOptions.RefusePermissionMode(value.Text),
+                _ => null,
+            };
+            if (refused is null)
+                return value.Text;
+            Refuse(value.Entry, refused);
+            return null;
         }
 
         // A command is a line for the shell, and nothing of it is looked at but that there is one.

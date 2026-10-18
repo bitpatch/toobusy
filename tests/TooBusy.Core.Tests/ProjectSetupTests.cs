@@ -1135,6 +1135,66 @@ public class ProjectSetupTests
     }
 
     [Fact]
+    public async Task ThePermissionModeIsNotAskedForAndIsKept()
+    {
+        store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        dialog.Answer("Skill", "task-auto");
+        machine.Skills = ["task-auto"];
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("dontAsk", store.Saved!.Assistant.PermissionMode);
+        Assert.Empty(result.Unasked);
+        Assert.DoesNotContain(dialog.Asked, label => label.Contains("ermission", StringComparison.Ordinal));
+    }
+
+    // A mode that is not named is the one a session is started in then, so it is not said to be none.
+    [Fact]
+    public async Task TheOptionNamesThePermissionModeAsClaudeCodeWritesIt()
+    {
+        var first = await RunAsync(new SetupProposals { PermissionMode = " DONTASK " });
+
+        Assert.Equal("dontAsk", store.Saved!.Assistant.PermissionMode);
+        Assert.Equal([new SetupAnswer("Permission mode", "auto by default → dontAsk")], first.Unasked);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Permission mode: auto by default → dontAsk"), dialog.Shown.Notes);
+
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        var changed = await RunUnaskedAsync(new SetupProposals { PermissionMode = "auto" });
+
+        Assert.Equal(SetupOutcome.Written, changed.Outcome);
+        Assert.Equal("auto", store.Saved!.Assistant.PermissionMode);
+        Assert.Equal([new SetupAnswer("Permission mode", "dontAsk → auto")], changed.Unasked);
+
+        var same = await RunUnaskedAsync(new SetupProposals { PermissionMode = "dontAsk" });
+
+        Assert.Equal(SetupOutcome.NothingToChange, same.Outcome);
+        Assert.Empty(same.Unasked);
+    }
+
+    [Theory]
+    [InlineData("plan", "--permission-mode: “plan” must be `auto` or `dontAsk`: in `plan` a session waits for an answer, and nobody answers a session of a run.")]
+    [InlineData("acceptEdits", "--permission-mode: “acceptEdits” must be `auto` or `dontAsk`: in `acceptEdits` a session waits for an answer, and nobody answers a session of a run.")]
+    [InlineData("bypassPermissions", "--permission-mode: “bypassPermissions” must be `auto` or `dontAsk`: `bypassPermissions` checks nothing a session does, and toobusy starts no session in it.")]
+    [InlineData("yolo", "--permission-mode: “yolo” must be `auto` or `dontAsk`, a permission mode of Claude Code in which a session goes on with nobody to answer it.")]
+    public async Task AModeASessionCannotBeStartedInFailsWithoutQuestionsAndIsSaidOnTheScreen(string mode, string said)
+    {
+        var unasked = await RunUnaskedAsync(new SetupProposals { PermissionMode = mode });
+
+        Assert.Equal(SetupOutcome.Failed, unasked.Outcome);
+        Assert.Equal(said, unasked.Failure);
+        Assert.Null(store.Saved);
+
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        var asked = await RunAsync(new SetupProposals { PermissionMode = mode });
+
+        Assert.Equal(SetupOutcome.NothingToChange, asked.Outcome);
+        Assert.Contains(new SetupNote(SetupTone.Warning, said), asked.Notes);
+    }
+
+    [Fact]
     public async Task AChangeOfTheSkillIsSaidAsItWasAndAsItWillBe()
     {
         store.Current = Existing;
@@ -1782,6 +1842,7 @@ public class ProjectSetupTests
             $"skill = {settings.Skill}",
             $"before = {settings.Commands.Before}",
             $"after = {settings.Commands.After}",
-            $"branch = {settings.Branch}") + "\n";
+            $"branch = {settings.Branch}",
+            $"permission-mode = {settings.Assistant.PermissionMode}") + "\n";
     }
 }

@@ -1139,7 +1139,7 @@ public sealed class Supervisor(
     {
         var queue = plan.Only is { } only ? $"#{only} and no other task"
             : $"{Spoken.Tasks(lineup.Ready.Count + lineup.Later.Count)} in the queue" + (plan.Most is { } most ? $", {most} at most" : "");
-        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {queue} · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort");
+        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {queue} · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort · {plan.PermissionMode} mode");
         if (lineup.Later.Count > 0)
             Say(RunMark.Note, "Opens later: " + string.Join(" · ", lineup.Later.Select(later => $"#{later.Task.Number} after {string.Join(", ", later.After.Select(before => $"#{before}"))}")));
         if (lineup.Held.Count > 0)
