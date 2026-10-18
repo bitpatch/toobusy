@@ -273,7 +273,7 @@ public sealed class RunScreenTests : IDisposable
     }
 
     // The line of the commands, with the pointer that shows where the menu opens.
-    string Pointer() => terminal.Tape.Text.Split('\n').First(row => row.Contains("press / to show the menu", StringComparison.Ordinal));
+    string Pointer(string text = "press / to show the menu") => terminal.Tape.Text.Split('\n').First(row => row.Contains(text, StringComparison.Ordinal));
 
     // The line under the time and the step of the task that is worked on.
     string? Bar()
@@ -431,8 +431,10 @@ public sealed class RunScreenTests : IDisposable
     [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, false, " ● Reading the queue…\n ❯ press /")]
     [InlineData(RunPhase.Preparing, true, "Starting #3…", 0, false, false, " ● #3 Export the data\n   1:24 · starting\n")]
     [InlineData(RunPhase.Preparing, true, "Running the command before #3…", 0, false, false, " ● #3 Export the data\n   1:24 · the command before the task\n", "the command before the task")]
-    [InlineData(RunPhase.Working, true, "", 0, true, false, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · the last task of this run\n")]
-    [InlineData(RunPhase.Working, true, "", 0, false, true, " ● #3 Export the data\n   1:24 · Edit src/Export.cs · wrapping up\n")]
+    [InlineData(RunPhase.Working, true, "", 0, true, false, " ● #3 Export the data\n   1:24 · Edit src/Export.cs\n ❯ stopping after this task\n")]
+    [InlineData(RunPhase.Working, true, "", 0, false, true, " ● #3 Export the data\n   1:24 · Edit src/Export.cs\n ❯ aborting: the session is wrapping up\n")]
+    [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, true, false, " ● Reading the queue…\n ❯ stopping before the next task\n")]
+    [InlineData(RunPhase.Preparing, false, "Reading the queue…", 0, false, true, " ● Reading the queue…\n ❯ stopping before the next task\n")]
     [InlineData(RunPhase.WaitingForOwner, true, "", 0, false, false, " ● #3 Export the data\n   1:24 · waits for you · gets no message\n")]
     [InlineData(RunPhase.WaitingForLimit, true, "", 3725, false, false, " ● #3 Export the data\n   1:24 · waits for a usage limit · goes on in 1:02:05\n")]
     [InlineData(RunPhase.WaitingForLimit, false, "Waiting for the 5-hour limit to reset", 125, false, false, " ● Waiting for the 5-hour limit to reset\n   goes on in 2:05\n")]
@@ -461,6 +463,29 @@ public sealed class RunScreenTests : IDisposable
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
         terminal.AssertTaped(expected);
+    }
+
+    [Fact]
+    public async Task TheLineOfTheCommandsSaysWhereTheMenuOpensAgainWhenTheStopIsTakenBack()
+    {
+        var lines = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Stopping = true });
+            await SeenAsync("stopping after this task");
+            lines.Add(Pointer("❯ stopping"));
+
+            view.Show(Working);
+            await SeenAsync("press / to show the menu");
+            lines.Add(Pointer("❯ press"));
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal([" ❯ stopping after this task", " ❯ press / to show the menu"], lines);
+        Assert.False(terminal.Saw("the last task of this run"));
     }
 
     [Fact]
