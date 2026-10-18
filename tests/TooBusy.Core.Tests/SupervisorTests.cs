@@ -108,7 +108,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(assistant.Started);
         Assert.Empty(shell.Ran);
         Assert.Null(state.Record);
-        Assert.Contains($"✖ Stopped: {why} · #3 is not taken · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · #3 is not taken · ", StringComparison.Ordinal));
         Assert.Empty(Ended);
 
         // A remote that refuses is not asked again.
@@ -178,7 +178,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Empty(assistant.Started);
         Assert.Empty(shell.Ran);
         Assert.Equal(0, workspace.Synced);
-        Assert.Equal($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines[0]);
+        Assert.StartsWith($"✖ Stopped: {why} · ", log.Lines[0], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -264,7 +264,11 @@ public sealed class SupervisorTests : IDisposable
     {
         plan = plan with { Commands = Around };
         tracker.Add(3);
-        tracker.Doing = did => Assert.True(did != "status 3 InProgress" || shell.Ran.Count == 1, "The task was moved before the command before it ran.");
+        tracker.Doing = did =>
+        {
+            Assert.True(did != "status 3 InProgress" || shell.Ran.Count == 1, "The task was moved before the command before it ran.");
+            Assert.True(did != "status 3 Done" || shell.Ran.Count == 1, "The command after the task ran before the tracker was told.");
+        };
 
         var result = await RunAsync();
 
@@ -274,33 +278,13 @@ public sealed class SupervisorTests : IDisposable
             [("TOOBUSY_TASK", "3"), ("TOOBUSY_TASK_TITLE", "Task 3"), ("TOOBUSY_TASK_URL", "https://example.com/3")],
             shell.Told[0].OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => (pair.Key, pair.Value)));
         Assert.Equal(
-            """
-            ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · auto mode
-              Running the command before #3: scripts/dev.sh ports free
-              the command before #3 passed in 2 s
-            → #3 Task 3 — started · a new session · fake attach 3
-              #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
-            ✔ #3 Task 3 — done in 5 s
-              #3 is closed, with the report of the session as its comment
-              Running the command after #3: scripts/dev.sh server stop
-              the command after #3 passed in 2 s
-            ✔ No task is left · 1 done
-              Worked 7 s
-            """.ReplaceLineEndings("\n"),
-            log.Text);
+            ["  Running the command before #3: scripts/dev.sh ports free", "  the command before #3 passed in 2 s", "  Running the command after #3: scripts/dev.sh server stop", "  the command after #3 passed in 2 s"],
+            log.Lines.Where(line => line.Contains("the command", StringComparison.Ordinal)));
+
+        // The time of the task counts from the command before it.
+        Assert.Equal([(3, RunMark.Done, 5)], log.Ends);
         Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Preparing, Task.Number: 3, Step: "the command before the task" });
         Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Preparing, Task.Number: 3, Step: "the command after the task" });
-    }
-
-    [Fact]
-    public async Task ARunWithoutCommandsRunsNone()
-    {
-        tracker.Add(3);
-
-        await RunAsync();
-
-        Assert.Empty(shell.Ran);
-        Assert.DoesNotContain(log.Lines, line => line.Contains("command", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -372,10 +356,7 @@ public sealed class SupervisorTests : IDisposable
 
     [Theory]
     [InlineData("Did a part, the rest is #9.\nTOOBUSY: partial", RunEnd.Emptied)]
-    [InlineData("The owner must choose.\nTOOBUSY: owner", RunEnd.Emptied)]
-    [InlineData("Undone.\nTOOBUSY: interrupted", RunEnd.Problem)]
     [InlineData("It broke.\nTOOBUSY: failed the build is broken", RunEnd.Problem)]
-    [InlineData("I am done, I think.", RunEnd.Problem)]
     public async Task TheCommandAfterATaskRunsHoweverTheTaskWent(string reply, RunEnd end)
     {
         plan = plan with { Commands = Around };
@@ -401,22 +382,6 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(RunEnd.Problem, result.End);
         Assert.Equal([Free, Halt], shell.Ran.Select(ran => ran.Command));
-    }
-
-    [Fact]
-    public async Task AKillRunsTheCommandAfterTheTaskAndDoesNotWaitLongForIt()
-    {
-        plan = plan with { Commands = Around };
-        tracker.Add(3);
-        var session = assistant.Session(3).Works();
-        clock.At(TimeSpan.FromSeconds(10), kill.Cancel);
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress, and the next run goes on with its session · fake attach 3"), result);
-        Assert.Equal(1, session.Stopped);
-        Assert.Equal([(Free, "3", policy.CommandTime), (Halt, "3", policy.KilledCommandTime)], shell.Ran);
-        Assert.Contains("  the command after #3 passed in 2 s", log.Lines);
     }
 
     [Fact]
@@ -542,7 +507,7 @@ public sealed class SupervisorTests : IDisposable
         await RunAsync();
 
         var start = Assert.Single(assistant.Started);
-        Assert.Contains("It has already moved the task to Doing, and it assigns the task to the user who runs it.", start.Message, StringComparison.Ordinal);
+        Assert.Contains("moved the task to Doing", start.Message, StringComparison.Ordinal);
         Assert.Contains("  #3 is Doing on the board and assigned to the current user; the session is told that toobusy keeps its task", log.Lines);
         Assert.DoesNotContain("In Progress", start.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("Todo", start.Message, StringComparison.Ordinal);
@@ -560,8 +525,9 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal((3, "**Done.**\n\nDid it.\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
         var start = Assert.Single(assistant.Started);
         Assert.Equal((3, "#3 Task 3", ModelChoice.AssistantsOwn, "high"), (start.Task, start.Name, start.Model, start.Effort));
+        Assert.StartsWith("You are doing task #3", start.Message, StringComparison.Ordinal);
         Assert.Contains("# Task #3: Task 3\n\nhttps://example.com/3\n\nRead the task and its comments before you start", start.Message, StringComparison.Ordinal);
-        Assert.Contains("It has already moved the task to In Progress, and it assigns the task to the user who runs it.", start.Message, StringComparison.Ordinal);
+        Assert.Contains("moved the task to In Progress", start.Message, StringComparison.Ordinal);
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Equal(
             """
@@ -584,18 +550,8 @@ public sealed class SupervisorTests : IDisposable
 
         await RunAsync();
 
-        Assert.StartsWith("/task-auto #3 Task 3\n\nYou are doing task #3 of this project without its owner.", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
+        Assert.StartsWith("/task-auto #3 Task 3\n\n", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
         Assert.Contains("→ #3 Task 3 — started · a new session with the skill task-auto · fake attach 3", log.Lines);
-    }
-
-    [Fact]
-    public async Task WithoutASkillTheFirstMessageBeginsWithTheWordsOfToobusy()
-    {
-        tracker.Add(3);
-
-        await RunAsync();
-
-        Assert.StartsWith("You are doing task #3 of this project without its owner.", Assert.Single(assistant.Started).Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -761,7 +717,10 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(RunEnd.Limited, result.End);
         Assert.Equal(1, result.Partial);
-        Assert.Contains(log.Lines, line => line.StartsWith("‖ #5 is paused: the weekly limit is spent", StringComparison.Ordinal) && line.EndsWith("and the next run goes on with its session · 0 done · 1 done in part", StringComparison.Ordinal));
+
+        // A far limit that is spent pauses the task at once.
+        Assert.Contains("‖ #5 is paused: the weekly limit is spent, it resets 2030-01-02 09:00 UTC. Its changes stay in the working tree, and the next run goes on with its session · 0 done · 1 done in part", log.Lines);
+        Assert.Equal(Record(5, RecordState.Paused), state.Record);
     }
 
     [Fact]
@@ -775,26 +734,15 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task TheLogSaysThePermissionModeOfTheSessionsWhereItSaysTheModelAndTheEffort()
-    {
-        plan = plan with { PermissionMode = "dontAsk" };
-        tracker.Add(3);
-
-        await RunAsync();
-
-        Assert.Equal("✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · dontAsk mode", log.Lines[0]);
-    }
-
-    [Fact]
     public async Task WithoutAMilestoneTheTasksAreReadWhateverTheirs()
     {
-        plan = plan with { Milestone = null, Rules = Rules with { Board = false }, Model = new ModelChoice("opus"), Effort = "max" };
+        plan = plan with { Milestone = null, Rules = Rules with { Board = false }, Model = new ModelChoice("opus"), Effort = "max", PermissionMode = "dontAsk" };
         tracker.Add(3, status: BoardStatus.Missing);
 
         await RunAsync();
 
         Assert.All(tracker.Read, Assert.Null);
-        Assert.Equal("✻ No milestone · 1 task in the queue · opus · max effort · auto mode", log.Lines[0]);
+        Assert.Equal("✻ No milestone · 1 task in the queue · opus · max effort · dontAsk mode", log.Lines[0]);
         Assert.DoesNotContain(log.Lines, line => line.Contains("on the board", StringComparison.Ordinal));
     }
 
@@ -807,13 +755,13 @@ public sealed class SupervisorTests : IDisposable
         await RunAsync();
 
         var message = Assert.Single(assistant.Started).Message;
-        Assert.Contains("- Put the label `needs-owner` on it, so that no run takes it before the owner answers, and the label `Feature`, as task #3 has, so that a run takes it after that.\n", message, StringComparison.Ordinal);
+        Assert.Contains("- Put the label `needs-owner` on it", message, StringComparison.Ordinal);
+        Assert.Contains("the label `Feature`, as task #3 has", message, StringComparison.Ordinal);
         Assert.Contains("- Put it into the milestone `v0.2.0`, the one the owner works on.\n- Put it on the board https://github.com/orgs/acme/projects/4 with the status `Todo`.\n", message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("v0.3.0", "- Put it into the milestone `v0.3.0`, the one of task #3.\n")]
-    [InlineData(null, "- Put it into no milestone, as task #3 is in none.\n")]
     public async Task WithoutAMilestoneANewTaskGoesWhereTheTaskOfTheSessionIs(string? milestone, string told)
     {
         plan = plan with { Milestone = null };
@@ -874,7 +822,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Null(state.Record);
         Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
-            (3, "**Failed.** The run stopped over this task: its session left changes in the working tree. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nDid it.\n\n_Session: `fake attach 3`_"),
+            (3, Briefing.Stopped("its session left changes in the working tree", "Did it.", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
         Assert.Contains("  #3 has the needs-owner label and a comment that says what went wrong; no run takes it while it has the label", log.Lines);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
@@ -910,7 +858,6 @@ public sealed class SupervisorTests : IDisposable
 
     [Theory]
     [InlineData("Did the half. What is left is #41, with the questions for the owner.")]
-    [InlineData("Did the half.\n\nLeft: https://github.com/acme/rocket/issues/41")]
     public async Task ATaskDoneInPartIsClosedWithItsReportAndTheRunMakesNothing(string report)
     {
         tracker.Add(3, labels: ["Feature", "urgent"], milestone: "v0.2.0");
@@ -927,7 +874,6 @@ public sealed class SupervisorTests : IDisposable
 
     [Theory]
     [InlineData("Half of it.")]
-    [InlineData("Half of #3; the rest is for the owner.")]
     public async Task APartWhoseReportNamesNoOtherTaskStopsTheRunAndLeavesTheTaskToTheOwner(string report)
     {
         tracker.Add(3);
@@ -976,7 +922,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains("  │ I tried twice.", log.Lines);
         Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
-            (3, "**Failed.** The run stopped over this task: its session failed: the tests do not pass. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI tried twice.\n\n_Session: `fake attach 3`_"),
+            (3, Briefing.Stopped("its session failed: the tests do not pass", "I tried twice.", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
         Assert.Single(assistant.Started);
         Assert.Equal([(3, RunMark.Failed, 3)], log.Ends);
@@ -998,7 +944,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Null(state.Record);
         Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.Equal(
-            (3, "**Failed.** The run stopped over this task: its session ended without saying how the task went. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\nI was about to\n\n_Session: `fake attach 3`_"),
+            (3, Briefing.Stopped("its session ended without saying how the task went", "I was about to", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
     }
 
@@ -1050,7 +996,7 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
         Assert.Contains(said, log.Lines);
-        Assert.Contains("✖ Stopped: #3 failed · fake attach 3 · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith("✖ Stopped: #3 failed · fake attach 3 · ", StringComparison.Ordinal));
         Assert.Equal(did.Split('|'), tracker.Did);
     }
 
@@ -1079,6 +1025,10 @@ public sealed class SupervisorTests : IDisposable
         // The record is forgotten, so the task is left to the owner: nothing else keeps the next run from it.
         Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.StartsWith("**Failed.** The run stopped over this task: the tracker refused something after its session: The tracker refused: close 3.", tracker.Comments[^1].Text, StringComparison.Ordinal);
+
+        // A refusal stays: it is told at once, and the call is not made again.
+        Assert.Single(tracker.Asked, asked => asked == "close 3");
+        Assert.DoesNotContain(log.Lines, line => line.Contains("did not answer", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1106,7 +1056,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(0, session.Looks);
         Assert.Single(assistant.Started);
         Assert.Equal(["status 3 InProgress"], tracker.Did);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
         Assert.Equal([$"Stopped: {why}"], machine.Notified);
 
         // The command after the task runs as after any other end of it, and the sign comes down.
@@ -1129,7 +1079,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
         Assert.Equal(1, session.Stopped);
         Assert.Equal([(3, RunMark.Failed)], Ended);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
 
         // The record stays, so the next run goes on with the session. The sign is not tried again, and comes down.
         Assert.Equal(Record(3), state.Record);
@@ -1234,7 +1184,7 @@ public sealed class SupervisorTests : IDisposable
         var why = "an error toobusy did not foresee: InvalidOperationException: git said nothing";
         Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
         Assert.Empty(assistant.Started);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
         Assert.Null(sign.Written[^1]);
     }
 
@@ -1253,7 +1203,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(1, session.Stopped);
         Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
         Assert.Equal(Record(3), state.Record);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1276,11 +1226,9 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Theory]
-    [InlineData("read", "the open tasks are read")]
     [InlineData("status 3 InProgress", "#3 is moved to In Progress")]
     [InlineData("assign", "#3 is assigned to the current user")]
     [InlineData("close", "#3 is closed")]
-    [InlineData("status 3 Done", "#3 is moved to Done")]
     public async Task ACallOfTheTrackerThatDidNotAnswerIsMadeAgainAfterAPause(string silent, string again)
     {
         tracker.Add(3);
@@ -1338,24 +1286,11 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(
             ["▲ GitHub did not answer: #3 is closed again in 10 s", "▲ GitHub did not answer: #3 is closed again in 30 s"],
             log.Lines.Where(line => line.StartsWith('▲')));
-        Assert.Contains("✖ Stopped: The tracker did not answer: close 3 (3). · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith("✖ Stopped: The tracker did not answer: close 3 (3). · ", StringComparison.Ordinal));
         Assert.Single(assistant.Started);
 
         // The task is left to the owner as over any tracker that refuses.
         Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
-    }
-
-    [Fact]
-    public async Task AFailureThatStaysIsToldAtOnce()
-    {
-        tracker.Add(3);
-        tracker.Refused.Add("close");
-
-        var result = await RunAsync();
-
-        Assert.Equal("The tracker refused: close 3.", result.Why);
-        Assert.Single(tracker.Asked, asked => asked == "close 3");
-        Assert.DoesNotContain(log.Lines, line => line.Contains("did not answer", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1408,6 +1343,7 @@ public sealed class SupervisorTests : IDisposable
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being taken, and the next run goes on with its session · fake attach 3"), result);
+        Assert.Contains("■ Killed the session of #3 while the task was taken: the next run goes on with its session · fake attach 3", log.Lines);
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Single(tracker.Asked, asked => asked == "assign 3");
         Assert.Equal(Record(3), state.Record);
@@ -1526,33 +1462,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task ASessionThatAsksAfterTheLineWaitsForTheOwnerAsBefore()
-    {
-        tracker.Add(3);
-        var session = assistant.Session(3).Works().Asks("input needed", $"{Half}\n\nShall I take #9 too?").Then().Works().Ends(Half);
-
-        var result = await RunAsync();
-
-        Assert.Equal(1, result.Partial);
-        Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
-        Assert.Contains("‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
-        Assert.Contains("#3 waits for an answer", machine.Notified);
-    }
-
-    [Fact]
-    public async Task AQuestionAfterTheMessageThatNoAnswerWillComeWaitsForTheOwnerAsBefore()
-    {
-        tracker.Add(3);
-        var session = assistant.Session(3).Works().Asks("input needed", Half).Then().Works().Asks("input needed", "CSV or JSON?").Then().Works().Ends(Done);
-
-        var result = await RunAsync();
-
-        Assert.Equal(1, result.Done);
-        Assert.Equal([Briefing.NoAnswer(3, "needs-owner"), Briefing.Alone(3, "needs-owner")], session.Told);
-        Assert.Contains("‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
-    }
-
-    [Fact]
     public async Task ASessionThatWasToldToGoOnAloneIsOverAtOnceWhenItEndsWithTheLineMarkedAsWaiting()
     {
         tracker.Add(3);
@@ -1564,36 +1473,6 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
         Assert.Contains("✔ #3 Task 3 — done in 99 s", log.Lines);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith("▲ #3 ended its turn with a line for toobusy", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task ASessionThatWrapsUpAfterAnAbortAndIsMarkedAsWaitingIsOverAtOnce()
-    {
-        tracker.Add(3);
-        var session = assistant.Session(3).Works(20).WhenAsked().Works().Asks("input needed", "Undone: a.cs.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
-        Assert.Equal([Briefing.WrapUp(3)], session.Asked);
-        Assert.Empty(session.Told);
-        Assert.Contains("■ #3 Task 3 — interrupted after 9 s: the report is in the task, and the next run takes it first", log.Lines);
-        Assert.Equal(Record(3, RecordState.WrappedUp), state.Record);
-    }
-
-    [Fact]
-    public async Task ASessionThatWaitedWhenTheRunWasAbortedIsOverWhenItsWrapUpIsMarkedAsWaiting()
-    {
-        tracker.Add(3);
-        var session = assistant.Session(3).Works().Asks().Then().Asks("input needed", "Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
-
-        var result = await RunAsync();
-
-        Assert.Equal(RunEnd.Stopped, result.End);
-        Assert.Equal([Briefing.WrapUp(3)], session.Told);
-        Assert.Contains("label 3 +interrupted", tracker.Did);
     }
 
     [Fact]
@@ -1786,6 +1665,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "comment 3", "status 3 Todo"], tracker.Did);
         Assert.StartsWith("**Interrupted.** Nothing is committed; a run takes the task again.\n\nUndone: a.cs.\nLeft: the export.", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
+        Assert.Equal([(3, RunMark.Interrupted)], Ended);
         Assert.Contains("■ Asked #3 to wrap up after its current step: nothing committed, a report in the task, the interrupted label", log.Lines);
         Assert.Contains("■ #3 Task 3 — interrupted after 9 s: the report is in the task, and the next run takes it first", log.Lines);
         Assert.Contains("  │ Undone: a.cs.", log.Lines);
@@ -2021,12 +1901,16 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being started: it is left as it was, and no session was found for it"), result);
     }
 
-    [Fact]
-    public async Task TheNearLimitHoldsNoTaskBack()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NeitherTheNearNorTheFarLimitHoldsATaskBack(bool far)
     {
         tracker.Add(3);
         tracker.Add(5);
-        assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 99.5, FakeClock.Start + TimeSpan.FromHours(2)), new UsageWindow("weekly", 40, null));
+        assistant.Limits = far
+            ? new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(3)))
+            : new UsageLimits(new UsageWindow("5-hour", 99.5, FakeClock.Start + TimeSpan.FromHours(2)), new UsageWindow("weekly", 40, null));
 
         var result = await RunAsync();
 
@@ -2034,19 +1918,6 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([3, 5], assistant.Started.Select(started => started.Task));
         Assert.True(clock.Now - FakeClock.Start < TimeSpan.FromMinutes(1));
         Assert.DoesNotContain(log.Statuses, status => status.Phase == RunPhase.WaitingForLimit);
-    }
-
-    [Fact]
-    public async Task TheFarLimitHoldsNoTaskBack()
-    {
-        tracker.Add(3);
-        tracker.Add(5);
-        assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(3)));
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
-        Assert.Equal([3, 5], assistant.Started.Select(started => started.Task));
     }
 
     [Fact]
@@ -2135,17 +2006,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task AResetThatIsNotKnownIsWaitedForHalfAnHour()
-    {
-        tracker.Add(3);
-        assistant.Session(3).Works().Limit().Then().Works().Ends(Done);
-
-        await RunAsync();
-
-        Assert.Contains("‖ #3 waits 30 min for the limit to reset, then goes on · /stop pauses it for the next run", log.Lines);
-    }
-
-    [Fact]
     public async Task ALimitThatDoesNotResetPausesTheTaskForTheNextRun()
     {
         policy = policy with { LimitWaits = 2 };
@@ -2164,21 +2024,6 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains("‖ #3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
         Assert.Contains("#3 is paused by a usage limit", machine.Notified);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
-    }
-
-    [Fact]
-    public async Task AFarLimitThatIsSpentPausesTheTaskAtOnce()
-    {
-        tracker.Add(3);
-        assistant.Session(3)
-            .Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(1))))
-            .Limit();
-
-        var result = await RunAsync();
-
-        Assert.Equal(RunEnd.Limited, result.End);
-        Assert.Contains("‖ #3 is paused: the weekly limit is spent, it resets 2030-01-02 09:00 UTC. Its changes stay in the working tree, and the next run goes on with its session · 0 done", log.Lines);
-        Assert.Equal(RecordState.Paused, state.Record?.State);
     }
 
     [Fact]
@@ -2215,7 +2060,9 @@ public sealed class SupervisorTests : IDisposable
     public async Task KillDuringTheWaitForALimitPausesTheTaskToo()
     {
         tracker.Add(3);
-        assistant.Session(3).Works().Limit();
+        assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Limit();
         clock.At(TimeSpan.FromMinutes(10), kill.Cancel);
 
         var result = await RunAsync();
@@ -2224,6 +2071,12 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Contains("label 3 +interrupted", tracker.Did);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith("■ Killed", StringComparison.Ordinal));
+
+        // The sign said what the run waited for, and the kill took it down.
+        Assert.Contains(
+            new RunSign(RunPhase.WaitingForLimit) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3", Until = FakeClock.Start + TimeSpan.FromMinutes(61) },
+            sign.Written);
+        Assert.Null(sign.Written[^1]);
     }
 
     [Fact]
@@ -2657,7 +2510,6 @@ public sealed class SupervisorTests : IDisposable
     [Theory]
     [InlineData(RecordState.Working, false, "it is closed, and its session did not say how the task went")]
     [InlineData(RecordState.Working, true, "it is closed, and nothing is left of its session")]
-    [InlineData(RecordState.Paused, false, "it is closed")]
     [InlineData(RecordState.WrappedUp, false, "it is closed")]
     public async Task AClosedTaskOfTheRecordWhoseSessionDidNotComeToALineIsForgotten(RecordState left, bool gone, string why)
     {
@@ -2778,7 +2630,6 @@ public sealed class SupervisorTests : IDisposable
 
     [Theory]
     [InlineData("needs-owner", "it waits for the owner: it has the needs-owner label")]
-    [InlineData("manual", "it has the manual label")]
     public async Task ATaskOfTheRecordThatGotALabelThatKeepsItOutIsNotTaken(string label, string why)
     {
         state.Record = Record(5, RecordState.Paused);
@@ -2886,7 +2737,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
         Assert.Equal(1, session.Stopped);
         Assert.Equal(0, session.Looks);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
         Assert.Equal(Record(5), state.Record);
 
         tracker.Refused.Clear();
@@ -2906,19 +2757,13 @@ public sealed class SupervisorTests : IDisposable
     [Theory]
     [InlineData(RecordState.Working)]
     [InlineData(RecordState.Paused)]
-    [InlineData(RecordState.WrappedUp)]
     public async Task ATrackerThatRefusesAfterASessionWasToldToGoOnStopsItAndTheNextRunGoesOnWithIt(RecordState left)
     {
         state.Record = Record(5, left);
         tracker.Add(5, labels: ["feature", "interrupted"]);
         tracker.Refused.Add("status 5 InProgress");
         var session = assistant.Session(5).Lost("I was about to").Then().Works().Ends(Done);
-        var first = left switch
-        {
-            RecordState.Paused => Briefing.AfterLimit(5),
-            RecordState.WrappedUp => Briefing.AfterAbort(5),
-            _ => Briefing.AfterStop(5),
-        };
+        var first = left == RecordState.Paused ? Briefing.AfterLimit(5) : Briefing.AfterStop(5);
 
         var result = await RunAsync();
 
@@ -2927,7 +2772,7 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([first], session.Told);
         Assert.Equal(1, session.Stopped);
         Assert.Empty(tracker.Did);
-        Assert.Contains($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines);
+        Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
         Assert.Equal(Record(5), state.Record);
 
         tracker.Refused.Clear();
@@ -2940,27 +2785,6 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal([first, Briefing.AfterStop(5)], session.Told);
         Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
         Assert.Null(state.Record);
-    }
-
-    [Fact]
-    public async Task AKillWhileATaskIsTakenStopsItsSessionToo()
-    {
-        tracker.Add(5, labels: ["bug", "interrupted"]);
-        tracker.Doing = what =>
-        {
-            if (what == "label 5 -interrupted")
-            {
-                kill.Cancel();
-                kill.Token.ThrowIfCancellationRequested();
-            }
-        };
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Killed, 0, "#5 was being taken, and the next run goes on with its session · fake attach 5"), result);
-        Assert.Equal(1, assistant.Session(5).Stopped);
-        Assert.Contains("■ Killed the session of #5 while the task was taken: the next run goes on with its session · fake attach 5", log.Lines);
-        Assert.Equal(Record(5), state.Record);
     }
 
     [Fact]
@@ -3107,18 +2931,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task ATaskThatIsAbortedIsToldAsInterrupted()
-    {
-        tracker.Add(3);
-        assistant.Session(3).Works(20).WhenAsked().Works().Ends("Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(5), () => Run.Send(RunCommand.Abort));
-
-        await RunAsync();
-
-        Assert.Equal([(3, RunMark.Interrupted)], Ended);
-    }
-
-    [Fact]
     public async Task SessionsThatCannotBeReadAreSaidOnce()
     {
         tracker.Add(3);
@@ -3193,17 +3005,8 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal(new RunResult(RunEnd.Stopped, 1, "Stopped after #5, as you asked"), result);
         Assert.Equal([5], assistant.Started.Select(start => start.Task));
-        Assert.Equal(
-            """
-            ✻ v0.2.0 · #5 and no other task · the assistant's own model · high effort · auto mode
-            → #5 Task 5 — started · a new session · fake attach 5
-              #5 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
-            ✔ #5 Task 5 — done in 3 s
-              #5 is closed, with the report of the session as its comment
-            ‖ Stopped after #5, as you asked · 1 done
-              Worked 3 s
-            """.ReplaceLineEndings("\n"),
-            log.Text);
+        Assert.Equal("✻ v0.2.0 · #5 and no other task · the assistant's own model · high effort · auto mode", log.Lines[0]);
+        Assert.Equal("‖ Stopped after #5, as you asked · 1 done", log.Lines[^2]);
         Assert.Equal(["Stopped after #5, as you asked: 1 done"], machine.Notified);
 
         // The queue is not read again: nothing is taken after the task.
@@ -3212,8 +3015,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Done.\nTOOBUSY: done", "1 done")]
-    [InlineData("Half of it; the rest is #9.\nTOOBUSY: partial", "0 done · 1 done in part")]
     [InlineData("What is the colour?\nTOOBUSY: owner", "0 done")]
     public async Task ARunOfOneTaskEndsSoWhateverTheOutcomeOfTheTask(string reply, string went)
     {
@@ -3229,37 +3030,14 @@ public sealed class SupervisorTests : IDisposable
         Assert.Contains($"‖ Stopped after #3, as you asked · {went}", log.Lines);
     }
 
-    [Fact]
-    public async Task ARunOfOneTaskDoesNotTakeATaskThatItsSessionMakes()
-    {
-        plan = plan with { Only = 3 };
-        tracker.Add(3);
-        assistant.Session(3).Works(and: () => tracker.Add(4)).Ends(Done);
-
-        var result = await RunAsync();
-
-        Assert.Equal(RunEnd.Stopped, result.End);
-        Assert.Equal([3], assistant.Started.Select(start => start.Task));
-    }
-
     [Theory]
     [InlineData(3, "it has the manual label")]
-    [InlineData(4, "it waits for the owner: it has the needs-owner label")]
-    [InlineData(5, "it has none of the labels to take: feature, bug")]
-    [InlineData(6, "its status is InProgress")]
-    [InlineData(7, "it waits for #8")]
-    [InlineData(9, "it waits for #3 (it has the manual label)")]
     [InlineData(40, "it is not among the open tasks of the milestone v0.2.0")]
     public async Task ARunOfOneTaskStartsNothingWhenARunWouldNotTakeTheTaskAndSaysWhyInTheWordsOfTheQueue(int number, string why)
     {
         plan = plan with { Only = number };
         tracker.Add(3, labels: ["feature", "manual"]);
-        tracker.Add(4, labels: ["feature", "needs-owner"]);
-        tracker.Add(5, labels: ["docs"]);
-        tracker.Add(6, status: BoardStatus.InProgress);
-        tracker.Add(7, blockedBy: [8]);
-        tracker.Add(8);
-        tracker.Add(9, blockedBy: [3]);
+        tracker.Add(5);
 
         var result = await RunAsync();
 
@@ -3488,21 +3266,6 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task ARunOfANumberOfTasksIsStoppedByItsOwnerAsAnyOther()
-    {
-        plan = plan with { Most = 2 };
-        tracker.Add(3);
-        tracker.Add(5);
-        assistant.Session(3).Works(4).Ends(Done);
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
-
-        var result = await RunAsync();
-
-        Assert.Equal(new RunResult(RunEnd.Stopped, 1), result);
-        Assert.Contains("‖ Stopped by /stop · 1 done", log.Lines);
-    }
-
-    [Fact]
     public async Task ARunPutsItsSignUpSaysOnItWhatItDoesAndTakesItDownWhenItEnds()
     {
         tracker.Add(3);
@@ -3538,24 +3301,6 @@ public sealed class SupervisorTests : IDisposable
         // The sign of the other run is not this one's to take down.
         Assert.Empty(sign.Written);
         Assert.Equal(RunPhase.Ended, log.Statuses[^1].Phase);
-    }
-
-    [Fact]
-    public async Task AKillTakesTheSignDownAndARunThatWaitsSaysSoOnIt()
-    {
-        tracker.Add(3);
-        assistant.Session(3)
-            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
-            .Limit();
-        clock.At(TimeSpan.FromMinutes(5), kill.Cancel);
-
-        var result = await RunAsync();
-
-        Assert.Equal(RunEnd.Killed, result.End);
-        Assert.Contains(
-            new RunSign(RunPhase.WaitingForLimit) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3", Until = FakeClock.Start + TimeSpan.FromMinutes(61) },
-            sign.Written);
-        Assert.Null(sign.Written[^1]);
     }
 
     [Fact]

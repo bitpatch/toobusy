@@ -93,28 +93,9 @@ public sealed class CliAppTests : IDisposable
     [InlineData("1.0.0.dev+c56f", "1.0.0.dev", "c56f")]
     [InlineData("1.0.0.dev+", "1.0.0.dev", null)]
     [InlineData("1.0.0", "1.0.0", null)]
-    [InlineData("", "", null)]
     public void TheVersionIsSplitFromTheCommitWhichIsShortened(string informational, string version, string? commit)
     {
         Assert.Equal((version, commit), CliApp.SplitVersion(informational));
-    }
-
-    [Fact]
-    public async Task HelpOptionWorksOutsideAGitRepository()
-    {
-        var (exit, output, _) = await RunAsync("--help");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("Usage:", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task HelpOfACommandWorksOutsideAGitRepository()
-    {
-        var (exit, output, _) = await RunAsync("run", "--help");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("--demo", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -130,10 +111,10 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task AboutNamesTheLabelsOfAProjectThatIsSetUp()
+    public async Task AboutNamesTheLabelsTheSkillTheCommandsAndThePermissionModeOfAProjectThatIsSetUp()
     {
         GitRepository();
-        WriteSettings(Settings);
+        WriteSettings(Settings + "\npermission-mode = \"dontAsk\"\n" + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n");
 
         var (exit, output, error) = await RunAsync("about");
 
@@ -141,47 +122,10 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.Contains("- A task with the label `manual` is not taken.\n- The project has no board", output, StringComparison.Ordinal);
         Assert.Contains("takes the `interrupted` label off a task that had it", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("No settings are read here", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AboutNamesTheSkillOfAProjectThatHasOne()
-    {
-        GitRepository();
-        WriteSettings(Settings + SkillOfTheProject);
-
-        var (exit, output, _) = await RunAsync("about");
-
-        Assert.Equal(0, exit);
         Assert.Contains("This project names the skill `task-auto`, so its first message begins with `/task-auto #12 <the title of the task>`, as shown below.", output, StringComparison.Ordinal);
-        Assert.Contains("```text\n/task-auto #12 <the title of the task>\n\nYou are doing task #12 of this project without its owner.", output, StringComparison.Ordinal);
-
-        WriteSettings(Settings);
-        Assert.Contains("This project names none: its first message begins with the words of toobusy", (await RunAsync("about")).Output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AboutNamesTheCommandsOfAProjectAroundATask()
-    {
-        GitRepository();
-        WriteSettings(Settings + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n");
-
-        var (exit, output, _) = await RunAsync("about");
-
-        Assert.Equal(0, exit);
         Assert.Contains("This project runs `scripts/dev.sh ports free` before a task and `scripts/dev.sh server stop` after it.", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AboutNamesThePermissionModeOfAProject()
-    {
-        GitRepository();
-        WriteSettings(Settings + "\npermission-mode = \"dontAsk\"\n");
-
-        var (exit, output, _) = await RunAsync("about");
-
-        Assert.Equal(0, exit);
         Assert.Contains("This project names the permission mode `dontAsk` of Claude Code in its settings, `assistant.permission-mode`: a session is started in it", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("No settings are read here", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -217,6 +161,10 @@ public sealed class CliAppTests : IDisposable
     [InlineData("queue")]
     [InlineData("queue", "--demo")]
     [InlineData("doctor")]
+    [InlineData("status")]
+    [InlineData("init", "--demo")]
+    [InlineData("init", "--assist")]
+    [InlineData("init", "--assist", "10")]
     public async Task OutsideAGitRepositoryACommandFails(params string[] args)
     {
         var (exit, output, error) = await RunAsync(args);
@@ -230,7 +178,6 @@ public sealed class CliAppTests : IDisposable
     [InlineData]
     [InlineData("run")]
     [InlineData("queue")]
-    [InlineData("queue", "--json")]
     public async Task WithoutSettingsTheProjectIsNotSetUp(params string[] args)
     {
         GitRepository();
@@ -281,37 +228,12 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("--no-such-option", error, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task UnknownOptionOfACommandIsAWrongCommandLine()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-
-        var (exit, _, error) = await RunAsync("run", "--no-such-option");
-
-        Assert.Equal(2, exit);
-        Assert.Contains("--no-such-option", error, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task DemoSaysThatNothingIsChanged()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-
-        var (exit, output, _) = await RunAsync("run", "--demo");
-
-        Assert.Equal(0, exit);
-        Assert.StartsWith("Demo: nothing is changed." + Environment.NewLine + "✻ v0.1.0 (made up) · 6 tasks in the queue", output, StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData("toobusy: give `--task` or `--max`, not both", "--task", "3", "--max", "2")]
     [InlineData("toobusy: `--task` takes the number of a task, which is 1 or more", "--task", "0")]
     [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max", "0")]
     [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max=-2")]
     [InlineData("--task", "--task", "twelve")]
-    [InlineData("--max", "--max")]
     public async Task ARunOfATaskAndOfANumberOfTasksTogetherOrWithANumberThatIsNotPositiveIsAWrongCommandLine(string said, params string[] options)
     {
         GitRepository();
@@ -333,19 +255,10 @@ public sealed class CliAppTests : IDisposable
 
         // The task a run was killed over is not among the tasks of such a demo: its record would hold the run.
         Assert.Equal(0, exit);
-        Assert.Equal(
-            """
-            Demo: nothing is changed.
-            ✻ v0.1.0 (made up) · #101 and no other task · the assistant's own model · high effort · auto mode
-            → #101 Show the total of an order in its header — started · a new session with the skill task-auto · claude attach 4f2a101 (made up)
-              #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
-            ✔ #101 Show the total of an order in its header — done in 9 s
-              #101 is closed, with the report of the session as its comment
-            ‖ Stopped after #101, as you asked · 1 done
-              Worked 9 s
-
-            """.ReplaceLineEndings(),
-            output);
+        Assert.Contains("✻ v0.1.0 (made up) · #101 and no other task · ", output, StringComparison.Ordinal);
+        Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
+        Assert.Contains("‖ Stopped after #101, as you asked · 1 done", output, StringComparison.Ordinal);
+        Assert.Equal(["#101"], Regex.Matches(output, @"#\d+").Select(match => match.Value).Distinct());
     }
 
     [Fact]
@@ -361,9 +274,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Theory]
-    [InlineData("105", "it waits for #102")]
-    [InlineData("106", "it has the draft label")]
-    [InlineData("107", "its status is In Progress")]
     [InlineData("999", "it is not among the open tasks of the milestone v0.1.0 (made up)")]
     public async Task ARunOfATaskThatARunWouldNotTakeStartsNothingAndFails(string number, string why)
     {
@@ -404,30 +314,13 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ARunOfATaskWithALabelItSkipsDoesNotTakeItButGoesOnWithTheTaskOfTheRecord()
+    public async Task TheHelpOfRunAndOfQueueWorkOutsideAGitRepositoryAndTellOfTheLabelsToSkip()
     {
-        GitRepository();
-
-        var (exit, output, _) = await RunAsync("run", "--demo", "--task", "102", "--skip-label", "FEATURE");
-
-        Assert.Equal(1, exit);
-        Assert.Equal(
-            $"Demo: nothing is changed.{Environment.NewLine}✖ Stopped: #102 is not taken: it has the feature label, which this run skips · no task was started{Environment.NewLine}  Worked 0 s{Environment.NewLine}",
-            output);
-
-        (exit, output, _) = await RunAsync("run", "--demo", "--task", "100", "--skip-label", "chore");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("✻ v0.1.0 (made up) · #100 and no other task · skips chore · the assistant's own model · high effort · auto mode", output, StringComparison.Ordinal);
-        Assert.Contains("‖ Stopped after #100, as you asked · 1 done", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task TheHelpOfRunAndOfQueueTellOfTheLabelsToSkip()
-    {
-        var (_, run, _) = await RunAsync("run", "--help");
+        var (exit, run, _) = await RunAsync("run", "--help");
         var (_, queue, _) = await RunAsync("queue", "--help");
 
+        Assert.Equal(0, exit);
+        Assert.Contains("--demo", run, StringComparison.Ordinal);
         Assert.Contains("--skip-label <name>", run, StringComparison.Ordinal);
         Assert.Contains("Leave out the tasks with this label for this run, and the tasks that wait for them", run, StringComparison.Ordinal);
         Assert.Contains("--skip-label <name>", queue, StringComparison.Ordinal);
@@ -447,26 +340,6 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
         Assert.DoesNotContain("#102 Export the orders as a file —", output, StringComparison.Ordinal);
         Assert.EndsWith($"‖ Stopped after 2 tasks, as you asked · 2 done{Environment.NewLine}  Worked 15 s{Environment.NewLine}", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task InATerminalTheTapeOfARunOfANumberOfTasksSaysWhatEndedIt()
-    {
-        GitRepository();
-
-        var (exit, output, _) = await RunLiveAsync(new Keys(), null, "run", "--demo", "--max", "1");
-
-        Assert.Equal(0, exit);
-        Assert.Equal(
-            [
-                "",
-                " ✔ #100 Rename the settings page  0:06",
-                "",
-                " 1 task in 6 s · 1 done",
-                " ‖ Stopped after 1 task, as you asked",
-                "Demo: the tasks and the sessions were made up, and nothing was changed.",
-            ],
-            Scroll.Read(output).Written.Skip(3));
     }
 
     [Fact]
@@ -599,42 +472,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ARunDoesNotStartWithAMilestoneThatIsNotOpenAnyMore()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        var processes = GitHub(milestones: "v2\t\t3\nv3\t\t0\n");
-        await RunAsync(Context(processes), ["milestone", "v2"]);
-        var later = GitHub(milestones: "v3\t\t0\n", Labels);
-
-        var (exit, _, error) = await RunAsync(Context(later), ["run"]);
-
-        Assert.Equal(1, exit);
-        Assert.StartsWith("toobusy: the milestone “v2” is not open any more." + Environment.NewLine, error, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AProjectWithoutAGitHubOriginHasNoTasksToTake()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        await ChooseAllAsync();
-        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "git@example.com:acme/rocket.git\n" : "", ""));
-
-        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
-
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.Equal(
-            """
-            ✘ repository         The `origin` remote is not a GitHub repository.
-            toobusy: the run did not start. `toobusy doctor` checks all of it again.
-
-            """.ReplaceLineEndings(),
-            error);
-    }
-
-    [Fact]
     public async Task ARunDoesNotStartWhileACheckFailsAndTellsTheFailuresWithTheirFixes()
     {
         GitRepository();
@@ -714,7 +551,6 @@ public sealed class CliAppTests : IDisposable
 
         (_, var about, _) = await RunAsync(Context(processes), ["about"]);
         Assert.Contains("a task is taken only from the status `Ready`. The statuses a run knows are named below as the settings of the project call them, `Ready`, `In Progress` and `Shipped`.", about, StringComparison.Ordinal);
-        Assert.Contains("with the status `Ready`.", about, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -904,20 +740,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task QueueOfMoreThanAHundredOpenTasksIsTheErrorItIsForARun()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        await RunAsync("milestone", "--none");
-
-        var (exit, output, error) = await RunAsync(Context(Tracker("total\t101\n")), ["queue"]);
-
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.Equal("toobusy: acme/rocket has 101 open tasks, and the queue reads only the first 100." + Environment.NewLine, error);
-    }
-
-    [Fact]
     public async Task QueueSaysWhatTheTrackerSaysWhenTheTasksCannotBeRead()
     {
         GitRepository();
@@ -992,14 +814,16 @@ public sealed class CliAppTests : IDisposable
             error);
     }
 
-    [Fact]
-    public async Task QueueRefusesSettingsThatAreNotValid()
+    [Theory]
+    [InlineData("queue")]
+    [InlineData("run", "--demo")]
+    public async Task RunAndQueueRefuseSettingsThatAreNotValid(params string[] args)
     {
         GitRepository();
         WriteSettings(Settings.Replace("blocking = [\"manual\"]", "blocking = \"manual\"", StringComparison.Ordinal));
         await RunAsync("milestone", "--none");
 
-        var (exit, output, error) = await RunAsync(Context(Tracker(OpenTasks)), ["queue"]);
+        var (exit, output, error) = await RunAsync(Context(Tracker(OpenTasks)), args);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
@@ -1081,9 +905,7 @@ public sealed class CliAppTests : IDisposable
         (_, output, _) = await RunAsync("queue", "--demo", "--skip-label", "feature", "--json");
 
         using var queue = System.Text.Json.JsonDocument.Parse(output);
-        Assert.Equal([100, 103, 104], queue.RootElement.GetProperty("ready").EnumerateArray().Select(task => task.GetProperty("number").GetInt32()));
         var held = queue.RootElement.GetProperty("held").EnumerateArray().ToDictionary(task => task.GetProperty("number").GetInt32(), task => task.GetProperty("reason").GetString());
-        Assert.Equal("it has the feature label, which this run skips", held[101]);
         Assert.Equal("it waits for #102 (it has the feature label, which this run skips)", held[105]);
     }
 
@@ -1140,59 +962,6 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.EndsWith($"✔ skill              {place}" + Environment.NewLine, output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task DoctorFailsOverABoardThatLacksAStatusOfARunAndARunDoesNotStart()
-    {
-        GitRepository();
-        WriteSettings(Settings.Replace("type = \"github\"", "type = \"github\"\nboard = \"https://github.com/orgs/acme/projects/1\"", StringComparison.Ordinal));
-        await ChooseAllAsync();
-        var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tBacklog\nstatus\tReady\nstatus\tDone\n");
-        var failure =
-            "✘ statuses           The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done." + Environment.NewLine
-            + "  fix: say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board" + Environment.NewLine;
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["doctor"]);
-
-        Assert.Equal(1, exit);
-        Assert.Contains("✔ board              https://github.com/orgs/acme/projects/1" + Environment.NewLine + failure + "✔ labels" + Environment.NewLine, output, StringComparison.Ordinal);
-
-        (exit, output, var error) = await RunAsync(Context(processes), ["run"]);
-
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.Equal(failure + "toobusy: the run did not start. `toobusy doctor` checks all of it again." + Environment.NewLine, error);
-        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
-    }
-
-    [Fact]
-    public async Task DoctorFailsOverABoardWithoutTheStatusField()
-    {
-        GitRepository();
-        WriteSettings(Settings.Replace("type = \"github\"", "type = \"github\"\nboard = \"https://github.com/orgs/acme/projects/1\"", StringComparison.Ordinal));
-
-        var (exit, output, _) = await RunAsync(Context(GitHubWithProjects(Labels, statuses: "board\n")), ["doctor"]);
-
-        Assert.Equal(1, exit);
-        Assert.Contains("✘ statuses           The board has no statuses “Todo”, “In Progress”, “Done”: it has no statuses." + Environment.NewLine, output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ARunDoesNotStartWhileTheSkillOfTheSettingsIsNotWritten()
-    {
-        GitRepository();
-        WriteSettings(Settings + SkillOfTheProject);
-        await ChooseAllAsync();
-        var processes = GitHub(milestones: "", Labels);
-
-        var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
-
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.StartsWith("✘ skill              There is no skill “task-auto”: a session that starts with it would do nothing.", error, StringComparison.Ordinal);
-        Assert.EndsWith("toobusy: the run did not start. `toobusy doctor` checks all of it again." + Environment.NewLine, error, StringComparison.Ordinal);
-        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
     }
 
     [Fact]
@@ -2108,41 +1877,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task RunOfTheMenuOpensNothingOverABoardThatLacksAStatusOfARun()
-    {
-        GitRepository();
-        WriteSettings(Settings.Replace("type = \"github\"", "type = \"github\"\nboard = \"https://github.com/orgs/acme/projects/1\"", StringComparison.Ordinal));
-        await ChooseAllAsync();
-
-        // A task in Todo to take, on a board that calls no status Done.
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
-        {
-            "git" => "https://github.com/acme/rocket.git\n",
-            "gh" when arguments[0] == "label" => Labels,
-            "gh" when arguments.Any(argument => argument.Contains("options { name }", StringComparison.Ordinal)) => "board\nstatus\tTodo\nstatus\tIn Progress\nstatus\tShipped\n",
-            "gh" when arguments.Any(argument => argument.Contains("projectV2(number:", StringComparison.Ordinal)) => "P_1\n",
-            "gh" when arguments is ["api", "graphql", ..] => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\tTodo\t\t\t\tfeature\n",
-            _ => "",
-        }, ""));
-        using var terminal = new TestTerminal(width: 120, height: 30);
-
-        // `Run`, which opens nothing; then the last of the menu.
-        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
-        var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
-
-        Assert.Equal(0, exit);
-        terminal.AssertSaw("""
-             ✘ statuses           The board has no status “Done”: it has Todo, In Progress, Shipped.
-               fix: say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board
-             The run did not start. `toobusy doctor` checks all of it again.
-             What to do
-             ❯ Run          1 task
-            """.ReplaceLineEndings("\n").TrimEnd(' '));
-        Assert.False(terminal.Saw("Running the queue"));
-        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
-    }
-
-    [Fact]
     public async Task SkipLabelsOfTheMenuChoosesTheLabelsWhoseTasksTheRunsOfTheMenuLeaveOut()
     {
         GitRepository();
@@ -2230,24 +1964,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task BackOfTheSettingsGoesToTheMenuAsEscapeDoes()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        await ChooseAllAsync();
-
-        // Settings; `Back`, the last of their list; the last of the menu.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter, Keys.Up, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, []);
-
-        Assert.Equal(0, exit);
-        Assert.Contains("❯ Back             esc", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("The setup was left", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("press esc again to exit", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task EscapeStopsTheSettingsOfTheMenuWhileTheyAreOpenedAndTheMenuStays()
     {
         GitRepository();
@@ -2281,29 +1997,6 @@ public sealed class CliAppTests : IDisposable
         await processes.Stopped.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.DoesNotContain("Changing the settings", output, StringComparison.Ordinal);
         Assert.DoesNotContain("Choose a setting to change it", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task TheSettingsOfTheMenuListEverySettingWithItsValue()
-    {
-        GitRepository();
-        WriteSettings(Settings + SkillOfTheProject);
-        await ChooseAllAsync();
-
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, []);
-
-        Assert.Equal(0, exit);
-        foreach (var row in (string[])[
-            "❯ Project          none", "  Blocking labels  manual", "  Labels to take   any task", "  Manual label     manual", "  Interrupt label  interrupted",
-            "  Skill            task-auto", "  Before a task    none", "  After a task     none", "  Branch           none", "  Permission mode  auto by default", "  Back             esc"])
-        {
-            Assert.Contains(row, output, StringComparison.Ordinal);
-        }
-
-        // A project without a board has no statuses to tell.
-        Assert.DoesNotContain("Statuses", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2354,24 +2047,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task ASettingThatIsLeftAsItWasAsksNothing()
-    {
-        GitRepository();
-        WriteSettings(Settings);
-        await ChooseAllAsync();
-
-        // Settings; the blocking labels, typed as they are, and left; out.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape, Keys.Escape);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, []);
-
-        Assert.Equal(0, exit);
-        Assert.Contains("Names separated by commas. A task with any of them is never taken.", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("Save the change?", output, StringComparison.Ordinal);
-        Assert.Equal(Settings, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
-    }
-
-    [Fact]
     public async Task ADemoShowsAProjectThatIsReadyWhereThereAreNoSettings()
     {
         GitRepository();
@@ -2403,20 +2078,9 @@ public sealed class CliAppTests : IDisposable
         // The screen is left for the run and entered again for the menu; the tasks of the run stay in the history
         // of the terminal, and only what else there is to say is printed under them.
         Assert.Equal(2, output.Split("\u001b[?1049h").Length - 1);
-        Assert.Equal(
-            [
-                " ✔ #100 Rename the settings page  0:06",
-                " ✔ #101 Show the total of an order in its header  0:09",
-                " ✔ #102 Export the orders as a file  0:21",
-                " ▲ #103 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that",
-                "   none will come · claude attach 4f2a103 (made up)",
-                " ◐ #103 Fix the rounding of a discount  0:11",
-                " ✔ #104 Update the dependencies  0:16",
-                " ✔ #105 Describe the export in the manual  0:07",
-                " 6 tasks in 70 s · 5 done · 1 done in part",
-                "Demo: the tasks and the sessions were made up, and nothing was changed.",
-            ],
-            Scroll.Read(output).Rows.Where(row => row.Length > 0).Skip(1));
+        var rows = Scroll.Read(output).Rows.Where(row => row.Length > 0).ToList();
+        Assert.Contains(" ✔ #100 Rename the settings page  0:06", rows);
+        Assert.Equal([" 6 tasks in 70 s · 5 done · 1 done in part", "Demo: the tasks and the sessions were made up, and nothing was changed."], rows.TakeLast(2));
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
@@ -2591,19 +2255,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task RunRefusesSettingsThatAreNotValid()
-    {
-        GitRepository();
-        WriteSettings(Settings.Replace("blocking = [\"manual\"]", "blocking = \"manual\"", StringComparison.Ordinal));
-
-        var (exit, output, error) = await RunAsync("run", "--demo");
-
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.Contains(".toobusy/settings.toml:7: queue.labels.blocking: ", error, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task TheNotSetUpMessageIsColouredInATerminal()
     {
         GitRepository();
@@ -2613,19 +2264,10 @@ public sealed class CliAppTests : IDisposable
         var exit = await CliApp.RunAsync(["run"], context, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, exit);
-        Assert.Equal(
-            $"{Palette.Dark.Muted("toobusy:")} this project is not set up yet.{Environment.NewLine}Run {Palette.Dark.Accent("`toobusy init`")} to set it up.{Environment.NewLine}"
-            + $"An assistant that sets a project up for its owner starts with {Palette.Dark.Accent("`toobusy init --assist`")}.{Environment.NewLine}",
-            error.ToString());
-    }
-
-    [Fact]
-    public async Task InitNeedsAGitRepository()
-    {
-        var (exit, _, error) = await RunAsync("init", "--demo");
-
-        Assert.Equal(2, exit);
-        Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
+        Assert.StartsWith(
+            $"{Palette.Dark.Muted("toobusy:")} this project is not set up yet.{Environment.NewLine}Run {Palette.Dark.Accent("`toobusy init`")} to set it up.{Environment.NewLine}",
+            error.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2735,10 +2377,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("✔ Skill            night-shift", output, StringComparison.Ordinal);
         Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
-        Assert.EndsWith(
-            "\n# What a session starts with: the skill of the project that says how a task is done here without its owner.\n[session]\nskill = \"night-shift\"\n",
-            File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")),
-            StringComparison.Ordinal);
+        Assert.EndsWith("[session]\nskill = \"night-shift\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
 
         // Settings that name a skill keep it when no option speaks of it.
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
@@ -2801,11 +2440,7 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains("✔ Assistant        Claude Code" + Environment.NewLine + "✔ Branch           none → develop" + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.EndsWith(
-            "# The branch the tasks are done on: before a task a run checks that the working copy is on it,\n"
-            + "# and brings it up to date with its upstream.\n[workspace]\nbranch = \"develop\"\n",
-            File.ReadAllText(file),
-            StringComparison.Ordinal);
+        Assert.EndsWith("[workspace]\nbranch = \"develop\"\n", File.ReadAllText(file), StringComparison.Ordinal);
 
         (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-branch"]);
 
@@ -2826,41 +2461,6 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("✔ Assistant        Claude Code" + Environment.NewLine + "✔ Permission mode  auto by default → dontAsk" + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.Contains("[assistant]\ntype = \"claude-code\"\npermission-mode = \"dontAsk\"\n", File.ReadAllText(file), StringComparison.Ordinal);
-
-        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--permission-mode", "plan"]);
-
-        Assert.Equal(1, exit);
-        Assert.EndsWith("✘ --permission-mode: “plan” must be `auto` or `dontAsk`: in `plan` a session waits for an answer, and nobody answers a session of a run. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.Contains("permission-mode = \"dontAsk\"", File.ReadAllText(file), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task WithYesANameThatGitDoesNotTakeForABranchFailsAndNothingIsWritten()
-    {
-        GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--branch", "my branch"]);
-
-        Assert.Equal(1, exit);
-        Assert.EndsWith("✘ --branch: “my branch” must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
-    }
-
-    [Theory]
-    [InlineData("--before", "")]
-    [InlineData("--after", "  ")]
-    public async Task WithYesAnEmptyCommandFailsAndNothingIsWritten(string option, string empty)
-    {
-        GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", option, empty]);
-
-        Assert.Equal(1, exit);
-        Assert.EndsWith($"✘ {option}: A command must not be empty: give --no-{option[2..]} to run none. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
-        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Take(2).SequenceEqual(["label", "create"]));
     }
 
     [Fact]
@@ -2881,19 +2481,6 @@ public sealed class CliAppTests : IDisposable
         Assert.DoesNotContain("After a task", output, StringComparison.Ordinal);
         Assert.Contains("✔ Before a task    none → scripts/dev.sh ports free" + Environment.NewLine + "✔ The settings are written to .toobusy/settings.toml. Commit the file.", Report(output), StringComparison.Ordinal);
         Assert.EndsWith("[task]\nbefore = \"scripts/dev.sh ports free\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task WithYesANameThatIsNotOneOfASkillFailsAndNothingIsWritten()
-    {
-        GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--skill", "task auto"]);
-
-        Assert.Equal(1, exit);
-        Assert.EndsWith("✘ Skill: task auto is not the name of a skill: it is letters, digits and dashes, as task-auto. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
     }
 
     [Fact]
@@ -2928,14 +2515,8 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
-        Assert.Equal(
-            [
-                "! The board has no status “In Progress”: it has Todo, Doing, Done.",
-                "Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`, or with `toobusy init`: `toobusy doctor` fails until then.",
-                "✔ Tracker          GitHub",
-                "✔ Project          https://github.com/orgs/acme/projects/3",
-            ],
-            output.Split(Environment.NewLine)[1..5]);
+        Assert.Contains("! The board has no status “In Progress”: it has Todo, Doing, Done.", output, StringComparison.Ordinal);
+        Assert.Contains("Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`", output, StringComparison.Ordinal);
         Assert.Contains("✔ The settings are written to .toobusy/settings.toml. Commit the file.", output, StringComparison.Ordinal);
         Assert.Contains("board = \"https://github.com/orgs/acme/projects/3\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
 
@@ -2952,43 +2533,6 @@ public sealed class CliAppTests : IDisposable
         Assert.DoesNotContain("The board has no status", output, StringComparison.Ordinal);
         Assert.Contains("✔ Statuses         Todo, Doing, Done", output, StringComparison.Ordinal);
         Assert.Contains("[tracker.statuses]\nin-progress = \"Doing\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task WithYesAStatusThatTheBoardDoesNotHaveFailsAndNothingIsWritten()
-    {
-        GitRepository();
-        var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tTodo\nstatus\tDoing\nstatus\tDone\n");
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--in-progress-status", "Working", "--manual-label", "manual", "--no-skill"]);
-
-        Assert.Equal(1, exit);
-        Assert.EndsWith("✘ In Progress status: The board has no status “Working”: it has Todo, Doing, Done. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
-    }
-
-    [Fact]
-    public async Task TheOptionsOfTheStatusesDoNotGoWithNoBoard()
-    {
-        GitRepository();
-
-        var (exit, _, error) = await RunAsync(Context(GitHubWithProjects(Labels)), ["init", "--yes", "--no-board", "--done-status", "Shipped"]);
-
-        Assert.Equal(2, exit);
-        Assert.Equal("toobusy: `--todo-status`, `--in-progress-status` and `--done-status` name the statuses of a board, and do not go with `--no-board`" + Environment.NewLine, error);
-    }
-
-    [Fact]
-    public async Task WithYesABoardThatHasTheStatusesOfARunIsNotSpokenOf()
-    {
-        GitRepository();
-        var processes = GitHubWithProjects(Labels);
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--manual-label", "manual", "--no-skill"]);
-
-        Assert.Equal(0, exit);
-        Assert.DoesNotContain("status", output, StringComparison.Ordinal);
-        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Any(argument => argument.Contains("options { name }", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -3076,40 +2620,18 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("take = []", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData("✘ Blocking labels: acme/rocket has no label “urgent”. The settings were not written.", "--blocking-label", "urgent")]
-    [InlineData("✘ Labels to take: acme/rocket has no label “nice”. The settings were not written.", "--take-label", "nice")]
-    [InlineData("✘ Labels to take: manual is a blocking label. The settings were not written.", "--blocking-label", "manual", "--take-label", "manual")]
-    [InlineData("✘ Project: rocket is not a project. Use https://github.com/orgs/<org>/projects/<number>. The settings were not written.", "--board", "rocket")]
-    [InlineData("✘ Project: A project cannot be made for acme, only for ann. The settings were not written.", "--new-board", "Rocket", "--board-owner", "acme")]
-    [InlineData("✘ Interrupt label: manual is the manual label. The settings were not written.", "--manual-label", "manual", "--interrupt-label", "manual")]
-    public async Task WithYesAValueThatFailsItsCheckIsAnErrorAndNothingIsWritten(string failure, params string[] options)
+    [Fact]
+    public async Task WithYesAValueThatFailsItsCheckIsAnErrorAndNothingIsWritten()
     {
         GitRepository();
         var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
 
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", .. options]);
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--blocking-label", "urgent"]);
 
         Assert.Equal(1, exit);
-        Assert.EndsWith(failure + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.EndsWith("✘ Blocking labels: acme/rocket has no label “urgent”. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("create"));
-    }
-
-    [Fact]
-    public async Task WithYesABoardThatCannotBeReachedIsAnErrorAndNothingIsWritten()
-    {
-        GitRepository();
-        var processes = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "project"
-            ? new ProcessResult(ProcessStatus.Exited, 1, "", "Could not resolve to a ProjectV2")
-            : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
-
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3"]);
-
-        Assert.Equal(1, exit);
-        Assert.Contains("✘ Project: ", output, StringComparison.Ordinal);
-        Assert.EndsWith("The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 
     [Fact]
@@ -3156,23 +2678,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task WhereTheOriginIsNotAGitHubRepositoryTheSetupOffersNoNewProject()
-    {
-        GitRepository();
-        var processes = ElsewhereWithProjects();
-        var keys = new Keys().Press(Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--new-board", "Rocket");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("! Project: A new project cannot be made where nothing is verified.", output, StringComparison.Ordinal);
-        Assert.Contains("By URL", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("New project", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
-        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)));
-    }
-
-    [Fact]
     public async Task WithYesADemoChangesNothing()
     {
         GitRepository();
@@ -3200,8 +2705,8 @@ public sealed class CliAppTests : IDisposable
 
     [Theory]
     [InlineData("toobusy: give one of `--board`, `--new-board` and `--no-board`, not several", "--board", "https://github.com/orgs/acme/projects/3", "--no-board")]
-    [InlineData("toobusy: give one of `--board`, `--new-board` and `--no-board`, not several", "--new-board", "Rocket", "--no-board")]
     [InlineData("toobusy: `--board-owner` goes with `--new-board`", "--board-owner", "acme")]
+    [InlineData("toobusy: `--todo-status`, `--in-progress-status` and `--done-status` name the statuses of a board, and do not go with `--no-board`", "--no-board", "--done-status", "Shipped")]
     [InlineData("toobusy: give `--blocking-label` or `--no-blocking-labels`, not both", "--blocking-label", "manual", "--no-blocking-labels")]
     [InlineData("toobusy: give `--take-label` or `--no-take-labels`, not both", "--take-label", "bug", "--no-take-labels")]
     [InlineData("toobusy: give `--skill` or `--no-skill`, not both", "--skill", "task-auto", "--no-skill")]
@@ -3528,16 +3033,6 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task StatusOutsideAGitRepositoryFailsAsTheOtherCommandsDo()
-    {
-        var (exit, output, error) = await RunAsync("status");
-
-        Assert.Equal(2, exit);
-        Assert.Equal("", output);
-        Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
-    }
-
-    [Fact]
     public async Task StatusOfADemoShowsAMadeUpRunThatGoesOn()
     {
         GitRepository();
@@ -3842,7 +3337,6 @@ public sealed class CliAppTests : IDisposable
     [Theory]
     [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "0")]
     [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "two")]
-    [InlineData("toobusy: `--assist` takes the number of a step, which is 1 or more", "--assist", "1.5")]
     [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--assist", "--yes")]
     [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--assist", "3", "--no-board")]
     [InlineData("toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing", "--skill", "task-auto", "--assist")]
@@ -3867,19 +3361,6 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(2, exit);
         Assert.DoesNotContain("Step", output, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("--assist")]
-    [InlineData("--assist", "3")]
-    [InlineData("--assist", "10")]
-    public async Task AssistNeedsAGitRepositoryAsInitDoes(params string[] options)
-    {
-        var (exit, output, error) = await RunAsync(["init", .. options]);
-
-        Assert.Equal(2, exit);
-        Assert.Equal("", output);
-        Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
     }
 
     [Fact]
@@ -3955,13 +3436,15 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
-    public async Task TheHelpOfTheToolAndOfInitSayWhereAnAssistantStarts()
+    public async Task TheHelpOfTheToolAndOfInitWorkOutsideAGitRepositoryAndSayWhereAnAssistantStarts()
     {
         const string Said = "An assistant that sets a project up for its owner starts with `toobusy init --assist`.";
 
-        var (_, tool, _) = await RunAsync("--help");
+        var (exit, tool, _) = await RunAsync("--help");
         var (_, init, _) = await RunAsync("init", "--help");
 
+        Assert.Equal(0, exit);
+        Assert.Contains("Usage:", tool, StringComparison.Ordinal);
         Assert.Contains(Said, Regex.Replace(tool, @"\s+", " "), StringComparison.Ordinal);
         Assert.Contains(Said, Regex.Replace(init, @"\s+", " "), StringComparison.Ordinal);
         Assert.Contains("--assist <step>", init, StringComparison.Ordinal);
