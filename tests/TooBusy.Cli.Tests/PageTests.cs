@@ -140,6 +140,18 @@ public sealed class PageTests : IDisposable
     }
 
     [Fact]
+    public void ASteadyPieceAmongThePointerAndTheNameKeepsItsColourWhileTheyBlink()
+    {
+        var palette = Palette.Dark;
+        using var page = terminal.Open(palette: palette);
+
+        page.Draw([], [new Line(new Part("❯ ", Tone.Accent), new Part("◉ ", Tone.Success, Steady: true), new Part("manual", Tone.Accent), new Part("  kept", Tone.Muted)) { Blinking = 3 }], "", chosen: 0);
+
+        Tick(5);
+        Assert.Equal(palette.Glow("❯ ", 0.5) + palette.Paint(Tone.Success, "◉ ") + palette.Glow("manual", 0.5), terminal.Output.ToString().Split("\u001b[10;2H")[^1]);
+    }
+
+    [Fact]
     public void TheNameOfTheChosenLineFadesBetweenTheAccentAndTheColourOfAnyTextAndTheRestStays()
     {
         var palette = Palette.Dark;

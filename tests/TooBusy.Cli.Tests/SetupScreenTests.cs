@@ -92,7 +92,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Up, Keys.Enter, Keys.Up, Keys.Enter, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Down, Keys.Enter);
 
         Assert.Null(screen.Choose("Milestone rule", "", Rules, 0));
-        Assert.Null(screen.ChooseMany("Blocking labels", "", ["bug", "draft"], []));
+        Assert.Null(screen.ChooseMany("Blocking labels", "", Labels("bug", "draft"), []));
         terminal.AssertSaw("   ◯ bug\n   ◯ draft\n ❯ Back  esc\n ↑↓ move · space select · enter confirm · ctrl+c exit");
         Assert.Null(screen.Confirm("Write the settings?"));
         Assert.Null(screen.AskBoard(Question(current: Boards[0])));
@@ -124,7 +124,7 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Escape, Keys.Escape, Keys.Escape, Keys.Escape, Keys.Escape, Keys.Escape);
 
         Assert.Null(screen.Choose("Milestone rule", "", Rules, 0));
-        Assert.Null(screen.ChooseMany("Blocking labels", "", ["bug"], []));
+        Assert.Null(screen.ChooseMany("Blocking labels", "", Labels("bug"), []));
         Assert.Null(screen.Ask("Milestone", "", "v.1", _ => null));
         Assert.Null(screen.Confirm("Write the settings?"));
         Assert.Null(screen.AskBoard(Question(current: Boards[0])));
@@ -194,7 +194,7 @@ public sealed class SetupScreenTests : IDisposable
     {
         terminal.Keys.Press(Keys.Space, Keys.Down, Keys.Down, Keys.Space, Keys.Up, Keys.Space, Keys.Enter);
 
-        var chosen = screen.ChooseMany("Blocking labels", "Never taken.", ["bug", "draft", "manual"], [0]);
+        var chosen = screen.ChooseMany("Blocking labels", "Never taken.", Labels("bug", "draft", "manual"), [0]);
 
         Assert.Equal([1, 2], chosen);
         terminal.AssertSaw(" Never taken.\n   ◯ bug\n ❯ ◉ draft\n   ◉ manual\n   Back  esc\n ↑↓ move · space select · enter confirm · ctrl+c exit");
@@ -205,7 +205,7 @@ public sealed class SetupScreenTests : IDisposable
     {
         terminal.Keys.Press(Keys.Space, Keys.Down, Keys.Enter);
 
-        Assert.Empty(screen.ChooseMany("Blocking labels", "", [], [])!);
+        Assert.Empty(screen.ChooseMany("Blocking labels", "", Labels(), [])!);
         terminal.AssertSaw(" There is nothing to choose from.\n enter confirm");
     }
 
@@ -276,9 +276,9 @@ public sealed class SetupScreenTests : IDisposable
         terminal.Keys.Press(Keys.Up, Keys.Space, Keys.Escape, Keys.Escape, Keys.Down, Keys.Enter);
         terminal.Keys.Type("-2").Press(Keys.Escape);
 
-        Assert.Equal([0, 1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
-        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
-        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
+        Assert.Equal([0, 1], menu.ChooseMany("Blocking labels", "", Labels("bug", "draft"), [1]));
+        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", Labels("bug", "draft"), [1]));
+        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", Labels("bug", "draft"), [1]));
         Assert.Equal("v.1-2", menu.Ask("Milestone", "", "v.1", _ => null));
     }
 
@@ -339,6 +339,31 @@ public sealed class SetupScreenTests : IDisposable
 
         wide.AssertSaw(" ❯ Rocket  current  https://github.com/orgs/acme/projects/1  linked to this repository\n");
         wide.AssertSaw(" ❯ Rocket     current  https://github.com/orgs/acme/projects/1  linked\n   Moon base           https://github.com/users/denis/projects/7\n");
+    }
+
+    [Fact]
+    public void ALabelThatAnotherSettingHoldsStandsWithWhatHoldsItAndCannotBeChosen()
+    {
+        terminal.Keys.Press(Keys.Down, Keys.Space, Keys.Up, Keys.Space, Keys.Enter);
+
+        Assert.Equal([0], screen.ChooseMany("Blocking labels", "", [new SetupOption("draft", ""), new SetupOption("bug", "to take", Off: true)], []));
+        terminal.AssertSaw("   ◯ draft\n ❯ ◯ bug  to take\n");
+    }
+
+    [Fact]
+    public void TheMarkOfASavedLabelIsInTheColourOfSuccessAndAHeldLabelIsMuted()
+    {
+        var palette = Palette.Dark;
+        using var coloured = new TestTerminal(width: 80, height: 20);
+        using var colouredPage = coloured.Open(palette: palette);
+        coloured.Keys.Press(Keys.Escape);
+
+        new SetupScreen(colouredPage).ChooseMany("Blocking labels", "", [new SetupOption("draft", ""), new SetupOption("manual", "", Current: true), new SetupOption("bug", "to take", Off: true)], []);
+
+        var output = coloured.Output.ToString();
+        Assert.Contains(palette.Paint(Tone.Success, "◯ "), output, StringComparison.Ordinal);
+        Assert.Contains(palette.Paint(Tone.Muted, "bug"), output, StringComparison.Ordinal);
+        Assert.Contains(palette.Paint(Tone.Muted, "  to take"), output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -540,6 +565,8 @@ public sealed class SetupScreenTests : IDisposable
         Assert.Equal(new BoardAnswer.Created(Owners[1], "Rocket two"), answer);
         terminal.AssertSaw("  Your projects   By URL  [New project]  No project   press tab to switch\n Whose project it will be:\n   acme   organisation\n ❯ denis  your account\n Title   Rocket two\n");
     }
+
+    static SetupOption[] Labels(params string[] names) => [.. names.Select(name => new SetupOption(name, ""))];
 
     static BoardQuestion Question(SetupBoard? current) => new(
         "Project",

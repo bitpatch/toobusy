@@ -22,6 +22,9 @@ public class ProjectSetupTests
         new QueueSettings(new LabelSettings(["manual"], ["bug", "retired"], "manual", "interrupted")),
         new AssistantSettings("claude-code"));
 
+    // Settings whose manual label is not a blocking one too, as the menu leaves them.
+    static readonly ProjectSettings Kept = Existing with { Queue = new QueueSettings(new LabelSettings(["draft"], ["bug", "retired"], "manual", "interrupted")) };
+
     readonly ScriptedDialog dialog = new();
     readonly FakeMachine machine = new();
     readonly FakeTracker tracker = new();
@@ -1647,21 +1650,21 @@ public class ProjectSetupTests
     [Fact]
     public async Task TheMenuSavesTheChangeOfOneSettingWhenTheUserSaysSo()
     {
-        store.Current = Existing;
+        store.Current = Kept;
         var setup = await OpenAsync();
-        dialog.Answer("Blocking labels", "draft", "manual");
+        dialog.Answer("Blocking labels", "draft", "feature");
 
         var result = await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.True(SameSettings(Existing with { Queue = new QueueSettings(Existing.Queue.Labels with { Blocking = ["draft", "manual"] }) }, store.Saved));
+        Assert.True(SameSettings(Kept with { Queue = new QueueSettings(Kept.Queue.Labels with { Blocking = ["draft", "feature"] }) }, store.Saved));
         Assert.Equal(["Blocking labels", "Save the change?"], dialog.Asked);
-        Assert.Equal([new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"), new SetupNote(SetupTone.Change, "Blocking labels: manual → draft, manual")], dialog.Shown.Notes);
+        Assert.Equal([new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"), new SetupNote(SetupTone.Change, "Blocking labels: draft → draft, feature")], dialog.Shown.Notes);
         Assert.True(dialog.Shown.Menu);
         Assert.Empty(dialog.Shown.Steps);
         Assert.Empty(dialog.Shown.Answers);
-        Assert.Equal([new SetupAnswer("Blocking labels", "draft, manual")], result.Answers);
-        Assert.Equal("draft, manual", Value(setup.Values, SetupSetting.Blocking).Value);
+        Assert.Equal([new SetupAnswer("Blocking labels", "draft, feature")], result.Answers);
+        Assert.Equal("draft, feature", Value(setup.Values, SetupSetting.Blocking).Value);
         Assert.Empty(tracker.Labelled);
         Assert.Empty(tracker.Linked);
     }
@@ -1669,7 +1672,7 @@ public class ProjectSetupTests
     [Fact]
     public async Task AnAnswerThatChangesNothingAsksNothingMore()
     {
-        store.Current = Existing;
+        store.Current = Kept;
         var setup = await OpenAsync();
 
         var result = await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
@@ -1744,21 +1747,68 @@ public class ProjectSetupTests
     }
 
     [Fact]
-    public async Task TheLabelsOfTheMenuLeaveOutWhatTheOtherSettingsHold()
+    public async Task TheLabelsOfTheMenuShowWhatTheOtherSettingsHoldAndWhatIsSaved()
     {
-        store.Current = Existing;
+        store.Current = Kept;
         var setup = await OpenAsync();
 
         foreach (var setting in (SetupSetting[])[SetupSetting.Blocking, SetupSetting.Take, SetupSetting.Manual, SetupSetting.Interrupted])
             await setup.ChangeAsync(setting, TestContext.Current.CancellationToken);
 
-        // The labels to take are `bug` and `retired`, the blocking one `manual`, the manual label `manual` and the
-        // interrupt label `interrupted`.
-        Assert.Equal(["draft", "feature", "manual"], dialog.Offered["Blocking labels"]);
-        Assert.Equal(["bug", "draft", "feature", "retired"], dialog.Offered["Labels to take"]);
-        Assert.Equal(["draft", "feature", "manual", NewLabel], dialog.Offered[ManualLabel]);
-        Assert.Equal(["draft", "feature", "interrupted", NewLabel], dialog.Offered[InterruptLabel]);
+        // `bug` and `retired` are the labels to take, `draft` the blocking one, `manual` the manual label and
+        // `interrupted` the interrupt label. The manual label may be a blocking one, and the other way round.
+        Assert.Equal(["bug: to take", "interrupted: interrupt label", "manual: manual label", "retired: to take"], dialog.Held["Blocking labels"]);
+        Assert.Equal(["draft: blocking", "interrupted: interrupt label", "manual: manual label"], dialog.Held["Labels to take"]);
+        Assert.Equal(["bug: to take", "interrupted: interrupt label", "retired: to take"], dialog.Held[ManualLabel]);
+        Assert.Equal(["bug: to take", "draft: blocking", "manual: manual label", "retired: to take"], dialog.Held[InterruptLabel]);
+        Assert.Equal(["draft"], dialog.Saved["Blocking labels"]);
+        Assert.Equal(["bug", "retired"], dialog.Saved["Labels to take"]);
         Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task TheManualLabelLeavesTheBlockingLabelsWhenTheyAreSaved()
+    {
+        // The settings name `manual` both as the manual label and as a blocking one, which keeps out nothing more.
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        var result = await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Empty(store.Saved!.Queue.Labels.Blocking);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
+        Assert.Contains("manual: manual label", dialog.Held["Blocking labels"]);
+        Assert.Equal(["manual"], dialog.Saved["Blocking labels"]);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Blocking labels: manual → none"), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task ABlockingLabelThatIsChosenAsTheManualOneLeavesTheBlockingLabels()
+    {
+        store.Current = Kept;
+        var setup = await OpenAsync();
+        dialog.Answer(ManualLabel, "draft");
+
+        var result = await setup.ChangeAsync(SetupSetting.Manual, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("draft", store.Saved!.Queue.Labels.Manual);
+        Assert.Empty(store.Saved.Queue.Labels.Blocking);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Blocking labels: draft → none"), dialog.Shown.Notes);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Manual label: manual → draft"), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task TheWalkLeavesTheManualLabelAmongTheBlockingOnes()
+    {
+        store.Current = Existing;
+
+        await RunAsync();
+
+        Assert.Equal(["manual"], (store.Saved ?? store.Current!).Queue.Labels.Blocking);
+        Assert.Empty(dialog.Held["Blocking labels"]);
+        Assert.Equal(["manual: blocking"], dialog.Held["Labels to take"]);
     }
 
     [Fact]
@@ -1987,7 +2037,7 @@ public class ProjectSetupTests
     public async Task TheQuestionsMarkWhatTheSettingsHaveNow()
     {
         tracker.Statuses = ["Ready", "Todo", "In Progress", "Done"];
-        store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        store.Current = Kept with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
         var setup = await OpenAsync();
         dialog.Answer(TodoStatus, "Ready");
         dialog.Confirm(false);
@@ -2071,6 +2121,12 @@ public class ProjectSetupTests
         // The option of a selection that is marked as the one the settings have now, under the label of the question.
         public Dictionary<string, string?> Current { get; } = [];
 
+        // The options of a multiple choice that the settings have now, under the label of the question.
+        public Dictionary<string, string[]> Saved { get; } = [];
+
+        // The options that cannot be chosen, each with what holds it, under the label of the question.
+        public Dictionary<string, string[]> Held { get; } = [];
+
         public BoardQuestion? Question { get; private set; }
 
         public Action? BeforeConfirm { get; set; }
@@ -2102,20 +2158,29 @@ public class ProjectSetupTests
         public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed)
         {
             Asked.Add(label);
-            Offered[label] = [.. options.Select(option => option.Name)];
+            Offer(label, options);
             Current[label] = options.SingleOrDefault(option => option.Current)?.Name;
             if (!Next(label, out var answer))
                 return proposed;
             return answer is null ? null : options.Select(option => option.Name).ToList().IndexOf(answer[0]);
         }
 
-        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
+        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<SetupOption> options, IReadOnlyList<int> proposed)
         {
             Asked.Add(label);
-            Offered[label] = [.. options];
+            Offer(label, options);
+            Saved[label] = [.. options.Where(option => option.Current).Select(option => option.Name)];
             if (!Next(label, out var answer))
                 return proposed;
-            return answer is null ? null : [.. answer.Select(name => options.ToList().IndexOf(name)).Order()];
+            var names = options.Select(option => option.Name).ToList();
+            return answer is null ? null : [.. answer.Select(name => names.IndexOf(name)).Order()];
+        }
+
+        // What is offered, and what is off with what holds it.
+        void Offer(string label, IReadOnlyList<SetupOption> options)
+        {
+            Offered[label] = [.. options.Where(option => !option.Off).Select(option => option.Name)];
+            Held[label] = [.. options.Where(option => option.Off).Select(option => $"{option.Name}: {option.Detail}")];
         }
 
         public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse)

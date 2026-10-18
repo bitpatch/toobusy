@@ -76,7 +76,7 @@ branch = "develop"                          # optional: the branch the tasks are
 | `tracker.statuses.done` | what the board calls the status a run moves a task to when it is done | optional, `Done` when it is not there; the same |
 | `queue.labels.blocking` | labels that keep a task out | list of label names; may be empty |
 | `queue.labels.take` | labels that let a task in | list of label names; may be empty; must not share a label with `blocking` |
-| `queue.labels.manual` | the label a run puts on a task that waits for the owner; a task that has it is never taken | a label name; not one of `take`; may be one of `blocking`. `queue.labels.owner`, the name it had before, is read in its place in a file that has it; a file that has both does not validate, and `owner` is renamed to `manual` where it stands when the file is written |
+| `queue.labels.manual` | the label a run puts on a task that waits for the owner; a task that has it is never taken, whether it is one of `blocking` or not | a label name; not one of `take`; may be one of `blocking`, which keeps out nothing more, and the settings of the menu take it out of them. `queue.labels.owner`, the name it had before, is read in its place in a file that has it; a file that has both does not validate, and `owner` is renamed to `manual` where it stands when the file is written |
 | `queue.labels.interrupted` | the label a run puts on a task it had to stop; such a task is taken first | a label name; not one of `take` or `blocking`, and not the label of `manual` |
 | `assistant.type` | the assistant adapter | `claude-code` only |
 | `assistant.permission-mode` | the permission mode of the assistant a session works in, as [The permission mode of a session](#the-permission-mode-of-a-session) describes | optional; a mode of the assistant that `assistant.type` names, written as the assistant writes it: for Claude Code `auto` or `dontAsk` |
@@ -211,9 +211,9 @@ Every command takes its colours from one palette, defined in one place. Each rol
 |---|---|---|---|
 | accent | `#D4503F` | `#B03A2E` | the selected line, the cursor, the chosen tab (as its ground, which is the light value in a dark terminal too), the step that is asked, the mark that turns and the steps of a plan that are done on the page of a run, the sign of a check that is running, a command in a message |
 | error | `#F0647E` | `#C2255C` | `✘` and the text of a failure, the reason an answer is refused, the blocking labels in the settings of the menu |
-| success | `#4EC97A` | `#1A7F37` | `✔`, steps that are done, a board that is linked, a value in a list, `current` |
+| success | `#4EC97A` | `#1A7F37` | `✔`, steps that are done, a board that is linked, a value in a list, `current`, the mark of a label of the settings in a multiple choice |
 | warning | `#E5C07B` | `#9A6700` | `!` and the text of a warning |
-| muted | `#808080` | `#767676` | `○`, steps to come and skipped checks, `fix:`, explanations, rules, what a key does, `toobusy:` in a message |
+| muted | `#808080` | `#767676` | `○`, steps to come and skipped checks, `fix:`, explanations, rules, what a key does, `toobusy:` in a message, a choice that is off, as a label that another setting holds |
 | quiet | `#B0B0B0` | `#585858` | the name of a key among the hints, a tab that is not chosen |
 
 The bar and the steps of a screen stand on a grey a little off the background, `#303030` in a dark terminal and `#E4E4E4` in a light one; a terminal of sixteen colours has no such ground. The accent is Claude's clay shifted toward red; the error is pinker than the accent, so that the two are told apart. The palette is provisional: the brand colours are a later design decision. There is no colour when `NO_COLOR` is set or the output is not a terminal.
@@ -229,9 +229,9 @@ The steps, in order:
 1. **Environment.** The checks of [`doctor`](#toobusy-doctor) that need no settings: whether `git`, `gh` and `claude` are installed and whether `gh` and Claude Code are logged in; and whether the `origin` remote is a GitHub repository. Failed checks are shown with their fixes and do not stop the setup; when all pass, nothing is shown and the setup starts with the first question. Without a `gh` that is logged in, or when the `origin` remote is not a GitHub repository, nothing is verified, and the setup says so: the labels are typed and not chosen, a board is taken by its address without being checked, nothing is linked and no label is made. No board is made there either: the question about the board has no `New project` tab, and `--new-board` cannot be taken. With a `gh` that is logged in the boards of the user are listed all the same.
 2. **Tracker.** GitHub is the only one; it is shown, not asked.
 3. **Project.** The GitHub Projects board of the tasks, optional. A project that has one already, the board of the settings or, in a first setup, one that is linked to the repository, shows it as the first of two choices, as it stands in the list of the boards, with `Choose another project` under it; one Enter keeps it. That choice, and a project without a board, open four ways to answer, as tabs that Tab goes through: one of the boards the user can reach, the address of a board, a new board with its owner and title, or no board. Settings that exist and name no board open them on `No project`, so that Enter keeps the project without one; a board that is linked to the repository stands in the list of the boards all the same. The address of any page of a project is taken as its board. A chosen board is checked for access and for the token scope it needs. Its statuses are read then too, and the step may go on with three questions more, as **The statuses of the board** below tells.
-4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first. A label of the settings that the repository has no more stays among the choices, here and in the questions below.
-5. **Labels to take.** A multiple choice over the remaining labels; nothing chosen means any task.
-6. **Manual label.** The label a run puts on a task that cannot go on without the owner: one of the labels of the repository that are not labels to take, or `New label…`, the last of the list, where a name is typed. A first setup proposes `manual`: the label of that name when the repository has it, a new one otherwise.
+4. **Blocking labels.** A multiple choice over the repository's labels; nothing is chosen at first. A label of the settings that the repository has no more stays among the choices, here and in the questions below. The marks of the labels of the settings that exist are in the colour of success, here and in the next question.
+5. **Labels to take.** A multiple choice over the labels; nothing chosen means any task. A blocking label stands among them muted, with `blocking` after it, and cannot be chosen; so does a label that an earlier question holds in the questions below, with what holds it, as [the settings of the menu](#toobusy) show it.
+6. **Manual label.** The label a run puts on a task that cannot go on without the owner: one of the labels of the repository that are not labels to take, a blocking one among them with `blocking` after it, or `New label…`, the last of the list, where a name is typed. A first setup proposes `manual`: the label of that name when the repository has it, a new one otherwise.
 7. **Interrupt label.** The label a run puts on a task it had to stop, chosen in the same way among the labels that neither block nor let a task in and are not the owner's. A first setup proposes `interrupted`.
 8. **Skill.** The skill of the project a session starts with, by its name, typed with the `/` of its command or without it; an empty answer is a project without a skill. A first setup proposes `task-auto`; settings that exist propose the skill they name, and none when they name none. A text that is not the name of a skill is refused. The skill is not made by the setup: it is a file of the project, which its owner or their assistant writes.
 9. **Assistant.** Claude Code is the only one; it is shown, not asked.
@@ -567,7 +567,26 @@ A setting is left when its last question is answered, and when Escape or `Back` 
 
 `Save` does what `Save and exit` of `init` does, for this setting alone: a new board is made and linked, a board that is chosen is linked when it is not yet, a label of a run that is named here and that the repository lacks is made, and the file is written. Then the list is back with how it went above it: ``The settings are written to .toobusy/settings.toml. Commit the file.``, or what GitHub refused and that the settings were not written. `Don't save` comes back to the list with `The change was not saved.`, and `Back` to the questions of the setting, with what was answered proposed; leaving them then, with Escape or `Back`, leaves them with that answer, and the change is asked about again. Leaving the list goes back to the menu.
 
-What one setting holds keeps a label out of the choices of another, as the order of the steps of `init` does: a blocking label is not a label to take and not the interrupt label; a label to take is not a blocking label, the manual label or the interrupt label; the manual label is not a label to take or the interrupt label; and the interrupt label is none of the others. Where nothing is verified and the labels are typed, such a label is refused with the reason.
+What one setting holds, another cannot have, by the rules of the settings, and the list of the other says so. A label stands with its roles after it, `to take`, `blocking`, `manual label` and `interrupt label`; one that a role keeps out is muted all through and cannot be chosen, and the pointer stops on it without blinking:
+
+| List | Muted, what holds it | Chosen as well, with its role |
+|---|---|---|
+| Blocking labels | `to take`, `interrupt label`, `manual label`: a task with the manual label is never taken anyway | — |
+| Labels to take | `blocking`, `manual label`, `interrupt label` | — |
+| Manual label | `to take`, `interrupt label` | `blocking` |
+| Interrupt label | `to take`, `blocking`, `manual label` | — |
+
+```
+ Labels to take
+ ────────────────────────────────────────────────────────────
+   ◉ bug
+   ◯ draft
+ ❯ ◯ help wanted    blocking · manual label
+   ◯ interrupted    interrupt label
+   ◉ feature
+```
+
+The marks of the labels the settings have, `◉` and `◯` alike, are in the colour of success, also where the pointer blinks, so that what is saved is told from what is changed: a `◯` in that colour is a label that leaves the setting when it is saved, and a `◉` in the colour of any text one that comes into it. The manual label is not kept among the blocking labels, where it changes nothing: the list of the blocking labels does not offer it, and a label that is chosen as the manual label leaves them. Settings that name it among them, as an older setup may, lose it there when the blocking labels or the manual label are saved, and the change says so: `Blocking labels: help wanted, invalid → invalid`. Where nothing is verified and the labels are typed, such a label is refused with the reason.
 
 Settings that do not validate have no list: `Settings` opens the steps of `init` then, which propose what a first setup does, and the end of the setup comes back to the menu with its last line above it.
 

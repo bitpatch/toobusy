@@ -746,22 +746,56 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         return true;
     }
 
-    // In the walk the labels are asked in the order of their steps, and each step leaves out what the steps before it
-    // answered. In the menu the others are answered already: a blocking label is not a label to take, and not the
-    // interrupt label.
+    // The roles a label can have in the settings, as the lists of the labels name them, each with the step that asks
+    // for it and how a refusal says it.
+    static readonly (int Step, string Role, string Is)[] LabelRoles =
+    [
+        (2, "to take", "a label to take"),
+        (1, "blocking", "a blocking label"),
+        (3, "manual label", "the manual label"),
+        (4, "interrupt label", "the interrupt label"),
+    ];
+
+    // The roles a label has among the answers that the question of a step sees: in the walk those of the steps before
+    // it, which the order of the steps keeps right, and in the menu all the others. Every role keeps the label out of
+    // the question, but for a blocking one in the question of the manual label: a label may be both, and the manual
+    // label keeps a task out by itself all the same.
+    List<(string Role, string Is, bool Holds)> RolesOf(string name, int step) =>
+    [
+        .. LabelRoles.Where(role => (menu ? role.Step != step : role.Step < step) && Plays(name, role.Step))
+            .Select(role => (role.Role, role.Is, !(step == 3 && role.Step == 1))),
+    ];
+
+    bool Plays(string name, int step) => step switch
+    {
+        1 => blocking is not null && Has(blocking, name),
+        2 => take is not null && Has(take, name),
+        3 => name.Equals(manual, StringComparison.OrdinalIgnoreCase),
+        _ => name.Equals(interrupted, StringComparison.OrdinalIgnoreCase),
+    };
+
+    // Why a label cannot be the answer of a step, as a question where it is typed refuses it; null when it can.
+    string? Refusal(string name, int step) =>
+        RolesOf(name, step).Where(role => role.Holds).Select(role => $"{name} is {role.Is}.").FirstOrDefault();
+
+    // The labels as the question of a step offers them: each with its roles after it, those that a role keeps out
+    // off, and those of the settings marked as the ones of now.
+    List<SetupOption> Options(IEnumerable<string> all, int step, Func<string, bool> now) => [.. all.Select(name => Option(name, step, now(name)))];
+
+    SetupOption Option(string name, int step, bool now)
+    {
+        var roles = RolesOf(name, step);
+        return new SetupOption(name, string.Join(" · ", roles.Select(role => role.Role)), now, roles.Exists(role => role.Holds));
+    }
+
     async Task<bool> AskBlockingAsync(CancellationToken cancellationToken)
     {
-        string? Against(string name) => !menu ? null
-            : Has(take!, name) ? $"{name} is a label to take."
-            : name.Equals(interrupted, StringComparison.OrdinalIgnoreCase) ? $"{name} is the interrupt label."
-            : null;
-
         if (!verified)
         {
             Show(1);
             var names = blocking ?? proposals.Blocking ?? current?.Queue.Labels.Blocking ?? [];
             var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", names), text =>
-                Names(text).Select(Against).FirstOrDefault(reason => reason is not null));
+                Names(text).Select(name => Refusal(name, 1)).FirstOrDefault(reason => reason is not null));
             if (typed is not null)
                 blocking = Names(typed);
             return typed is not null;
@@ -771,30 +805,22 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             return false;
         offeredBlocking ??= Among(all, proposals.Blocking, BlockingLabel);
         var proposed = blocking ?? offeredBlocking ?? current?.Queue.Labels.Blocking ?? [];
-        var rest = all.Where(name => Against(name) is null).ToList();
+        var options = Options(all, 1, name => current is not null && Has(current.Queue.Labels.Blocking, name));
         Show(1);
-        var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, rest, Indexes(rest, proposed));
+        var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, options, Indexes(all, proposed, options));
         if (picked is not null)
-            blocking = [.. picked.Select(index => rest[index])];
+            blocking = [.. picked.Where(index => !options[index].Off).Select(index => all[index])];
         return picked is not null;
     }
 
-    // A label to take is not a blocking label; in the menu, where the two labels of a run are answered already, it is
-    // neither of them.
     async Task<bool> AskTakeAsync(CancellationToken cancellationToken)
     {
-        string? Against(string name) =>
-            Has(blocking!, name) ? $"{name} is a blocking label."
-            : menu && name.Equals(manual, StringComparison.OrdinalIgnoreCase) ? $"{name} is the manual label."
-            : menu && name.Equals(interrupted, StringComparison.OrdinalIgnoreCase) ? $"{name} is the interrupt label."
-            : null;
-
         if (!verified)
         {
             Show(2);
             var names = take ?? proposals.Take ?? current?.Queue.Labels.Take ?? [];
             var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", names), text =>
-                Names(text).Select(Against).FirstOrDefault(reason => reason is not null));
+                Names(text).Select(name => Refusal(name, 2)).FirstOrDefault(reason => reason is not null));
             if (typed is not null)
                 take = Names(typed);
             return typed is not null;
@@ -805,29 +831,32 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         offeredTake ??= Among(all, proposals.Take, TakeLabel);
         var proposed = take ?? offeredTake ?? current?.Queue.Labels.Take ?? [];
 
-        // A blocking label is not among the choices. Where nobody chooses, a proposed one would be dropped
-        // without a word.
+        // A blocking label cannot be chosen. Where nobody chooses, a proposed one would be dropped without a word.
         if (unasked && proposed.FirstOrDefault(name => Has(blocking!, name)) is { } shared)
             throw new Refused($"{TakeLabel}: {shared} is a blocking label.");
 
-        var rest = all.Where(name => Against(name) is null).ToList();
+        var options = Options(all, 2, name => current is not null && Has(current.Queue.Labels.Take, name));
         Show(2);
-        var picked = dialog.ChooseMany(TakeLabel, TakeHint, rest, Indexes(rest, proposed));
+        var picked = dialog.ChooseMany(TakeLabel, TakeHint, options, Indexes(all, proposed, options));
         if (picked is not null)
-            take = [.. picked.Select(index => rest[index])];
+            take = [.. picked.Where(index => !options[index].Off).Select(index => all[index])];
         return picked is not null;
     }
 
+    // The manual label keeps a task out by itself, so in the menu it is not kept among the blocking labels too: a
+    // label that is chosen here leaves them, as the change says.
     Task<bool> AskManualAsync(CancellationToken cancellationToken) => AskLabelAsync(
         3,
         ManualLabel,
         "A task that cannot go on without you gets this label, and is not taken while it has it.",
         manual ?? proposals.Manual?.Trim() ?? current?.Queue.Labels.Manual ?? ProposedManual,
         current?.Queue.Labels.Manual,
-        name => Has(take!, name) ? $"{name} is a label to take."
-            : menu && name.Equals(interrupted, StringComparison.OrdinalIgnoreCase) ? $"{name} is the interrupt label."
-            : null,
-        answer => manual = answer,
+        answer =>
+        {
+            manual = answer;
+            if (menu)
+                blocking = [.. blocking!.Where(name => !name.Equals(answer, StringComparison.OrdinalIgnoreCase))];
+        },
         cancellationToken);
 
     Task<bool> AskInterruptedAsync(CancellationToken cancellationToken) => AskLabelAsync(
@@ -836,10 +865,6 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         "A task that a run had to stop gets this label, and the next run takes it first.",
         interrupted ?? proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
         current?.Queue.Labels.Interrupted,
-        name => Has(take!, name) ? $"{name} is a label to take."
-            : Has(blocking!, name) ? $"{name} is a blocking label."
-            : name.Equals(manual, StringComparison.OrdinalIgnoreCase) ? $"{name} is the manual label."
-            : null,
         answer => interrupted = answer,
         cancellationToken);
 
@@ -899,9 +924,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // One label that a run puts on a task: one of the labels of the repository that nothing speaks against, or a new
     // one, which is named here and made when the setup is confirmed. The proposed one is the label that was
     // answered, the one of the settings, or the name a first setup proposes; `now` is the one of the settings.
-    async Task<bool> AskLabelAsync(int step, string label, string hint, string proposed, string? now, Func<string, string?> refuse, Action<string> answer, CancellationToken cancellationToken)
+    async Task<bool> AskLabelAsync(int step, string label, string hint, string proposed, string? now, Action<string> answer, CancellationToken cancellationToken)
     {
-        string? Refuse(string text) => string.IsNullOrWhiteSpace(text) ? "A label needs a name." : refuse(text.Trim());
+        string? Refuse(string text) => string.IsNullOrWhiteSpace(text) ? "A label needs a name." : Refusal(text.Trim(), step);
 
         if (!verified)
         {
@@ -914,18 +939,23 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
         if (await AllLabelsAsync(step, label, hint, cancellationToken) is not { } all)
             return false;
-        var offered = all.Where(name => refuse(name) is null).ToList();
+        // A label that another setting holds stands among the others, off, with what holds it.
+        var options = Options(all, step, name => name.Equals(now, StringComparison.OrdinalIgnoreCase));
         while (true)
         {
-            var at = offered.FindIndex(name => name.Equals(proposed, StringComparison.OrdinalIgnoreCase));
+            var at = all.FindIndex(name => name.Equals(proposed, StringComparison.OrdinalIgnoreCase));
+            at = at >= 0 && options[at].Off ? -1 : at;
             Show(step);
-            if (dialog.Choose(label, hint, [.. offered.Select(name => new SetupOption(name, "", name.Equals(now, StringComparison.OrdinalIgnoreCase))), new SetupOption(NewLabel, "")], at < 0 ? offered.Count : at) is not { } picked)
+            if (dialog.Choose(label, hint, [.. options, new SetupOption(NewLabel, "")], at < 0 ? all.Count : at) is not { } picked)
                 return false;
-            if (picked < offered.Count)
+            if (picked < all.Count && !options[picked].Off)
             {
-                answer(offered[picked]);
+                answer(all[picked]);
                 return true;
             }
+
+            if (picked < all.Count)
+                continue;
 
             // Going back from the name comes back to the list.
             Show(step, later: true);
@@ -1159,8 +1189,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
     static bool Has(IReadOnlyList<string> labels, string label) => labels.Contains(label, StringComparer.OrdinalIgnoreCase);
 
-    static List<int> Indexes(List<string> options, IReadOnlyList<string> chosen) =>
-        [.. Enumerable.Range(0, options.Count).Where(index => chosen.Contains(options[index], StringComparer.OrdinalIgnoreCase))];
+    // The options that are chosen at first: those proposed that can be chosen.
+    static List<int> Indexes(List<string> options, IReadOnlyList<string> chosen, List<SetupOption> offered) =>
+        [.. Enumerable.Range(0, options.Count).Where(index => !offered[index].Off && chosen.Contains(options[index], StringComparer.OrdinalIgnoreCase))];
 
     static List<string> Names(string text) =>
         [.. text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase)];
@@ -1182,7 +1213,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
         public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) => proposed;
 
-        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) => proposed;
+        public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<SetupOption> options, IReadOnlyList<int> proposed) => proposed;
 
         public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) =>
             refuse(proposed) is { } reason ? throw new Refused($"{label}: {reason}") : proposed;

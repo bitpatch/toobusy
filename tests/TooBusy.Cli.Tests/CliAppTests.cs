@@ -2060,7 +2060,7 @@ public sealed class CliAppTests : IDisposable
 
         // The labels of the repository and, after them, those of the settings it lacks, nothing chosen at first.
         Assert.Contains("Reading the labels", output, StringComparison.Ordinal);
-        Assert.Contains("❯ ◯ feature    \u001b[K\r\n   ◯ design     \u001b[K\r\n   ◯ manual     \u001b[K\r\n   ◯ interrupted\u001b[K\r\n   Back  esc\u001b[K\r\n", output, StringComparison.Ordinal);
+        Assert.Contains("❯ ◯ feature\u001b[K\r\n   ◯ design\u001b[K\r\n   ◯ manual\u001b[K\r\n   ◯ interrupted\u001b[K\r\n   Back  esc\u001b[K\r\n", output, StringComparison.Ordinal);
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "list", "--repo", "acme/rocket", "--limit", "1000", "--json", "name", "--jq", ".[].name"]));
 
         // The choice stands above the menu and at its row, and the tasks are counted again without those it skips.
@@ -2069,7 +2069,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("❯ Run          2 tasks", output, StringComparison.Ordinal);
 
         // The list opens with the choice, and Escape leaves it as it was.
-        Assert.Contains(" ❯ ◉ design     ", output, StringComparison.Ordinal);
+        Assert.Contains(" ❯ ◉ design\u001b[K", output, StringComparison.Ordinal);
         Assert.Contains("The labels to skip are left as they were.", output, StringComparison.Ordinal);
         Assert.True(output.LastIndexOf("✔ Skipped labels   design", StringComparison.Ordinal) > output.LastIndexOf(" ❯ ◉ design", StringComparison.Ordinal));
     }

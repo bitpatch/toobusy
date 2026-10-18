@@ -65,10 +65,12 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         await page.WaitAsync(text, work, cancellationToken, Head(label, hint)) is (true, var value) ? value : null;
 
     public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
-        Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail, Current: option.Current))], at: proposed);
+        Picker.Pick(page, Head(label, hint), [.. options.Select(Offered)], at: proposed);
 
-    public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) =>
-        Picker.PickMany(page, Head(label, hint), options, proposed, keeps);
+    public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<SetupOption> options, IReadOnlyList<int> proposed) =>
+        Picker.PickMany(page, Head(label, hint), [.. options.Select(Offered)], proposed, keeps);
+
+    static Choice Offered(SetupOption option) => new(option.Name, option.Detail, Off: option.Off, Current: option.Current);
 
     public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse, keeps);
 

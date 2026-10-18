@@ -3,16 +3,20 @@ using System.Text;
 
 namespace TooBusy.Cli.Terminal;
 
-// A piece of a line and what it is. A ground of its own goes before the ground of its line.
-public readonly record struct Part(string Text, Tone Tone = Tone.Plain, Ground Ground = Ground.None);
+// A piece of a line and what it is. A ground of its own goes before the ground of its line. A steady piece keeps
+// its tone where the pieces around it blink.
+public readonly record struct Part(string Text, Tone Tone = Tone.Plain, Ground Ground = Ground.None, bool Steady = false);
 
 // Where a text is typed: a line of the choice and a column in it.
 public readonly record struct Caret(int Line, int Column);
 
-// A line of a screen: its pieces from left to right.
+// A line of a screen: its pieces from left to right. Blinking is how many of its first pieces are the pointer and
+// the name, which blink when it is the chosen line.
 public sealed record Line(params Part[] Parts)
 {
     public static Line Empty { get; } = new();
+
+    public int Blinking { get; init; } = 1;
 
     public static Line Of(string text, Tone tone = Tone.Plain) => new(new Part(text, tone));
 }
@@ -274,13 +278,18 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
 
         var glow = Glow;
         var text = new StringBuilder();
-        // Of the chosen line only its first piece blinks, the pointer with the name: what explains the name after
-        // it stays as the frame drew it.
-        if (chosen is { Line.Parts: [var name, ..] } pointed)
+        // Of the chosen line only its first pieces blink, the pointer with the name, but for a steady one among
+        // them: what explains the name after it stays as the frame drew it.
+        if (chosen is { } pointed)
         {
             var room = pointed.Width - 1;
-            var piece = name.Text.Length <= room ? name.Text : room > 0 ? name.Text[..(room - 1)] + "…" : "";
-            text.Append(At(pointed.Row, 2)).Append(palette.Glow(piece, glow));
+            text.Append(At(pointed.Row, 2));
+            foreach (var name in pointed.Line.Parts.Take(pointed.Line.Blinking))
+            {
+                var piece = name.Text.Length <= room ? name.Text : room > 0 ? name.Text[..(room - 1)] + "…" : "";
+                text.Append(name.Steady ? palette.Paint(name.Tone, piece) : palette.Glow(piece, glow));
+                room -= piece.Length;
+            }
         }
 
         if (cursor is { } typed)

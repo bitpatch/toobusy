@@ -76,13 +76,15 @@ public static class Picker
     // chooses the option under the pointer or leaves it, and Enter gives the indexes of those that are chosen.
     // Escape gives null. Where there is somewhere to go back to the options end with `Back`, and Enter on it goes
     // back; a list without options says so, and Enter there gives nothing chosen. `keeps` makes going back give
-    // what is chosen too, as Enter does: whoever asked looks whether that is a change.
-    public static IReadOnlyList<int>? PickMany(Page page, IReadOnlyList<Line> question, IReadOnlyList<string> options, IReadOnlyList<int> proposed, bool keeps = false)
+    // what is chosen too, as Enter does: whoever asked looks whether that is a change. An option that is off is
+    // muted, and Space does nothing on it; the mark of one that is current, chosen or not, is in the colour of
+    // success, as the one of now.
+    public static IReadOnlyList<int>? PickMany(Page page, IReadOnlyList<Line> question, IReadOnlyList<Choice> options, IReadOnlyList<int> proposed, bool keeps = false)
     {
         var chosen = new SortedSet<int>(proposed);
         var at = chosen.FirstOrDefault();
         var top = 0;
-        var widest = options.Select(option => option.Length).DefaultIfEmpty().Max();
+        var widest = options.Where(option => option.Detail.Length > 0).Select(option => option.Name.Length).DefaultIfEmpty().Max();
         var back = options.Count > 0 && GoesBack(page);
         var rows = options.Count + (back ? 1 : 0);
         while (true)
@@ -92,8 +94,11 @@ public static class Picker
                 lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
             top = Window(lines, rows, at, top, Rows, out var pointer, index => index == options.Count
                 ? BackRow(index == at)
-                : Row(index == at, (chosen.Contains(index) ? "◉ " : "◯ ") + options[index].PadRight(widest)));
-            page.Draw(question, lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: options.Count == 0 ? null : pointer, back: back);
+                : Marked(index == at, options[index], chosen.Contains(index), widest));
+
+            // An option that is off does not blink under the pointer: it does not wait to be chosen.
+            var waits = options.Count > 0 && !(at < options.Count && options[at].Off);
+            page.Draw(question, lines, options.Count == 0 ? "enter confirm" : "↑↓ move · space select · enter confirm", chosen: waits ? pointer : null, back: back);
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Enter)
@@ -107,9 +112,24 @@ public static class Picker
                 at = (at + rows - 1) % rows;
             else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
                 at = (at + 1) % rows;
-            else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !chosen.Remove(at))
+            else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !options[at].Off && !chosen.Remove(at))
                 chosen.Add(at);
         }
+    }
+
+    // A row of a multiple choice: the pointer, the mark of whether the option is chosen, its name and what explains
+    // it. The mark of the one of now stays in the colour of success where the pointer and the name blink.
+    static Line Marked(bool pointed, Choice option, bool on, int widest)
+    {
+        var tone = option.Off ? Tone.Muted : pointed ? Tone.Accent : Tone.Plain;
+        return new Line(
+            new Part(pointed ? "❯ " : "  ", tone),
+            new Part(on ? "◉ " : "◯ ", option.Current ? Tone.Success : tone, Steady: option.Current),
+            new Part(option.Detail.Length == 0 ? option.Name : option.Name.PadRight(widest), tone),
+            new Part(option.Detail.Length == 0 ? "" : "  " + option.Detail, Tone.Muted))
+        {
+            Blinking = 3,
+        };
     }
 
     // A row of a list: the pointer when it is on the row, the name, and after it what explains the name and what is

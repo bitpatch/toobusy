@@ -24,6 +24,6 @@ public static class SkipScreen
 
         List<string> options = [.. labels.Concat(skipped).Distinct(StringComparer.OrdinalIgnoreCase)];
         var chosen = Enumerable.Range(0, options.Count).Where(index => skipped.Contains(options[index], StringComparer.OrdinalIgnoreCase)).ToList();
-        return Picker.PickMany(page, Picker.Head(Label, Hint), options, chosen) is { } picked ? [.. picked.Select(index => options[index])] : null;
+        return Picker.PickMany(page, Picker.Head(Label, Hint), [.. options.Select(option => new Choice(option))], chosen) is { } picked ? [.. picked.Select(index => options[index])] : null;
     }
 }

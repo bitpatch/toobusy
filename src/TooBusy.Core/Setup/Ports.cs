@@ -19,7 +19,7 @@ public interface ISetupDialog
     int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed);
 
     // Any number of the options; gives their indexes in the order of the options.
-    IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed);
+    IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<SetupOption> options, IReadOnlyList<int> proposed);
 
     // A typed answer. It is asked again while `refuse` gives a reason against it.
     string? Ask(string label, string hint, string proposed, Func<string, string?> refuse);
@@ -31,8 +31,9 @@ public interface ISetupDialog
     bool? Confirm(string question);
 }
 
-// Current is the option the settings have now, which the screen marks among the others.
-public sealed record SetupOption(string Name, string Detail, bool Current = false);
+// Current is an option the settings have now, which the screen marks among the others. One that is off cannot be
+// chosen, as a label that another setting holds: what explains it says which.
+public sealed record SetupOption(string Name, string Detail, bool Current = false, bool Off = false);
 
 // Steps are the names of the steps of the setup in their order; Step is the index of the one that is asked now,
 // and their number when they are all done and only the confirmation is left.
