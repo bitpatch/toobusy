@@ -4,7 +4,7 @@ A command-line tool that works through the tasks of your project while you are t
 
 ## Status
 
-toobusy is in development, and there is no release yet: it is built from source, and it says `1.0.0.dev` as its version.
+toobusy is in development, and there is no release yet: it is built from source, and it says `1.0.0.dev` as its version, with `toobusy --version` and at the top of its menu.
 
 What works today:
 

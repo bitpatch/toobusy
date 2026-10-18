@@ -82,7 +82,8 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("--version");
 
         Assert.Equal(0, exit);
-        Assert.Matches(@"^\d+\.\d+\.\d+(\.dev)?$", output.Trim());
+        Assert.Equal(CliApp.Version + Environment.NewLine, output);
+        Assert.Matches(@"^\d+\.\d+\.\d+(\.dev)?$", CliApp.Version);
     }
 
     [Fact]
@@ -1697,6 +1698,57 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("Setting up this project", output, StringComparison.Ordinal);
         Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
         Assert.Contains("press esc again to exit", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheBarOfTheMenuShowsTheVersionOfTheToolAtItsRight()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        using var terminal = new TestTerminal(width: 120, height: 30);
+
+        // The last of the menu.
+        terminal.Keys.Press(Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync([], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        terminal.AssertSaw("What to do");
+        Assert.Equal(Bar(120, $"v{CliApp.Version}"), terminal.Frame[1]);
+    }
+
+    [Fact]
+    public async Task TheBarOfTheMenuOfADemoShowsTheVersionAndThatItIsADemo()
+    {
+        GitRepository();
+        using var terminal = new TestTerminal(width: 120, height: 30);
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
+
+        // The last of the menu, once it is there.
+        terminal.Keys.Hold(() => terminal.Saw("What to do")).Press(Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync(["--demo"], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(Bar(120, $"v{CliApp.Version} · demo"), terminal.Frame[1]);
+    }
+
+    [Fact]
+    public async Task InANarrowTerminalTheVersionGivesWayToTheFolder()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // One column short of the room the folder and the version need side by side: two columns between them and
+        // two after the version.
+        var title = $"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}";
+        using var terminal = new TestTerminal(width: title.Length + 2 + $"v{CliApp.Version}".Length + 2 - 1, height: 30);
+        terminal.Keys.Press(Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync([], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        terminal.AssertSaw("What to do");
+        Assert.Equal(title, terminal.Frame[1]);
     }
 
     [Fact]
@@ -3582,6 +3634,14 @@ public sealed class CliAppTests : IDisposable
 
     // What is left in the terminal when the screen is closed.
     static string Report(string output) => output.Split(Screen.Leave)[^1];
+
+    // The line of the bar of the page in a terminal so wide: the tool and the folder at the left, and the status
+    // two columns from the right edge.
+    string Bar(int width, string status)
+    {
+        var title = $"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}";
+        return title + new string(' ', width - 2 - title.Length - status.Length) + status;
+    }
 
     async Task<(int Exit, string Output, string Error)> RunAsync(CliContext context, string[] args)
     {

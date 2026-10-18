@@ -276,9 +276,11 @@ public sealed class Session(Page page, Workbench bench)
 
     // Takes the page back from the screen that had it: what is settled in its body, with a note under it, and
     // nothing of that screen around. The checks that failed before a run stand before the note, with their fixes.
+    // A page whose status says nothing, as the menu, shows the version of the tool there.
     void Clear(string status, string? note, IReadOnlyList<CheckResult>? failed = null)
     {
-        page.Status = bench.Demo ? status.Length == 0 ? "demo" : $"{status} · demo" : status;
+        status = status.Length == 0 ? $"v{CliApp.Version}" : status;
+        page.Status = bench.Demo ? $"{status} · demo" : status;
         page.Foot = Line.Empty;
         page.Keys = "";
         page.EscapeLeaves = false;

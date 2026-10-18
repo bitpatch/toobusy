@@ -1,5 +1,7 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Globalization;
+using System.Reflection;
 using TooBusy.Cli.Imitation;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
@@ -15,6 +17,10 @@ namespace TooBusy.Cli;
 
 public static class CliApp
 {
+    // The version of the tool, the one place it is read from: `--version` prints it and the menu shows it.
+    public static string Version { get; } =
+        typeof(CliApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+
     public static RootCommand CreateRootCommand(CliContext context)
     {
         var demo = new Option<bool>("--demo")
@@ -23,6 +29,7 @@ public static class CliApp
             Recursive = true,
         };
         var root = new RootCommand($"Runs the tasks of your tracker one after another with AI coding assistants. {ForAnAssistant}");
+        root.Options.OfType<VersionOption>().Single().Action = new PrintVersion();
         root.Options.Add(demo);
         root.Subcommands.Add(CreateInitCommand(context, demo));
         root.Subcommands.Add(CreateMilestoneCommand(context, demo));
@@ -56,6 +63,16 @@ public static class CliApp
         var result = CreateRootCommand(context).Parse(args);
         var exit = await result.InvokeAsync(configuration, cancellationToken);
         return result.Errors.Count > 0 ? ExitCode.NotReady : exit;
+    }
+
+    // What `--version` does: prints the version of the tool.
+    sealed class PrintVersion : SynchronousCommandLineAction
+    {
+        public override int Invoke(ParseResult parseResult)
+        {
+            parseResult.InvocationConfiguration.Output.WriteLine(Version);
+            return ExitCode.Done;
+        }
     }
 
     static Command CreateInitCommand(CliContext context, Option<bool> demo)
