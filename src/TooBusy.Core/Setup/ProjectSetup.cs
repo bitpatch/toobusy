@@ -28,9 +28,9 @@ public sealed record SetupResult(SetupOutcome Outcome, IReadOnlyList<SetupAnswer
     // before it was refused.
     public IReadOnlyList<string> Done { get; init; } = [];
 
-    // The commands around a task that the options set, changed or took away, each as it was and as it is now; no
-    // question asks for them, so they are not among the answers.
-    public IReadOnlyList<SetupAnswer> Commands { get; init; } = [];
+    // The settings no question asks for, the commands around a task and the branch, that the options set, changed or
+    // took away, each as it was and as it is now; they are not among the answers.
+    public IReadOnlyList<SetupAnswer> Unasked { get; init; } = [];
 }
 
 // The steps of `toobusy init`: it asks what the settings need, shows what would change, and on a yes makes it so.
@@ -54,9 +54,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     const string SkillLabel = "Skill";
     const string SkillHint = "A session starts with this skill of the project. Leave empty to start without one.";
 
-    // The commands around a task, which no step asks for: the options name them.
+    // The commands around a task and the branch, which no step asks for: the options name them.
     const string BeforeLabel = "Before a task";
     const string AfterLabel = "After a task";
+    const string BranchLabel = "Branch";
 
     // The last choice of a label: one that the repository does not have yet.
     const string NewLabel = "New label…";
@@ -113,8 +114,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // The name of the skill; empty for a project that names none.
     string? skill;
 
-    // The commands around a task: those of the settings, but for what the options say of them.
+    // The commands around a task and the branch: those of the settings, but for what the options say of them.
     TaskCommands commands = TaskCommands.None;
+    string? branch;
 
     // What is said of a board that is chosen and lacks a status a run would know it by; empty when nothing is.
     IReadOnlyList<SetupNote> lacking = [];
@@ -162,6 +164,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             commands = new TaskCommands(
                 Offered(proposals.Before, current?.Commands.Before, "--before"),
                 Offered(proposals.After, current?.Commands.After, "--after"));
+            branch = OfferedBranch(proposals.Branch, current?.Branch);
             if (machine.TrackerReachable)
             {
                 Show(0);
@@ -200,7 +203,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                         break;
                     default:
                         if (await ConcludeAsync(cancellationToken) is { } outcome)
-                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. lacking, .. unwritten], Done = done, Commands = CommandChanges() };
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. lacking, .. unwritten], Done = done, Unasked = UnaskedChanges() };
                         answered = false;
                         break;
                 }
@@ -262,6 +265,23 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (proposed.Line is null || !string.IsNullOrWhiteSpace(proposed.Line))
             return proposed.Line?.Trim();
         Reject($"{option}: A command must not be empty: give --no-{option[2..]} to run none.");
+        return now;
+    }
+
+    // The branch the tasks are done on: the one the option names, or the one of the settings when no option speaks
+    // of it. A name git does not take is refused as the settings refuse it, and the branch stays as it is.
+    string? OfferedBranch(BranchProposal? proposed, string? now)
+    {
+        if (proposed is null)
+            return now;
+        if (proposed.Name?.Trim() is not { } name)
+            return null;
+        if (name.Length == 0)
+            Reject("--branch: A branch must not be empty: give --no-branch to name none.");
+        else if (SettingsValidator.RefuseBranch(name) is { } reason)
+            Reject($"--branch: “{name}” {reason}.");
+        else
+            return name;
         return now;
     }
 
@@ -684,9 +704,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         }
         else if (writing)
         {
-            // No answer above names a command of the options: a first setup says it under them.
+            // No answer above names a command or the branch of the options: a first setup says them under them.
             coming.Add(new SetupNote(SetupTone.Plain, $"The answers above will be written to {store.DisplayPath}."));
-            coming.AddRange(CommandChanges().Select(change => new SetupNote(SetupTone.Change, $"{change.Label}: {change.Value}")));
+            coming.AddRange(UnaskedChanges().Select(change => new SetupNote(SetupTone.Change, $"{change.Label}: {change.Value}")));
         }
 
         if (made is not null)
@@ -760,16 +780,21 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         return
         [
             .. settings.Where(setting => setting.Before != setting.After).Select(setting => $"{setting.Name}: {setting.Before} → {setting.After}"),
-            .. CommandChanges().Select(change => $"{change.Label}: {change.Value}"),
+            .. UnaskedChanges().Select(change => $"{change.Label}: {change.Value}"),
         ];
     }
 
-    // The commands around a task that differ from those of the settings, each as `before → after`.
-    List<SetupAnswer> CommandChanges()
+    // The commands around a task and the branch that differ from those of the settings, each as `before → after`.
+    List<SetupAnswer> UnaskedChanges()
     {
         var before = current?.Commands ?? TaskCommands.None;
-        (string Name, string? Before, string? After)[] around = [(BeforeLabel, before.Before, commands.Before), (AfterLabel, before.After, commands.After)];
-        return [.. around.Where(command => command.Before != command.After).Select(command => new SetupAnswer(command.Name, $"{command.Before ?? "none"} → {command.After ?? "none"}"))];
+        (string Name, string? Before, string? After)[] unasked =
+        [
+            (BeforeLabel, before.Before, commands.Before),
+            (AfterLabel, before.After, commands.After),
+            (BranchLabel, current?.Branch, branch),
+        ];
+        return [.. unasked.Where(setting => setting.Before != setting.After).Select(setting => new SetupAnswer(setting.Name, $"{setting.Before ?? "none"} → {setting.After ?? "none"}"))];
     }
 
     // A board as people know it: by its title when it is known, with its address.
@@ -785,8 +810,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     {
         Skill = skill is { Length: > 0 } ? skill : null,
 
-        // The commands around a task are not asked for: they are those of the file, but for what the options say.
+        // The commands around a task and the branch are not asked for: they are those of the file, but for what the
+        // options say.
         Commands = commands,
+        Branch = branch,
     };
 
     void Show(int step, IReadOnlyList<SetupNote>? more = null, bool chosen = false) =>

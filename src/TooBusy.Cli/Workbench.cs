@@ -106,7 +106,7 @@ public sealed record Workbench(
     // the one: the record of that task would keep the run from any other.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null)
     {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands };
+        var plan = new RunPlan(milestone, QueueRules.Of(settings), model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch };
         if (Demo)
             return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules, killed: only is null or ImitatedTasks.Killed), remembered);
         if (Repository is null)

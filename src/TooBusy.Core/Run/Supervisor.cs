@@ -66,6 +66,9 @@ public sealed class Supervisor(
     // What the pause of a task or a kill said last: it is why the run ended.
     string? left;
 
+    // Whether the run said that the branch of the tasks has no upstream: it says so once.
+    bool unfollowed;
+
     public void Send(RunCommand command) => commands.Enqueue(command);
 
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
@@ -144,6 +147,11 @@ public sealed class Supervisor(
             var before = state.Load();
             if (await workspace.ReadAsync(kill) is not { } tree)
                 return Stop("the working tree cannot be read");
+
+            // The tasks are done on the branch of the project, and what is checked out is the owner's: the run does
+            // not change it.
+            if (plan.Branch is { } branch && tree.Branch != branch)
+                return Stop($"the working copy is on {tree.Branch ?? "no branch"}, and the tasks are done on {branch}");
             if (tree.Changes > 0 && (before is null || before.State == RecordState.WrappedUp))
                 return Stop("the working tree is not clean: commit or stash the changes first");
 
@@ -350,6 +358,43 @@ public sealed class Supervisor(
         return $"{name} {how}";
     }
 
+    // Brings the branch of the tasks up to date with its upstream, before a task is taken anew and before the
+    // command before it: null when it is up to date, and in a project that names no branch; otherwise what went
+    // wrong. The working copy is on that branch: it was checked with the working tree.
+    async Task<string?> BringUpAsync(QueueTask task, DateTimeOffset since, int queued, CancellationToken kill)
+    {
+        if (plan.Branch is not { } branch)
+            return null;
+
+        Show(new RunStatus(RunPhase.Preparing, $"Bringing {branch} up to date…") { Task = task, Since = since, Queued = queued, Step = "bringing the branch up to date" });
+        var sync = await workspace.SyncAsync(kill);
+        var upstream = sync.Upstream ?? "its upstream";
+        switch (sync.Status)
+        {
+            case SyncStatus.Level:
+                break;
+            case SyncStatus.Moved:
+                Say(RunMark.Note, $"{branch} is moved forward by {Spoken.Commits(sync.Behind)} to {upstream}");
+                break;
+            case SyncStatus.NoUpstream:
+                if (!unfollowed)
+                    Say(RunMark.Note, $"{branch} has no upstream, so there is nothing to bring it up to date with");
+                unfollowed = true;
+                break;
+            case SyncStatus.Ahead:
+                return $"{branch} has {Spoken.Commits(sync.Ahead)} that {upstream} lacks: push {(sync.Ahead == 1 ? "it" : "them")} first, or take {(sync.Ahead == 1 ? "it" : "them")} back";
+            case SyncStatus.Parted:
+                return $"{branch} and {upstream} have parted: {branch} has {Spoken.Commits(sync.Ahead)} that {upstream} lacks, and lacks {Spoken.Commits(sync.Behind)} of it: rebase or merge it first";
+            case SyncStatus.Unreachable:
+                return $"{upstream} cannot be fetched: {sync.Said}";
+            default:
+                return $"{branch} cannot be brought up to date with {upstream}: {sync.Said}";
+        }
+
+        Show(new RunStatus(RunPhase.Preparing, $"Starting #{task.Number}…") { Task = task, Since = since, Queued = queued });
+        return null;
+    }
+
     // What a command of the project is told of the task, in its environment.
     static Dictionary<string, string> Told(QueueTask task) => new()
     {
@@ -416,7 +461,11 @@ public sealed class Supervisor(
         if (session is null)
         {
             // A record whose session and conversation are gone gives a new session, which is told what it finds.
+            // A task that is taken anew starts from what the remote has; one of a record may start over the changes
+            // of its session, and nothing is moved under them.
             var gone = before is not null;
+            if (!gone && await BringUpAsync(task, since, queued, kill) is { } behind)
+                return Stop($"{behind} · #{number} is not taken");
             if (await CommandAsync(after: false, task, since, queued, policy.CommandTime, kill) is { } unready)
                 return Stop($"{unready} · #{number} is not taken");
 

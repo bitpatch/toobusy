@@ -210,6 +210,60 @@ public class SettingsValidatorTests
         Assert.Equal(new TaskCommands(null, "make stop && echo \"stopped\""), one.Settings!.Commands);
     }
 
+    [Fact]
+    public void TheBranchOfTheTasksIsOptional()
+    {
+        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Branch);
+
+        var named = SettingsValidator.Validate(Document(("workspace", ""), (SettingsKeys.WorkspaceBranch, "release/2.0")));
+
+        Assert.Empty(named.Errors);
+        Assert.Equal("release/2.0", named.Settings!.Branch);
+    }
+
+    // Each refused by `git check-ref-format --branch` as well.
+    [Theory]
+    [InlineData("")]
+    [InlineData("my branch")]
+    [InlineData("-develop")]
+    [InlineData("/develop")]
+    [InlineData("develop/")]
+    [InlineData("develop.")]
+    [InlineData(".develop")]
+    [InlineData("feature/.hidden")]
+    [InlineData("a..b")]
+    [InlineData("a//b")]
+    [InlineData("develop.lock")]
+    [InlineData("a.lock/b")]
+    [InlineData("a@{1}")]
+    [InlineData("@")]
+    [InlineData("HEAD")]
+    [InlineData("a~1")]
+    [InlineData("a^")]
+    [InlineData("a:b")]
+    [InlineData("a?")]
+    [InlineData("a*")]
+    [InlineData("a[b")]
+    [InlineData("a\\b")]
+    [InlineData("a\tb")]
+    public void ANameThatGitDoesNotTakeForABranchIsRefused(string branch)
+    {
+        var error = OnlyError(Document(("workspace", ""), (SettingsKeys.WorkspaceBranch, branch)));
+
+        Assert.Equal(
+            new SettingsError(SettingsKeys.WorkspaceBranch, LineOf(SettingsKeys.WorkspaceBranch), "must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end"),
+            error);
+    }
+
+    [Theory]
+    [InlineData("develop")]
+    [InlineData("main")]
+    [InlineData("feature/export-2.0")]
+    [InlineData("release_1.x")]
+    [InlineData("@home")]
+    [InlineData("ветка")]
+    public void ANameThatGitTakesIsABranch(string branch) => Assert.Null(SettingsValidator.RefuseBranch(branch));
+
     [Theory]
     [InlineData(SettingsKeys.TaskBefore, "")]
     [InlineData(SettingsKeys.TaskAfter, "  ")]
@@ -409,7 +463,7 @@ public class SettingsValidatorTests
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter, "workspace", SettingsKeys.WorkspaceBranch];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

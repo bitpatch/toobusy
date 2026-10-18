@@ -299,6 +299,46 @@ public class SettingsTomlTests
         Assert.Equal(new TaskCommands("scripts/dev.sh ports free", null), SettingsToml.Read(rewritten).Settings!.Commands);
     }
 
+    const string WorkspaceComment = "# The branch the tasks are done on: before a task a run checks that the working copy is on it,\n# and brings it up to date with its upstream.\n";
+
+    [Fact]
+    public void TheBranchIsReadFromItsSectionAndARewriteKeepsIt()
+    {
+        var existing = Example + "\n[workspace]\nbranch = 'develop'   # where the work is done\n";
+        var read = SettingsToml.Read(existing);
+
+        Assert.Empty(read.Errors);
+        Assert.Equal("develop", read.Settings!.Branch);
+        Assert.Null(SettingsToml.Read(Example).Settings!.Branch);
+        Assert.StartsWith(existing, SettingsToml.Write(read.Settings with { Skill = "task-auto" }, existing), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANewFileWithABranchHasItsSectionLastAndARewriteWithoutOneTakesItsLineAway()
+    {
+        var settings = Settings with { Commands = new TaskCommands("make free", null), Branch = "develop" };
+
+        var text = SettingsToml.Write(settings);
+
+        Assert.EndsWith("\n" + TaskComment + "[task]\nbefore = \"make free\"\n\n" + WorkspaceComment + "[workspace]\nbranch = \"develop\"\n", text, StringComparison.Ordinal);
+        Assert.Equal("develop", SettingsToml.Read(text).Settings!.Branch);
+        Assert.DoesNotContain("[workspace]", SettingsToml.Write(Settings), StringComparison.Ordinal);
+
+        var without = SettingsToml.Write(settings with { Branch = null }, text);
+
+        Assert.EndsWith(WorkspaceComment + "[workspace]\n", without, StringComparison.Ordinal);
+        Assert.Null(SettingsToml.Read(without).Settings!.Branch);
+    }
+
+    [Fact]
+    public void ANameThatIsNotABranchIsRefusedWithItsLine()
+    {
+        var result = SettingsToml.Read(Example + "\n[workspace]\nbranch = \"my branch\"\n");
+
+        Assert.Null(result.Settings);
+        Assert.Equal(("workspace.branch", 17), (Assert.Single(result.Errors).Key, result.Errors[0].Line));
+    }
+
     [Fact]
     public void TheSkillIsReadFromItsSection()
     {

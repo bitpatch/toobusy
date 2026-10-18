@@ -79,6 +79,8 @@ public static class CliApp
         var noBefore = new Option<bool>("--no-before") { Description = "No command before a task." };
         var after = new Option<string?>("--after") { Description = "The command a run runs after the session of a task, however the task went: a line for the shell.", HelpName = "command" };
         var noAfter = new Option<bool>("--no-after") { Description = "No command after a task." };
+        var branch = new Option<string?>("--branch") { Description = "The branch the tasks are done on: before a task a run checks that the working copy is on it and brings it up to date with its upstream.", HelpName = "name" };
+        var noBranch = new Option<bool>("--no-branch") { Description = "No branch: a run does the tasks on whatever is checked out, as it stands." };
         var yes = new Option<bool>("--yes", "-y") { Description = "Ask nothing: take what the options say and, for the rest, what the setup proposes, and save." };
         var assist = new Option<string?>("--assist")
         {
@@ -88,7 +90,7 @@ public static class CliApp
         };
         var command = new Command("init", $"Sets the project up: asks what it needs and writes the settings. {ForAnAssistant}")
         {
-            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes, assist,
+            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, yes, assist,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -96,7 +98,7 @@ public static class CliApp
             // nothing of it: it changes nothing as it is.
             if (result.GetResult(assist) is { Implicit: false })
             {
-                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, yes];
+                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, yes];
                 if (others.Any(other => result.GetResult(other) is { Implicit: false }))
                 {
                     Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
@@ -119,6 +121,7 @@ public static class CliApp
                 (result.GetValue(skill) is not null && result.GetValue(noSkill), "toobusy: give `--skill` or `--no-skill`, not both"),
                 (result.GetValue(before) is not null && result.GetValue(noBefore), "toobusy: give `--before` or `--no-before`, not both"),
                 (result.GetValue(after) is not null && result.GetValue(noAfter), "toobusy: give `--after` or `--no-after`, not both"),
+                (result.GetValue(branch) is not null && result.GetValue(noBranch), "toobusy: give `--branch` or `--no-branch`, not both"),
             ];
             if (clashes.FirstOrDefault(clash => clash.Wrong) is { Wrong: true } clash)
             {
@@ -142,6 +145,7 @@ public static class CliApp
                 TodoStatus = result.GetValue(todoStatus),
                 InProgressStatus = result.GetValue(inProgressStatus),
                 DoneStatus = result.GetValue(doneStatus),
+                Branch = result.GetValue(noBranch) ? new BranchProposal(null) : result.GetValue(branch) is { } name ? new BranchProposal(name) : null,
             };
 
             if (FindProject(context) is not { } root)
@@ -633,7 +637,7 @@ public static class CliApp
         command.SetAction(_ =>
         {
             var settings = ProjectLocator.FindRoot(context.Folder) is { } root ? new SettingsFile(root).Load()?.Settings : null;
-            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill, settings?.Commands));
+            context.Output.Write(About.Text(settings is null ? null : QueueRules.Of(settings), RunPolicy.Default, settings?.Skill, settings?.Commands, settings?.Branch));
             return ExitCode.Done;
         });
         return command;
@@ -690,9 +694,10 @@ public static class CliApp
         foreach (var answer in setup.Answers)
             context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
 
-        // No question asks for the commands around a task: what the options made of them is said after the answers.
-        foreach (var command in setup.Commands)
-            context.Output.WriteLine($"{palette.Success("✔")} {command.Label,-16} {command.Value}");
+        // No question asks for the commands around a task and the branch: what the options made of them is said after
+        // the answers.
+        foreach (var setting in setup.Unasked)
+            context.Output.WriteLine($"{palette.Success("✔")} {setting.Label,-16} {setting.Value}");
 
         // A setup that asked nothing showed nobody what it was about to do on GitHub: it says what it did. A demo
         // did none of it.

@@ -975,12 +975,12 @@ public class ProjectSetupTests
     {
         var without = await RunAsync();
         Assert.Equal(TaskCommands.None, store.Saved!.Commands);
-        Assert.Empty(without.Commands);
+        Assert.Empty(without.Unasked);
 
         var result = await RunAsync(new SetupProposals(Before: new("scripts/dev.sh ports free"), After: new(" scripts/dev.sh server stop ")));
 
         Assert.Equal(new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop"), store.Saved!.Commands);
-        Assert.Equal([new SetupAnswer("Before a task", "none → scripts/dev.sh ports free"), new SetupAnswer("After a task", "none → scripts/dev.sh server stop")], result.Commands);
+        Assert.Equal([new SetupAnswer("Before a task", "none → scripts/dev.sh ports free"), new SetupAnswer("After a task", "none → scripts/dev.sh server stop")], result.Unasked);
 
         // No question asks for them: they stand on the last page, under what is said of the answers.
         Assert.DoesNotContain(dialog.Asked, label => label.Contains("task", StringComparison.Ordinal));
@@ -1008,7 +1008,7 @@ public class ProjectSetupTests
         Assert.Equal(
             [new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"), new SetupNote(SetupTone.Change, "Before a task: none → make free")],
             dialog.Shown.Notes);
-        Assert.Equal([new SetupAnswer("Before a task", "none → make free")], set.Commands);
+        Assert.Equal([new SetupAnswer("Before a task", "none → make free")], set.Unasked);
 
         // Changed and taken away, each as it was and as it will be; the one no option speaks of is kept.
         store.Current = Existing with { Commands = new("make free", "make stop") };
@@ -1018,12 +1018,12 @@ public class ProjectSetupTests
         Assert.Equal(
             [new SetupNote(SetupTone.Change, "Before a task: make free → make ports"), new SetupNote(SetupTone.Change, "After a task: make stop → none")],
             dialog.Shown.Notes.Skip(1));
-        Assert.Equal([new SetupAnswer("Before a task", "make free → make ports"), new SetupAnswer("After a task", "make stop → none")], changed.Commands);
+        Assert.Equal([new SetupAnswer("Before a task", "make free → make ports"), new SetupAnswer("After a task", "make stop → none")], changed.Unasked);
 
         var kept = await RunAsync(new SetupProposals(After: new(null)));
 
         Assert.Equal(new TaskCommands("make free", null), store.Saved!.Commands);
-        Assert.Equal([new SetupAnswer("After a task", "make stop → none")], kept.Commands);
+        Assert.Equal([new SetupAnswer("After a task", "make stop → none")], kept.Unasked);
     }
 
     [Fact]
@@ -1035,7 +1035,7 @@ public class ProjectSetupTests
         var result = await RunUnaskedAsync(new SetupProposals(Before: new("make free"), After: new(null)));
 
         Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
-        Assert.Empty(result.Commands);
+        Assert.Empty(result.Unasked);
         Assert.Null(store.Saved);
     }
 
@@ -1048,7 +1048,7 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.Failed, before.Outcome);
         Assert.Equal("--before: A command must not be empty: give --no-before to run none.", before.Failure);
-        Assert.Empty(before.Commands);
+        Assert.Empty(before.Unasked);
 
         var after = await RunUnaskedAsync(new SetupProposals(After: new(empty)));
 
@@ -1067,6 +1067,71 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
         Assert.Contains(new SetupNote(SetupTone.Warning, "--before: A command must not be empty: give --no-before to run none."), result.Notes);
+    }
+
+    [Fact]
+    public async Task TheBranchIsNotAskedForAndIsKept()
+    {
+        store.Current = Existing with { Branch = "develop" };
+        dialog.Answer("Skill", "task-auto");
+        machine.Skills = ["task-auto"];
+
+        var result = await RunAsync();
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal("develop", store.Saved!.Branch);
+        Assert.Empty(result.Unasked);
+        Assert.DoesNotContain(dialog.Asked, label => label.Contains("ranch", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheOptionsNameTheBranchChangeItAndTakeItAway()
+    {
+        var first = await RunAsync(new SetupProposals { Branch = new(" develop ") });
+
+        Assert.Equal("develop", store.Saved!.Branch);
+        Assert.Equal([new SetupAnswer("Branch", "none → develop")], first.Unasked);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Branch: none → develop"), dialog.Shown.Notes);
+
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Branch = "develop" };
+        var changed = await RunAsync(new SetupProposals(Before: new("make free")) { Branch = new("main") });
+
+        Assert.Equal("main", store.Saved!.Branch);
+        Assert.Equal([new SetupAnswer("Before a task", "none → make free"), new SetupAnswer("Branch", "develop → main")], changed.Unasked);
+        Assert.Equal(
+            [new SetupNote(SetupTone.Change, "Before a task: none → make free"), new SetupNote(SetupTone.Change, "Branch: develop → main")],
+            dialog.Shown.Notes.Skip(1));
+
+        var gone = await RunUnaskedAsync(new SetupProposals { Branch = new(null) });
+
+        Assert.Equal(SetupOutcome.Written, gone.Outcome);
+        Assert.Null(store.Saved!.Branch);
+        Assert.Equal([new SetupAnswer("Branch", "develop → none")], gone.Unasked);
+
+        var same = await RunUnaskedAsync(new SetupProposals { Branch = new("develop") });
+
+        Assert.Equal(SetupOutcome.NothingToChange, same.Outcome);
+        Assert.Empty(same.Unasked);
+    }
+
+    [Theory]
+    [InlineData("  ", "--branch: A branch must not be empty: give --no-branch to name none.")]
+    [InlineData("my branch", "--branch: “my branch” must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end.")]
+    public async Task ABranchThatGitDoesNotTakeFailsWithoutQuestionsAndIsSaidOnTheScreen(string name, string said)
+    {
+        var unasked = await RunUnaskedAsync(new SetupProposals { Branch = new(name) });
+
+        Assert.Equal(SetupOutcome.Failed, unasked.Outcome);
+        Assert.Equal(said, unasked.Failure);
+        Assert.Null(store.Saved);
+
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        store.Current = Existing with { Branch = "develop" };
+        var asked = await RunAsync(new SetupProposals { Branch = new(name) });
+
+        Assert.Equal(SetupOutcome.NothingToChange, asked.Outcome);
+        Assert.Contains(new SetupNote(SetupTone.Warning, said), asked.Notes);
     }
 
     [Fact]
@@ -1716,6 +1781,7 @@ public class ProjectSetupTests
             $"interrupted = {settings.Queue.Labels.Interrupted}",
             $"skill = {settings.Skill}",
             $"before = {settings.Commands.Before}",
-            $"after = {settings.Commands.After}") + "\n";
+            $"after = {settings.Commands.After}",
+            $"branch = {settings.Branch}") + "\n";
     }
 }

@@ -161,7 +161,29 @@ public class AboutTests
         Assert.Contains("When it fails, the task stays as it ended, and the run stops.", text, StringComparison.Ordinal);
         Assert.Contains("A command is given up after 5 min, and counts as failed then. After a kill of the run, `after` has 20 s.", text, StringComparison.Ordinal);
         Assert.Contains("What these commands do, the instructions and the skill of a project do not tell a session to do as well", text, StringComparison.Ordinal);
-        Assert.Contains("but for what the commands of the settings do, as told under “The commands of the project around a task”;", text, StringComparison.Ordinal);
+        Assert.Contains("but for what the run does itself, as told under “The branch of the tasks” and “The commands of the project around a task”;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheBranchOfTheTasksIsToldWithHowASessionBringsItUpToDateBeforeItsPush()
+    {
+        var text = About.Text(Rules, RunPolicy.Default, branch: "develop");
+
+        Assert.Contains("## The branch of the tasks\n\nA project may name the branch its tasks are done on, `workspace.branch` of its settings. This project names `develop`.", text, StringComparison.Ordinal);
+        Assert.Contains("On another one the run stops and says so: what is checked out is the owner's, and the run does not change it.", text, StringComparison.Ordinal);
+        Assert.Contains("Before a task is taken, and before the command before it, the branch is brought up to date with its upstream", text, StringComparison.Ordinal);
+        Assert.Contains("A task that a run goes on with, whose session may have left its changes in the working tree, is checked for the branch as any other, and nothing is moved under it.", text, StringComparison.Ordinal);
+        Assert.Contains("its first message tells it to do so as the instructions of the project say, by a rebase or by a merge, and to push again.", text, StringComparison.Ordinal);
+        Assert.Contains("- how the branch is brought up to date when it has moved on the remote by the time a session pushes: by a rebase or by a merge", text, StringComparison.Ordinal);
+        Assert.Contains("The branch may have moved on the remote by the time you push: then bring it up to date as the instructions of the project say, and push again.", text, StringComparison.Ordinal);
+        Assert.True(text.IndexOf("## The branch of the tasks", StringComparison.Ordinal) < text.IndexOf("## The commands of the project around a task", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AProjectThatNamesNoBranchOrNoSettingsIsToldSo()
+    {
+        Assert.Contains("This project names none: its tasks are done on whatever is checked out, as it stands. `toobusy init --branch <name>` names one.", About.Text(Rules, RunPolicy.Default), StringComparison.Ordinal);
+        Assert.Contains("`workspace.branch` of its settings. No settings are read here, so it is not said whether this project names one.", About.Text(null, RunPolicy.Default, branch: "develop"), StringComparison.Ordinal);
     }
 
     [Fact]

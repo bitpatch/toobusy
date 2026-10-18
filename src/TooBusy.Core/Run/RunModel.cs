@@ -10,7 +10,8 @@ namespace TooBusy.Core.Run;
 // a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
 // with, null where the project names none. Only is the number of the one task the run does, and Most how many tasks
 // it takes at most; null is a run of the whole queue. A run is given one of the two at most. Commands are the
-// commands of the project the run runs around a task.
+// commands of the project the run runs around a task. Branch is the branch the tasks are done on, null where the
+// project names none: the working copy is checked to be on it and brought up to date with its upstream.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
@@ -22,6 +23,8 @@ public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Mo
     public int? Most { get; init; }
 
     public TaskCommands Commands { get; init; } = TaskCommands.None;
+
+    public string? Branch { get; init; }
 }
 
 // What a session is told of the tracker to make a new task there: the label of the owner, the labels a task needs
@@ -235,6 +238,8 @@ public static class Spoken
     }
 
     public static string Tasks(int count) => count == 1 ? "1 task" : string.Create(CultureInfo.InvariantCulture, $"{count} tasks");
+
+    public static string Commits(int count) => count == 1 ? "1 commit" : string.Create(CultureInfo.InvariantCulture, $"{count} commits");
 
     // A task as it is named wherever it is shown: its number, which finds it in the tracker, and its title.
     public static string Task(QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"#{task.Number} {task.Title}");

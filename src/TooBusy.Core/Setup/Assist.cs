@@ -61,7 +61,7 @@ public static class Assist
         "The owner's own choices",
         "The instructions of the project",
         "The skill a session starts with",
-        "The commands around a task",
+        "The branch and the commands around a task",
         "What a session may do",
         "The last check",
     ];
@@ -98,7 +98,7 @@ public static class Assist
 
             A setup is made of three things:
 
-            - the settings of the project, `.toobusy/settings.toml`: which tasks a run takes, the board, the skill a session starts with and the commands around a task. They are committed, and everyone who clones the project gets the same;
+            - the settings of the project, `.toobusy/settings.toml`: which tasks a run takes, the board, the skill a session starts with, the branch of the tasks and the commands around a task. They are committed, and everyone who clones the project gets the same;
             - the choices of the owner: the milestone to work on, the model and the effort. They are kept on the owner's machine and are not committed;
             - what is the project's own: its instructions, its skill and its commands around a task.
 
@@ -126,7 +126,7 @@ public static class Assist
             $"milestone: {MilestoneInShort(ground.Milestone)}; model: {ModelInShort(ground.Model)}; effort: {ground.Effort ?? "not chosen"}",
             "the project's own; toobusy does not read them",
             SkillInShort(ground),
-            Stated(ground) is { } kept ? $"before: {Quoted(kept.Commands.Before)}; after: {Quoted(kept.Commands.After)}" : Unstated(ground),
+            Stated(ground) is { } kept ? $"branch: {Quoted(kept.Branch)}; before: {Quoted(kept.Commands.Before)}; after: {Quoted(kept.Commands.After)}" : Unstated(ground),
             "the settings of Claude Code in the project; toobusy does not read them",
             "`toobusy doctor` passes every check",
         ];
@@ -250,7 +250,7 @@ public static class Assist
         if (ground.Settings is null)
             notes.Append(" `--no-board` and `--no-skill` stand there only because nothing is set yet: steps 3 and 6 set them.");
         else
-            notes.Append(" What the command does not name stays as it is: the board, the skill and the commands around a task.");
+            notes.Append(" What the command does not name stays as it is: the board, the skill, the branch and the commands around a task.");
         text.Append(notes).Append("\n\n");
         Part(text, "Check", $"the command ends with `The settings are written to {ground.Path}.`, or with `Nothing to change`, and `toobusy doctor` passes `settings` and `labels`.");
     }
@@ -367,6 +367,7 @@ public static class Assist
 
             - that an assistant that works with the owner looks at `toobusy status` before it commits: a run works in the working copy itself, and a commit made beside it lands in the middle of its task. `toobusy status` exits with 3 while a run goes on. The rule is not for a session that toobusy started;
             - where they tell an assistant to move its task, to assign it, to label it, to comment on it or to close it: that in a session of a run the task is kept by toobusy, and the session does none of that;
+            - how a session brings its branch up to date when the branch has moved on the remote by the time it pushes: by a rebase or by a merge. Its first message tells it to do so as the instructions say, and to push again;
             - what a session without the owner does in another way than one with them. The skill of step 6 is the place for that, when the project has one.
             """);
         Part(text, "Look at", "`CLAUDE.md`, `AGENTS.md`, the skills and the commands in `.claude/`, `CONTRIBUTING.md` and whatever else tells an assistant how the work of this project is done.");
@@ -410,35 +411,39 @@ public static class Assist
         var settings = Stated(ground);
         Part(text, "As things are", settings is null
             ? $"{Unstated(ground)}."
-            : $"before a task: {Quoted(settings.Commands.Before)}; after a task: {Quoted(settings.Commands.After)}.");
+            : $"the branch of the tasks: {Quoted(settings.Branch)}; before a task: {Quoted(settings.Commands.Before)}; after a task: {Quoted(settings.Commands.After)}.");
         Part(text, "Decide", $"""
-            whether the run itself runs a command of the project before every task and one after it: what is to be so around every task, whatever its session does or forgets. Before a task, such as that the working copy is on its branch and up to date with the remote, and that the ports of the development server are free; after it, such as that the services a session brought up are stopped. Most projects need none.
+            what the run itself does around every task, whatever its session does or forgets.
+
+            **The branch.** The branch the tasks are done on. With one named, a run checks before every task that the working copy is on it, and stops on another one: it does not change what is checked out. And before a task it brings the branch up to date with its upstream: it fetches what the remote has and moves the branch forward to it, so that the task starts from there. A branch with commits its upstream lacks, one that has parted from it, and a remote that does not answer stop the run. Without a branch, a run does the tasks on whatever is checked out, as it stands. A project that does its work on one branch names it.
+
+            **The commands.** Whether the run runs a command of the project before every task and one after it: what is to be so around every task. Before a task, such as that the ports of the development server are free; after it, such as that the services a session brought up are stopped. The branch and its sync with the remote are not for a command: the branch does them. Most projects need no command.
 
             The rules of a command:
 
-            - it is one line for the shell, `sh -c` and on Windows `cmd /c`, run at the root of the working copy;
+            - it is one line for the shell, `sh -c` and on Windows `cmd /c`, run at the root of the working copy, after the branch is brought up to date;
             - it exits with 0 when all is well: a `before` that fails stops the run before the task is touched, and an `after` that fails stops the run after it;
             - it is given up after {Spoken.Time(RunPolicy.Default.CommandTime)};
             - it learns the task from its environment: `TOOBUSY_TASK` is the number, `TOOBUSY_TASK_TITLE` the title and `TOOBUSY_TASK_URL` the address;
             - it gets no input and nobody answers it;
             - it leaves the working tree clean: a run starts no task over files that differ from what is committed.
 
-            `toobusy about` tells the rest under “The commands of the project around a task”. What a command does, the instructions and the skill do not tell a session to do as well.
+            `toobusy about` tells the rest under “The branch of the tasks” and “The commands of the project around a task”. What the run does, the instructions and the skill do not tell a session to do as well.
             """);
-        Part(text, "Look at", "the scripts of the project, its `Makefile` or `package.json`, and what its instructions tell an assistant to do before it starts a task and after it has finished one.");
-        Part(text, "Ask the owner", "before a command is set: it runs on their machine around every task, with nobody watching.");
+        Part(text, "Look at", "the branch the instructions of the project do the work on, and the default branch of the repository, `gh repo view --json defaultBranchRef`; what is checked out and what it follows, `git status --short --branch`; the scripts of the project, its `Makefile` or `package.json`, and what its instructions tell an assistant to do before it starts a task and after it has finished one.");
+        Part(text, "Ask the owner", "which branch the tasks are done on, and before a command is set: it runs on their machine around every task, with nobody watching.");
 
         var rest = ground.Settings is null ? " --no-board --no-skill" : "";
         Set(text,
         [
-            $"toobusy init --yes{rest} --before \"<command>\" --after \"<command>\"",
-            $"toobusy init --yes{rest} --no-before --no-after",
+            $"toobusy init --yes{rest} --branch <name> --before \"<command>\" --after \"<command>\"",
+            $"toobusy init --yes{rest} --no-branch --no-before --no-after",
         ]);
-        text.Append("Each of the four options stands alone too: `--before` and `--after` set a command, `--no-before` and `--no-after` take one away, and a command no option names stays as it is.");
+        text.Append("Each of the six options stands alone too: `--branch` names the branch and `--no-branch` takes it away, `--before` and `--after` set a command, `--no-before` and `--no-after` take one away, and what no option names stays as it is.");
         text.Append(ground.Settings is null
             ? " `--no-board` and `--no-skill` stand there only because nothing is set yet: steps 3 and 6 set them. The labels are then those a first setup proposes, which step 2 decides.\n\n"
             : "\n\n");
-        Part(text, "Check", "run each command by hand once, at the root of the working copy and with a task in its environment, as `TOOBUSY_TASK=1 sh -c \"<command>\"; echo $?`: it prints 0, and `git status --short` prints nothing after it.");
+        Part(text, "Check", "`git status --short --branch` shows the branch, and after it the upstream it follows, as `## develop...origin/develop`: a branch without one is not brought up to date. Run each command by hand once, at the root of the working copy and with a task in its environment, as `TOOBUSY_TASK=1 sh -c \"<command>\"; echo $?`: it prints 0, and `git status --short` prints nothing after it.");
     }
 
     static void Permissions(StringBuilder text)
@@ -461,7 +466,7 @@ public static class Assist
         var skill = Stated(ground)?.Skill is { } name && ground.Skill is { Found: not null } look ? $"the skill `{name}`, {look.Place}" : "the skill, when the project has one";
         Part(text, "As things are", "`toobusy doctor` tells: it checks everything a run needs, and changes nothing.");
         Part(text, "Look at", $"what `toobusy doctor` prints. A check that fails goes back to its step: the tools, the logins and the repository to `{Command(1)}`, the settings and the labels to `{Command(2)}`, the board and its statuses to `{Command(3)}`, the skill to `{Command(6)}`.");
-        Part(text, "Ask the owner", "nothing but the commit of the setup, where the instructions of the project say that a commit is asked for. When the step is done, tell them in a few lines what was set: which tasks a run takes, the board, their own choices, the skill, the commands around a task and what was changed in the instructions; and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try. A run is theirs to start.");
+        Part(text, "Ask the owner", "nothing but the commit of the setup, where the instructions of the project say that a commit is asked for. When the step is done, tell them in a few lines what was set: which tasks a run takes, the board, their own choices, the skill, the branch, the commands around a task and what was changed in the instructions; and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try. A run is theirs to start.");
         Part(text, "Set it", $"""
             no command of toobusy: what is left is the commit of the setup, made as the instructions of the project say a commit is made. What is to be committed:
 

@@ -314,7 +314,7 @@ sealed class FakeSession(int task) : IAssistantSession
 }
 
 // The working copy as the test says it is: the states that are waiting are given one after another, and after them
-// the one that stands.
+// the one that stands. A sync of its branch comes out as the test says, and is counted.
 sealed class FakeWorkspace : IWorkspace
 {
     public WorkspaceState? State { get; set; } = new(0, 0);
@@ -323,10 +323,24 @@ sealed class FakeWorkspace : IWorkspace
 
     public int Read { get; private set; }
 
+    public BranchSync Sync { get; set; } = new(SyncStatus.Level, "origin/develop");
+
+    public int Synced { get; private set; }
+
+    // What happens when the branch is brought up to date, for a test that looks at what was done before it.
+    public Action? Syncing { get; set; }
+
     public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken)
     {
         Read++;
         return Task.FromResult(Next.Count > 0 ? Next.Dequeue() : State);
+    }
+
+    public Task<BranchSync> SyncAsync(CancellationToken cancellationToken)
+    {
+        Synced++;
+        Syncing?.Invoke();
+        return Task.FromResult(Sync);
     }
 }
 

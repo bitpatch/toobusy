@@ -2108,7 +2108,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("init", "--help");
 
         Assert.Equal(0, exit);
-        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "-y, --yes"])
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "--branch <name>", "--no-branch", "-y, --yes"])
             Assert.Contains(option, output, StringComparison.Ordinal);
     }
 
@@ -2221,6 +2221,43 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("before", File.ReadAllText(file).Split("[task]")[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesTheOptionsOfTheBranchNameItAndTakeItAway()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill", "--branch", "develop"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Assistant        Claude Code" + Environment.NewLine + "✔ Branch           none → develop" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.EndsWith(
+            "# The branch the tasks are done on: before a task a run checks that the working copy is on it,\n"
+            + "# and brings it up to date with its upstream.\n[workspace]\nbranch = \"develop\"\n",
+            File.ReadAllText(file),
+            StringComparison.Ordinal);
+
+        (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-branch"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ Branch           develop → none" + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.DoesNotContain("branch =", File.ReadAllText(file), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithYesANameThatGitDoesNotTakeForABranchFailsAndNothingIsWritten()
+    {
+        GitRepository();
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--branch", "my branch"]);
+
+        Assert.Equal(1, exit);
+        Assert.EndsWith("✘ --branch: “my branch” must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
     }
 
     [Theory]
@@ -2583,6 +2620,7 @@ public sealed class CliAppTests : IDisposable
     [InlineData("toobusy: give `--skill` or `--no-skill`, not both", "--skill", "task-auto", "--no-skill")]
     [InlineData("toobusy: give `--before` or `--no-before`, not both", "--before", "make free", "--no-before")]
     [InlineData("toobusy: give `--after` or `--no-after`, not both", "--after", "make stop", "--no-after")]
+    [InlineData("toobusy: give `--branch` or `--no-branch`, not both", "--branch", "develop", "--no-branch")]
     public async Task OptionsThatAnswerTheSameQuestionDifferentlyAreAWrongCommandLine(string message, params string[] options)
     {
         GitRepository();
@@ -3082,7 +3120,7 @@ public sealed class CliAppTests : IDisposable
     public async Task AssistTellsTheStandingOfAProjectThatIsSetUp()
     {
         GitRepository();
-        WriteSettings(SettingsWithABoard + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\n");
+        WriteSettings(SettingsWithABoard + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\n\n[workspace]\nbranch = \"develop\"\n");
         WriteSkill("task-auto");
         await ChooseAllAsync();
         var before = Files();
@@ -3097,7 +3135,7 @@ public sealed class CliAppTests : IDisposable
             4. **The owner's own choices.** Milestone: no milestone; model: the assistant's own; effort: high.
             5. **The instructions of the project.** The project's own; toobusy does not read them.
             6. **The skill a session starts with.** `task-auto`, written.
-            7. **The commands around a task.** Before: `scripts/dev.sh ports free`; after: none.
+            7. **The branch and the commands around a task.** Branch: `develop`; before: `scripts/dev.sh ports free`; after: none.
             """.ReplaceLineEndings("\n"),
             output,
             StringComparison.Ordinal);
@@ -3287,7 +3325,7 @@ public sealed class CliAppTests : IDisposable
         "",
         Settings.Replace("type = \"github\"", "type = \"jira\"", StringComparison.Ordinal),
         Settings,
-        SettingsWithABoard.Replace("take = [\"feature\", \"bug\"]", "take = [\"feature\", \"good first issue\"]", StringComparison.Ordinal) + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n",
+        SettingsWithABoard.Replace("take = [\"feature\", \"bug\"]", "take = [\"feature\", \"good first issue\"]", StringComparison.Ordinal) + SkillOfTheProject + "\n[task]\nbefore = \"scripts/dev.sh ports free\"\nafter = \"scripts/dev.sh server stop\"\n\n[workspace]\nbranch = \"develop\"\n",
     ];
 
     [Theory]
@@ -3312,7 +3350,8 @@ public sealed class CliAppTests : IDisposable
             .ToList();
 
         Assert.True(commands.Count > 25, string.Join('\n', commands));
-        Assert.Contains(commands, command => command.EndsWith(" --before \"<command>\" --after \"<command>\"", StringComparison.Ordinal));
+        Assert.Contains(commands, command => command.EndsWith(" --branch <name> --before \"<command>\" --after \"<command>\"", StringComparison.Ordinal));
+        Assert.Contains(commands, command => command.EndsWith(" --no-branch --no-before --no-after", StringComparison.Ordinal));
         Assert.Contains("toobusy queue --json", commands);
         foreach (var command in commands)
         {

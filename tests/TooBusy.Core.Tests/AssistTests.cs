@@ -21,7 +21,7 @@ public class AssistTests
     static readonly AssistGround Broken = new(
         new SettingsValidation(null, [new SettingsError("tracker.type", 4, "must be `github`"), new SettingsError(null, null, "the file is not TOML")]), File, "acme/rocket");
 
-    static AssistGround Set(string? board = null, string? skill = null, TaskCommands? commands = null, string[]? take = null, string[]? blocking = null) => new(
+    static AssistGround Set(string? board = null, string? skill = null, TaskCommands? commands = null, string[]? take = null, string[]? blocking = null, string? branch = null) => new(
         new SettingsValidation(
             new ProjectSettings(
                 new TrackerSettings("github", board),
@@ -30,6 +30,7 @@ public class AssistTests
             {
                 Skill = skill,
                 Commands = commands ?? TaskCommands.None,
+                Branch = branch,
             },
             []),
         File,
@@ -65,7 +66,7 @@ public class AssistTests
             4. **The owner's own choices.** Milestone: not chosen; model: not chosen; effort: not chosen.
             5. **The instructions of the project.** The project's own; toobusy does not read them.
             6. **The skill a session starts with.** Not set: there are no settings yet.
-            7. **The commands around a task.** Not set: there are no settings yet.
+            7. **The branch and the commands around a task.** Not set: there are no settings yet.
             8. **What a session may do.** The settings of Claude Code in the project; toobusy does not read them.
             9. **The last check.** `toobusy doctor` passes every check.
 
@@ -84,7 +85,7 @@ public class AssistTests
     [Fact]
     public void TheListSaysHowEveryStepStandsInAProjectThatIsSetUp()
     {
-        var ground = Set(Rocket, "task-auto", new TaskCommands("scripts/dev.sh ports free", null)) with
+        var ground = Set(Rocket, "task-auto", new TaskCommands("scripts/dev.sh ports free", null), branch: "develop") with
         {
             Milestone = new MilestoneChoice("v1"),
             Model = ModelChoice.AssistantsOwn,
@@ -101,7 +102,7 @@ public class AssistTests
             4. **The owner's own choices.** Milestone: v1; model: the assistant's own; effort: high.
             5. **The instructions of the project.** The project's own; toobusy does not read them.
             6. **The skill a session starts with.** `task-auto`, written.
-            7. **The commands around a task.** Before: `scripts/dev.sh ports free`; after: none.
+            7. **The branch and the commands around a task.** Branch: `develop`; before: `scripts/dev.sh ports free`; after: none.
             """.ReplaceLineEndings("\n"),
             text,
             StringComparison.Ordinal);
@@ -112,7 +113,7 @@ public class AssistTests
     {
         var bare = Assist.Introduction(Set(take: [], blocking: []) with { Milestone = MilestoneChoice.None, Model = new ModelChoice("opus") });
         Assert.Contains("2. **Which tasks are taken.** Take: any task; blocking: none; owner: `needs-owner`; interrupted: `interrupted`.\n3. **The board.** No board.\n4. **The owner's own choices.** Milestone: no milestone; model: opus; effort: not chosen.", bare, StringComparison.Ordinal);
-        Assert.Contains("6. **The skill a session starts with.** No skill.\n7. **The commands around a task.** Before: none; after: none.", bare, StringComparison.Ordinal);
+        Assert.Contains("6. **The skill a session starts with.** No skill.\n7. **The branch and the commands around a task.** Branch: none; before: none; after: none.", bare, StringComparison.Ordinal);
 
         var unwritten = Assist.Introduction(Set(skill: "task-auto") with { Skill = new SkillLook(false, ".claude/skills/task-auto/SKILL.md") });
         Assert.Contains("6. **The skill a session starts with.** `task-auto`, not written yet.", unwritten, StringComparison.Ordinal);
@@ -214,7 +215,7 @@ public class AssistTests
         Assert.Contains("    toobusy init --yes --take-label \"feature,good first issue\" --blocking-label question --owner-label needs-owner --interrupt-label interrupted\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("--no-board", text, StringComparison.Ordinal);
         Assert.DoesNotContain("--no-skill", text, StringComparison.Ordinal);
-        Assert.Contains("What the command does not name stays as it is: the board, the skill and the commands around a task.", text, StringComparison.Ordinal);
+        Assert.Contains("What the command does not name stays as it is: the board, the skill, the branch and the commands around a task.", text, StringComparison.Ordinal);
 
         var none = Assist.Step(2, Set(take: [], blocking: []) with { Labels = [] });
         Assert.Contains("the labels to take: none, so any task is taken; the blocking labels: none;", none, StringComparison.Ordinal);
@@ -348,6 +349,7 @@ public class AssistTests
         Assert.Contains("Read `toobusy about` first", text, StringComparison.Ordinal);
         Assert.Contains("- that an assistant that works with the owner looks at `toobusy status` before it commits", text, StringComparison.Ordinal);
         Assert.Contains("that in a session of a run the task is kept by toobusy", text, StringComparison.Ordinal);
+        Assert.Contains("- how a session brings its branch up to date when the branch has moved on the remote by the time it pushes: by a rebase or by a merge.", text, StringComparison.Ordinal);
         Assert.Contains("Ask the owner: what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `toobusy init --assist 2`. A single task that waits for the owner gets the `needs-owner` label.", text, StringComparison.Ordinal);
         Assert.Contains("Set it: no command of toobusy sets this step", text, StringComparison.Ordinal);
         Assert.DoesNotContain("toobusy init --yes", text, StringComparison.Ordinal);
@@ -383,10 +385,10 @@ public class AssistTests
     {
         var text = Assist.Step(7, Set(commands: new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop")));
 
-        Assert.Contains("As things are: before a task: `scripts/dev.sh ports free`; after a task: `scripts/dev.sh server stop`.\n", text, StringComparison.Ordinal);
+        Assert.Contains("As things are: the branch of the tasks: none; before a task: `scripts/dev.sh ports free`; after a task: `scripts/dev.sh server stop`.\n", text, StringComparison.Ordinal);
         Assert.Contains(
             """
-            - it is one line for the shell, `sh -c` and on Windows `cmd /c`, run at the root of the working copy;
+            - it is one line for the shell, `sh -c` and on Windows `cmd /c`, run at the root of the working copy, after the branch is brought up to date;
             - it exits with 0 when all is well: a `before` that fails stops the run before the task is touched, and an `after` that fails stops the run after it;
             - it is given up after 10 min;
             - it learns the task from its environment: `TOOBUSY_TASK` is the number, `TOOBUSY_TASK_TITLE` the title and `TOOBUSY_TASK_URL` the address;
@@ -395,11 +397,25 @@ public class AssistTests
             """.ReplaceLineEndings("\n"),
             text,
             StringComparison.Ordinal);
-        Assert.Contains("Set it:\n\n    toobusy init --yes --before \"<command>\" --after \"<command>\"\n    toobusy init --yes --no-before --no-after\n\n", text, StringComparison.Ordinal);
-        Assert.Contains("Check: run each command by hand once", text, StringComparison.Ordinal);
+        Assert.Contains("Set it:\n\n    toobusy init --yes --branch <name> --before \"<command>\" --after \"<command>\"\n    toobusy init --yes --no-branch --no-before --no-after\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("Run each command by hand once", text, StringComparison.Ordinal);
 
-        Assert.Contains("As things are: before a task: none; after a task: none.\n", Assist.Step(7, Set()), StringComparison.Ordinal);
-        Assert.Contains("    toobusy init --yes --no-board --no-skill --before \"<command>\" --after \"<command>\"\n", Assist.Step(7, Unset), StringComparison.Ordinal);
+        Assert.Contains("As things are: the branch of the tasks: none; before a task: none; after a task: none.\n", Assist.Step(7, Set()), StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --no-board --no-skill --branch <name> --before \"<command>\" --after \"<command>\"\n", Assist.Step(7, Unset), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheStepOfTheCommandsTellsTheBranchInThePlaceOfACommandThatChecksIt()
+    {
+        var text = Assist.Step(7, Set(branch: "develop"));
+
+        Assert.StartsWith("## Step 7 of 9: The branch and the commands around a task\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("As things are: the branch of the tasks: `develop`; before a task: none; after a task: none.\n", text, StringComparison.Ordinal);
+        Assert.Contains("**The branch.** The branch the tasks are done on. With one named, a run checks before every task that the working copy is on it", text, StringComparison.Ordinal);
+        Assert.Contains("The branch and its sync with the remote are not for a command: the branch does them.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("that the working copy is on its branch and up to date with the remote", text, StringComparison.Ordinal);
+        Assert.Contains("Ask the owner: which branch the tasks are done on, and before a command is set", text, StringComparison.Ordinal);
+        Assert.Contains("Check: `git status --short --branch` shows the branch, and after it the upstream it follows, as `## develop...origin/develop`", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -23,10 +23,10 @@ public static class ImitatedRun
     };
 
     // The tracker and the record are those the demo keeps for the menu and for the runs after this one.
-    // A demo runs no command of the project, whatever the settings say, and puts up no sign: it works on nothing, so
-    // it goes on beside a run, and a run beside it.
+    // A demo runs no command of the project and checks no branch, whatever the settings say, and puts up no sign: it
+    // works on nothing, so it goes on beside a run, and a run beside it.
     public static IQueueRun Open(RunPlan plan, IClock clock, ImitatedTasks tasks, IRunState state) =>
-        new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), state, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None }, Pace);
+        new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), state, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None, Branch = null }, Pace);
 
     sealed class NoCommands : IProjectCommands
     {
@@ -50,6 +50,8 @@ public static class ImitatedRun
     sealed class CleanWorkspace : IWorkspace
     {
         public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult<WorkspaceState?>(new WorkspaceState(0, 0));
+
+        public Task<BranchSync> SyncAsync(CancellationToken cancellationToken) => Task.FromResult(new BranchSync(SyncStatus.Level));
     }
 
     sealed class QuietMachine : IMachine

@@ -34,6 +34,7 @@ public class BriefingTests
         Assert.Contains("Commit and push the finished work as they say. Where they differ from the rules of this session, these rules hold.\n", message, StringComparison.Ordinal);
         Assert.Contains("- Your task is kept by toobusy. It has already moved the task to In Progress, and it assigns the task to the user who runs it. Do not change the status, the assignee or the labels of the task, do not close it and do not comment on it", message, StringComparison.Ordinal);
         Assert.Contains("make no worktree", message, StringComparison.Ordinal);
+        Assert.Contains("everything of yours is committed and pushed, or undone. The branch may have moved on the remote by the time you push: then bring it up to date as the instructions of the project say, and push again.\n", message, StringComparison.Ordinal);
         Assert.Contains("- Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done", message, StringComparison.Ordinal);
         Assert.Contains("- `TOOBUSY: done`", message, StringComparison.Ordinal);
         Assert.Contains("- `TOOBUSY: partial`: a part is done, committed and pushed, and you have made the task of what is left. Name that task in the report by its number, as `#<number>`: toobusy closes task #12 only when the report names it.\n", message, StringComparison.Ordinal);

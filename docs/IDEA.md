@@ -44,7 +44,7 @@ What is one person's own is not in the folder: the milestone to work on, and the
 
 ## Principles
 
-- **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board, what it calls its statuses, the labels and the commands around a task come from `.toobusy/`, and later the branches and the prompts do.
+- **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board, what it calls its statuses, the labels, the branch the tasks are done on and the commands around a task come from `.toobusy/`, and later the prompts do.
 - **Trackers and assistants are replaceable.** The first version supports GitHub Issues with GitHub Projects, and Claude Code. Codex, OpenCode and other trackers come later behind the same interfaces.
 - **One task at a time in the shared working copy** in the first version. The design must not prevent running several sessions in parallel in separate git worktrees later.
 - **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it.
@@ -63,8 +63,7 @@ toobusy grows out of a single-file .NET script that runs the task queue of one p
 
 ## Open questions for the specification
 
-The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, and the commands with their options. What is still open:
+The specification has answered most of what stood here: the format of the settings and their first sections, the rules of the queue, the contract between toobusy and the assistant, how the tracker is reached, which is through its command-line tool, the commands with their options, and the checks of the working copy around a task: its branch, its sync with the remote and the commands of the project. What is still open:
 
 - The rest of the schema of the settings in `.toobusy/`: the prompts as templates, the permissions of the assistant. What a board calls the three statuses a run knows is answered; more than one status to take tasks from, and statuses beyond the three, as one for a review, are open.
-- What the project-specific checks of the working copy look like: its branch and its sync with the remote. The commands of the project around a task are answered.
 - How installation and updates work on each platform.

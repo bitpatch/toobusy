@@ -15,8 +15,9 @@ public static class About
 
     // `rules` are those of the project the text is asked in; null where no settings are read, and then the labels
     // are spoken of without their names. `skill` is the skill the settings name for a session to start with; null
-    // where they name none, and where none are read. `commands` are the commands of the settings around a task.
-    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null)
+    // where they name none, and where none are read. `commands` are the commands of the settings around a task, and
+    // `branch` the branch they name for the tasks to be done on.
+    public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null, string? branch = null)
     {
         var owner = rules is null ? "the label of the owner" : $"the `{rules.Owner}` label";
 
@@ -43,6 +44,14 @@ public static class About
             (_, { Before: { } first }) => $"This project runs `{first}` before a task, and nothing after it.",
             (_, { After: { } last }) => $"This project runs `{last}` after a task, and nothing before it.",
             _ => "This project has none: `toobusy init --before <command>` and `toobusy init --after <command>` set them.",
+        };
+
+        // What is said of the branch of this project.
+        var tasksBranch = (rules, branch) switch
+        {
+            (null, _) => "No settings are read here, so it is not said whether this project names one.",
+            (_, { } name) => $"This project names `{name}`.",
+            _ => "This project names none: its tasks are done on whatever is checked out, as it stands. `toobusy init --branch <name>` names one.",
         };
 
         // What the board calls the statuses a run knows: as the settings name them, and as GitHub does where none
@@ -119,16 +128,29 @@ public static class About
             What is the skill's to say:
 
             - how the work of this project is done and checked without its owner: which checks a session runs by itself, and what it does where the owner would have looked;
-            - what is done before the work and after it, such as what is brought up to date first and what is stopped or cleaned up at the end, but for what the commands of the settings do, as told under “The commands of the project around a task”;
+            - what is done before the work and after it, such as what is brought up to date first and what is stopped or cleaned up at the end, but for what the run does itself, as told under “The branch of the tasks” and “The commands of the project around a task”;
+            - how the branch is brought up to date when it has moved on the remote by the time a session pushes: by a rebase or by a merge, where the instructions of the project do not say it already;
             - the language of the report;
             - which tasks a session makes besides the one of what is left, with their labels, their wording and their relations.
+
+            ## The branch of the tasks
+
+            A project may name the branch its tasks are done on, `workspace.branch` of its settings. {tasksBranch}
+
+            - Before every task, where the working tree is checked, the working copy must be on that branch. On another one the run stops and says so: what is checked out is the owner's, and the run does not change it.
+            - Before a task is taken, and before the command before it, the branch is brought up to date with its upstream: what the remote has is fetched, and the branch is moved forward to it, so that the task starts from what the remote has. A branch that has commits its upstream lacks, one that has parted from it, and a remote that does not answer stop the run, and the task is not touched. A branch without an upstream has nothing to be brought up to date with.
+            - A task that a run goes on with, whose session may have left its changes in the working tree, is checked for the branch as any other, and nothing is moved under it.
+            - The branch may move while a session works, as when someone pushes to it meanwhile. Bringing it up to date before the push is the session's own: its first message tells it to do so as the instructions of the project say, by a rebase or by a merge, and to push again. toobusy checks the result only: a session that leaves commits its upstream lacks stops the run.
+            - A demo checks nothing of it.
+
+            What the run does here, the instructions and the skill of a project do not tell a session to do as well. They tell it how the branch is brought up to date before its push.
 
             ## The commands of the project around a task
 
             A project may have the run itself run a command before a task and one after it, `task.before` and `task.after` of its settings: what is to be so around every task, such as that the ports of its development server are free before one and that the server is stopped after it. It does not depend on a session remembering it then. {around}
 
             - A command is a line for the shell, `sh -c` and on Windows `cmd /c`. It runs at the root of the working copy, and the run knows of it only whether it exited with 0. It learns the task from its environment: `TOOBUSY_TASK` is the number of the task, `TOOBUSY_TASK_TITLE` its title and `TOOBUSY_TASK_URL` its address.
-            - `before` runs when the working tree and the queue are read, before the task is moved to {progress} and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
+            - `before` runs when the working tree and the queue are read, and the branch is brought up to date where the project names one, before the task is moved to {progress} and before its session is started or told to go on. When it fails, the run stops and says so with what the command printed, and the task is not touched. A session that still works when a run finds it is not disturbed by the command.
             - `after` runs when the run has done with the task, however it went: done, done in part, left to the owner, interrupted, failed, paused by a usage limit, and when the run was killed over it. The working copy is checked and the tracker is told before it. When it fails, the task stays as it ended, and the run stops.
             - A command is given up after {Spoken.Time(policy.CommandTime)}, and counts as failed then. After a kill of the run, `after` has {Spoken.Time(policy.KilledCommandTime)}.
             - Neither runs around the wait for a usage limit inside a task, and a demo runs none.

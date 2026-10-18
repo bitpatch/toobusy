@@ -93,9 +93,9 @@ public abstract record BoardAnswer
 
 // What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
 // leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an
-// empty name of the skill: no skill. The commands around a task have no question: null leaves a command as the
-// settings have it. The three statuses are what the board calls them: each is the proposed answer of its question,
-// which a board that is named as GitHub names one is not asked.
+// empty name of the skill: no skill. The commands around a task and the branch have no question: null leaves them
+// as the settings have them. The three statuses are what the board calls them: each is the proposed answer of its
+// question, which a board that is named as GitHub names one is not asked.
 public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
@@ -113,10 +113,15 @@ public sealed record SetupProposals(
     public string? InProgressStatus { get; init; }
 
     public string? DoneStatus { get; init; }
+
+    public BranchProposal? Branch { get; init; }
 }
 
 // A command around a task as an option names it: the line for the shell, or null for no command.
 public sealed record CommandProposal(string? Line);
+
+// The branch the tasks are done on as an option names it, or null for none.
+public sealed record BranchProposal(string? Name);
 
 // The board as an option names it: by an address, as a new one with its title and the login of whose it will be,
 // which is the first of those it can be made for when it is not given, or none.

@@ -23,15 +23,25 @@ public static partial class SettingsValidator
         ? null
         : "must be the name of a skill, as `task-auto`: letters, digits, `-`, `_`, `.` and `:`, without the `/` before it";
 
+    // Null when the text is the name of a branch as git takes one; otherwise why it is not.
+    public static string? RefuseBranch(string value) => BranchPattern().IsMatch(value)
+        ? null
+        : "must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end";
+
     [GeneratedRegex(@"^https://github\.com/(orgs|users)/[A-Za-z0-9-]+/projects/[0-9]+$")]
     private static partial Regex BoardPattern();
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
     private static partial Regex SkillPattern();
 
+    // The rules of `git check-ref-format --branch`: no character git keeps for itself, no part of the name that
+    // starts with a dot or ends with `.lock`, and not `@` or `HEAD` alone.
+    [GeneratedRegex(@"^(?![-/.])(?!(?:@|HEAD)$)(?!.*(?:\.\.|//|@\{|/\.|\.lock/|\.lock$))[^\x00-\x20\x7F~^:?*\[\\]+(?<![./])$")]
+    private static partial Regex BranchPattern();
+
     sealed class Run(SettingsDocument document)
     {
-        static readonly string[] Sections = ["tracker", "tracker.statuses", "queue", "queue.labels", "assistant", "session", "task"];
+        static readonly string[] Sections = ["tracker", "tracker.statuses", "queue", "queue.labels", "assistant", "session", "task", "workspace"];
 
         readonly Dictionary<string, SettingsEntry> entries = [];
 
@@ -56,6 +66,9 @@ public static partial class SettingsValidator
             var skill = String(SettingsKeys.SessionSkill, required: false);
             if (skill is not null && RefuseSkill(skill.Value.Text) is { } reason)
                 Refuse(skill.Value.Entry, reason);
+            var branch = String(SettingsKeys.WorkspaceBranch, required: false);
+            if (branch is not null && RefuseBranch(branch.Value.Text) is { } wrong)
+                Refuse(branch.Value.Entry, wrong);
 
             return new ProjectSettings(
                 new TrackerSettings(trackerType ?? "", board?.Text) { Statuses = statuses },
@@ -64,6 +77,7 @@ public static partial class SettingsValidator
             {
                 Skill = skill?.Text,
                 Commands = new TaskCommands(Command(SettingsKeys.TaskBefore), Command(SettingsKeys.TaskAfter)),
+                Branch = branch?.Text,
             };
         }
 

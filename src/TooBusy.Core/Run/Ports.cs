@@ -100,14 +100,52 @@ public sealed record UsageLimits(UsageWindow? Near, UsageWindow? Far)
         window is { ResetsAt: { } reset } && reset <= now ? window with { Used = 0, ResetsAt = null } : window;
 }
 
-// The working copy of the project: how many files differ from what is committed, and how many commits of the
-// branch are not pushed. Null when it cannot be read.
+// The working copy of the project: how many files differ from what is committed, how many commits of the branch are
+// not pushed, and which branch is checked out. Null when it cannot be read.
 public interface IWorkspace
 {
     Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken);
+
+    // Brings the branch that is checked out up to date with its upstream: what the remote has is fetched, and the
+    // branch is moved forward to it when it can simply be moved. A branch that cannot is left as it is. Only a
+    // cancellation throws.
+    Task<BranchSync> SyncAsync(CancellationToken cancellationToken);
 }
 
-public sealed record WorkspaceState(int Changes, int Unpushed);
+// Branch is the name of the branch that is checked out; null when none is, as on a detached HEAD.
+public sealed record WorkspaceState(int Changes, int Unpushed)
+{
+    public string? Branch { get; init; }
+}
+
+public enum SyncStatus
+{
+    // The branch has what its upstream has, and nothing more: nothing was moved.
+    Level,
+
+    // The branch was moved forward to its upstream.
+    Moved,
+
+    // The branch follows no upstream, so it has nothing to be brought up to date with.
+    NoUpstream,
+
+    // The branch has commits that its upstream lacks, and lacks none of its: it is not moved.
+    Ahead,
+
+    // Each has commits that the other lacks: the branch cannot simply be moved.
+    Parted,
+
+    // What the remote has could not be fetched: it did not answer, or refused.
+    Unreachable,
+
+    // Something else went wrong: the branch could not be read, its upstream is gone, or git refused to move it.
+    Failed,
+}
+
+// How the branch came out of its sync. Upstream is what it follows, as `origin/develop`; Ahead and Behind count the
+// commits of the branch that its upstream lacks and those of the upstream that it lacked, once the remote was fetched.
+// Said is what git said of a failure, in a line.
+public sealed record BranchSync(SyncStatus Status, string? Upstream = null, int Ahead = 0, int Behind = 0, string Said = "");
 
 public interface IClock
 {

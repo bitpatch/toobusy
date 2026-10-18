@@ -34,6 +34,182 @@ public sealed class SupervisorTests : IDisposable
 
     static readonly TooBusy.Core.Settings.TaskCommands Around = new(Free, Halt);
 
+    static readonly WorkspaceState OnDevelop = new(0, 0) { Branch = "develop" };
+
+    [Fact]
+    public async Task TheBranchIsBroughtUpToDateBeforeEveryTaskAndBeforeTheCommandBeforeIt()
+    {
+        plan = plan with { Branch = "develop", Commands = Around };
+        workspace.State = OnDevelop;
+        workspace.Sync = new BranchSync(SyncStatus.Moved, "origin/develop", 0, 3);
+        var seen = new List<(int Commands, int Sessions, int Moved)>();
+        workspace.Syncing = () => seen.Add((shell.Ran.Count, assistant.Started.Count, tracker.Did.Count));
+        tracker.Add(3);
+        tracker.Add(4);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
+        Assert.Equal([(0, 0, 0), (2, 1, 5)], seen);
+        Assert.Equal(
+            ["  develop is moved forward by 3 commits to origin/develop", "  Running the command before #3: scripts/dev.sh ports free"],
+            log.Lines.Skip(1).Take(2));
+        Assert.Equal(2, log.Lines.Count(line => line == "  develop is moved forward by 3 commits to origin/develop"));
+        Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Preparing, Task.Number: 3, Step: "bringing the branch up to date" });
+    }
+
+    [Fact]
+    public async Task ABranchThatHasWhatItsUpstreamHasIsNotSpokenOf()
+    {
+        plan = plan with { Branch = "develop" };
+        workspace.State = OnDevelop;
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal(1, workspace.Synced);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("develop", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ABranchWithoutAnUpstreamIsSaidOnceAndTheTasksGoOn()
+    {
+        plan = plan with { Branch = "develop" };
+        workspace.State = OnDevelop;
+        workspace.Sync = new BranchSync(SyncStatus.NoUpstream);
+        tracker.Add(3);
+        tracker.Add(4);
+
+        var result = await RunAsync();
+
+        Assert.Equal(2, result.Done);
+        Assert.Equal(2, workspace.Synced);
+        Assert.Single(log.Lines, line => line == "  develop has no upstream, so there is nothing to bring it up to date with");
+    }
+
+    [Theory]
+    [InlineData(SyncStatus.Ahead, 1, 0, "", "develop has 1 commit that origin/develop lacks: push it first, or take it back")]
+    [InlineData(SyncStatus.Ahead, 2, 0, "", "develop has 2 commits that origin/develop lacks: push them first, or take them back")]
+    [InlineData(SyncStatus.Parted, 2, 3, "", "develop and origin/develop have parted: develop has 2 commits that origin/develop lacks, and lacks 3 commits of it: rebase or merge it first")]
+    [InlineData(SyncStatus.Unreachable, 0, 0, "fatal: unable to access 'https://github.com/acme/rocket/': Could not resolve host: github.com", "origin/develop cannot be fetched: fatal: unable to access 'https://github.com/acme/rocket/': Could not resolve host: github.com")]
+    [InlineData(SyncStatus.Failed, 0, 0, "origin/develop is not on the remote any more", "develop cannot be brought up to date with origin/develop: origin/develop is not on the remote any more")]
+    public async Task ABranchThatCannotBeBroughtUpToDateStopsTheRunAndTheTaskIsNotTouched(SyncStatus status, int ahead, int behind, string said, string why)
+    {
+        plan = plan with { Branch = "develop", Commands = Around };
+        workspace.State = OnDevelop;
+        workspace.Sync = new BranchSync(status, "origin/develop", ahead, behind, said);
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, $"{why} · #3 is not taken"), result);
+        Assert.Empty(tracker.Did);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(shell.Ran);
+        Assert.Null(state.Record);
+        Assert.Contains($"✖ Stopped: {why} · #3 is not taken · the next task did not start · 0 done", log.Lines);
+        Assert.Empty(Ended);
+    }
+
+    [Theory]
+    [InlineData("feature/export", "the working copy is on feature/export, and the tasks are done on develop")]
+    [InlineData(null, "the working copy is on no branch, and the tasks are done on develop")]
+    public async Task AWorkingCopyOnAnotherBranchStopsTheRunBeforeTheQueueIsRead(string? branch, string why)
+    {
+        plan = plan with { Branch = "develop", Commands = Around };
+        workspace.State = new WorkspaceState(0, 0) { Branch = branch };
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, why), result);
+        Assert.Empty(tracker.Read);
+        Assert.Empty(tracker.Did);
+        Assert.Empty(assistant.Started);
+        Assert.Empty(shell.Ran);
+        Assert.Equal(0, workspace.Synced);
+        Assert.Equal($"✖ Stopped: {why} · the next task did not start · 0 done", log.Lines[0]);
+    }
+
+    [Fact]
+    public async Task AWorkingCopyThatIsNotCleanOnAnotherBranchIsToldOfTheBranchFirst()
+    {
+        plan = plan with { Branch = "develop" };
+        workspace.State = new WorkspaceState(2, 0) { Branch = "feature/export" };
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal("the working copy is on feature/export, and the tasks are done on develop", result.Why);
+    }
+
+    [Fact]
+    public async Task ATaskThatIsGoneOnWithIsCheckedForTheBranchAndNothingIsMovedUnderIt()
+    {
+        plan = plan with { Branch = "develop", Commands = Around };
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        workspace.Next.Enqueue(new WorkspaceState(2, 0) { Branch = "develop" });
+        workspace.State = OnDevelop;
+        var session = assistant.Session(5).Lost("I was about to").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal([Briefing.AfterStop(5)], session.Told);
+        Assert.Equal([Free, Halt], shell.Ran.Select(ran => ran.Command));
+        Assert.Equal(0, workspace.Synced);
+    }
+
+    [Fact]
+    public async Task ANewSessionForATaskWhoseConversationIsGoneIsNotBroughtUpToDateEither()
+    {
+        plan = plan with { Branch = "develop" };
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        tracker.Add(6);
+        workspace.Next.Enqueue(new WorkspaceState(2, 0) { Branch = "develop" });
+        workspace.State = OnDevelop;
+        workspace.Sync = new BranchSync(SyncStatus.Moved, "origin/develop", 0, 1);
+        assistant.Gone = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(2, result.Done);
+        Assert.Equal(1, workspace.Synced);
+        Assert.Equal(
+            ["→ #5 Task 5 — taken again · a new session: the conversation of the one before is gone · fake attach 5", "  develop is moved forward by 1 commit to origin/develop"],
+            log.Lines.Where(line => line.StartsWith('→') || line.Contains("moved forward", StringComparison.Ordinal)).Take(2));
+    }
+
+    [Fact]
+    public async Task ATaskThatIsGoneOnWithOnAnotherBranchStopsTheRunAndKeepsItsRecord()
+    {
+        plan = plan with { Branch = "develop" };
+        state.Record = Record(5);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        workspace.State = new WorkspaceState(2, 0) { Branch = "feature/export" };
+
+        var result = await RunAsync();
+
+        Assert.Equal("the working copy is on feature/export, and the tasks are done on develop", result.Why);
+        Assert.Equal(Record(5), state.Record);
+        Assert.Empty(tracker.Did);
+    }
+
+    [Fact]
+    public async Task AProjectThatNamesNoBranchHasItsTasksDoneOnWhateverIsCheckedOut()
+    {
+        workspace.State = new WorkspaceState(0, 0) { Branch = "feature/export" };
+        tracker.Add(3);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal(0, workspace.Synced);
+    }
+
     [Fact]
     public async Task TheCommandsOfTheProjectRunAroundATaskAndAreToldOfIt()
     {

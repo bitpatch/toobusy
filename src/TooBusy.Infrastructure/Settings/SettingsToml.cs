@@ -26,6 +26,9 @@ public static class SettingsToml
         ("task",
             "The commands a run runs around a task, through the shell, at the root of the working copy:\n"
             + "`before` a task is taken, and `after` its session, however the task went."),
+        ("workspace",
+            "The branch the tasks are done on: before a task a run checks that the working copy is on it,\n"
+            + "and brings it up to date with its upstream."),
     ];
 
     public static SettingsValidation Read(string text)
@@ -103,6 +106,7 @@ public static class SettingsToml
         (SettingsKeys.SessionSkill, settings.Skill),
         (SettingsKeys.TaskBefore, settings.Commands.Before),
         (SettingsKeys.TaskAfter, settings.Commands.After),
+        (SettingsKeys.WorkspaceBranch, settings.Branch),
     ];
 
     // The name of a status as the file keeps it: not at all in a project without a board, and not when it is the

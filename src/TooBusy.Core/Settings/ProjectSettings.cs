@@ -14,6 +14,11 @@ public sealed record ProjectSettings(TrackerSettings Tracker, QueueSettings Queu
 
     // The commands of the project a run runs around a task.
     public TaskCommands Commands { get; init; } = TaskCommands.None;
+
+    // The branch the tasks are done on: a run checks that the working copy is on it and brings it up to date with
+    // its upstream before a task. Null when the project names none, and a run does the tasks on whatever is checked
+    // out.
+    public string? Branch { get; init; }
 }
 
 // What a run runs through the shell of the machine, at the root of the working copy: Before a task is taken, and
