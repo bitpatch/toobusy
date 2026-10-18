@@ -319,6 +319,29 @@ public sealed class SetupScreenTests : IDisposable
     }
 
     [Fact]
+    public void TheOptionOfTheSettingsIsMarkedAmongTheOthers()
+    {
+        terminal.Keys.Press(Keys.Down, Keys.Enter);
+
+        Assert.Equal(1, screen.Choose("Manual label", "", [new SetupOption("draft", ""), new SetupOption("manual", "", Current: true)], 0));
+        terminal.AssertSaw(" ❯ draft\n   manual  current\n");
+    }
+
+    [Fact]
+    public void TheBoardOfTheSettingsIsMarkedAsTheOneOfNow()
+    {
+        // Wide enough for the whole row of the board.
+        using var wide = new TestTerminal(width: 100, height: 20);
+        using var page = wide.Open();
+        wide.Keys.Press(Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape);
+
+        new SetupScreen(page).AskBoard(Question(current: Boards[0]) with { Saved = Rocket });
+
+        wide.AssertSaw(" ❯ Rocket  current  https://github.com/orgs/acme/projects/1  linked to this repository\n");
+        wide.AssertSaw(" ❯ Rocket     current  https://github.com/orgs/acme/projects/1  linked\n   Moon base           https://github.com/users/denis/projects/7\n");
+    }
+
+    [Fact]
     public void AProjectThatHasABoardKeepsItWithOneEnter()
     {
         terminal.Keys.Press(Keys.Enter);

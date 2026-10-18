@@ -6,15 +6,15 @@ namespace TooBusy.Cli.Terminal;
 // the most.
 public static class EffortScreen
 {
-    // `chosen` is null when the user has not chosen yet: the pointer then starts on the proposed level. Gives the
-    // level, or null when Escape is pressed or `Back` is chosen.
+    // `chosen` is null when the user has not chosen yet: the pointer then starts on the proposed level, and no level
+    // is marked as the one of now. Gives the level, or null when Escape is pressed or `Back` is chosen.
     public static string? Ask(Page page, string? chosen)
     {
         var levels = ClaudeCodeOptions.Efforts.ToList();
         var picked = Picker.Pick(
             page,
             Picker.Head("Effort", "How hard the assistant thinks over a task by default."),
-            [.. levels.Select(level => new Choice(level))],
+            [.. levels.Select(level => new Choice(level, Current: level == chosen))],
             at: Math.Max(0, levels.IndexOf(chosen ?? ClaudeCodeOptions.ProposedEffort)));
         return picked is { } index ? levels[index] : null;
     }

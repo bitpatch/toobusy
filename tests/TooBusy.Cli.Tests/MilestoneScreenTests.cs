@@ -84,6 +84,27 @@ public sealed class MilestoneScreenTests : IDisposable
         Assert.Null(Ask(Open, null));
     }
 
+    [Fact]
+    public void TheMilestoneThatIsChosenIsMarkedWhereverThePointerGoes()
+    {
+        terminal.Keys.Press(Keys.Up, Keys.Enter, Keys.Enter);
+
+        Assert.Equal(new MilestoneChoice("v0.10.0"), Ask(Open, new MilestoneChoice("Backlog")));
+        terminal.AssertSaw(" ❯ v0.10.0                no open tasks\n   Backlog       current  1 open task\n");
+        Assert.Equal(MilestoneChoice.None, Ask(Open, MilestoneChoice.None));
+        terminal.AssertSaw(" ❯ No milestone  current  take tasks whatever their milestone\n");
+    }
+
+    [Fact]
+    public void NothingIsMarkedBeforeAMilestoneIsChosen()
+    {
+        terminal.Keys.Press(Keys.Enter);
+
+        Ask(Open, null);
+
+        Assert.DoesNotContain("current", terminal.Text, StringComparison.Ordinal);
+    }
+
     MilestoneChoice? Ask(IReadOnlyList<Milestone>? open, MilestoneChoice? chosen)
     {
         using var page = terminal.Open();

@@ -52,6 +52,17 @@ public sealed class EffortScreenTests : IDisposable
         Assert.Null(Ask("max"));
     }
 
+    [Fact]
+    public void TheLevelThatIsChosenIsMarkedAndTheProposedOneIsNot()
+    {
+        terminal.Keys.Press(Keys.Down, Keys.Enter, Keys.Enter);
+
+        Ask("low");
+        terminal.AssertSaw("   low  current\n ❯ medium\n");
+        Ask(null);
+        Assert.DoesNotContain("current", terminal.Text, StringComparison.Ordinal);
+    }
+
     string? Ask(string? chosen)
     {
         using var page = terminal.Open();

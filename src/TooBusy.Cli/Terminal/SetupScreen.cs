@@ -65,7 +65,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         await page.WaitAsync(text, work, cancellationToken, Head(label, hint)) is (true, var value) ? value : null;
 
     public int? Choose(string label, string hint, IReadOnlyList<SetupOption> options, int proposed) =>
-        Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);
+        Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail, Current: option.Current))], at: proposed);
 
     public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) =>
         Picker.PickMany(page, Head(label, hint), options, proposed, keeps);
@@ -88,7 +88,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         // The board that is stands first among the choices, as it stands in the list of the boards: Enter keeps it.
         Choice[] choices =
         [
-            new(current.Title.Length == 0 ? current.Address : current.Title, current.Title.Length == 0 ? "" : current.Address, current.Linked ? "linked to this repository" : ""),
+            new(current.Title.Length == 0 ? current.Address : current.Title, current.Title.Length == 0 ? "" : current.Address, current.Linked ? "linked to this repository" : "", Current: Saved(question, current)),
             new("Choose another project"),
         ];
         while (true)
@@ -193,11 +193,14 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
                         lines.Add(Line.Of("  No project fits.", Tone.Muted));
                     var widest = Math.Min(30, fitting.Select(board => board.Title.Length).DefaultIfEmpty().Max());
                     var shown = fitting;
+
+                    // The board of the settings is marked where it is among those that fit.
+                    bool? saved = shown.Any(board => Saved(question, board)) ? false : null;
                     top = Window(lines, listed, at, top, BoardRows, out var pointer, index => index == shown.Count
                         ? Picker.BackRow(index == at)
                         : shown[index].Title.Length == 0
-                            ? Row(index == at, shown[index].Address, "", shown[index].Linked ? "linked" : "")
-                            : Row(index == at, shown[index].Title.PadRight(widest), shown[index].Address, shown[index].Linked ? "linked" : ""));
+                            ? Row(index == at, shown[index].Address, "", shown[index].Linked ? "linked" : "", saved is null ? null : Saved(question, shown[index]))
+                            : Row(index == at, shown[index].Title.PadRight(widest), shown[index].Address, shown[index].Linked ? "linked" : "", saved is null ? null : Saved(question, shown[index])));
                     pointed = listed > 0 ? pointer : null;
                     named = listed > 0 && back > 0;
                     keys = "type to filter · ↑↓ move · enter choose";
@@ -311,7 +314,10 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         }
     }
 
-    static Line Row(bool pointed, string name, string detail = "", string note = "") => Picker.Row(pointed, name, detail, note);
+    static Line Row(bool pointed, string name, string detail = "", string note = "", bool? current = null) => Picker.Row(pointed, name, detail, note, current);
+
+    // Whether the board is the one the settings have now.
+    static bool Saved(BoardQuestion question, SetupBoard board) => board.Address.Equals(question.Saved, StringComparison.OrdinalIgnoreCase);
 
     static List<Line> Head(string label, string hint, string? reason = null) => Picker.Head(label, hint, reason);
 

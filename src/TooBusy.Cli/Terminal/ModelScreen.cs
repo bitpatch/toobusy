@@ -15,11 +15,12 @@ public static class ModelScreen
         var offered = ClaudeCodeOptions.Models;
         var known = chosen?.Name is { } name ? offered.ToList().IndexOf(name) : -1;
         var other = chosen?.Name is not null && known < 0 ? chosen.Name : "";
+        // The model that is chosen now is marked among the others, a model of another name on `Other…`.
         Choice[] choices =
         [
-            new("Assistant's own", "no model is named: the assistant takes its default"),
-            .. offered.Select(model => new Choice(model)),
-            new("Other…", "any model, by its name", other),
+            new("Assistant's own", "no model is named: the assistant takes its default", Current: chosen is { Name: null }),
+            .. offered.Select((model, index) => new Choice(model, Current: index == known)),
+            new("Other…", "any model, by its name", other, Current: other.Length > 0),
         ];
         var at = chosen?.Name is null ? 0 : known < 0 ? choices.Length - 1 : known + 1;
 

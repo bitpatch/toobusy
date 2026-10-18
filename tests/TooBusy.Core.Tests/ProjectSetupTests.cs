@@ -1983,6 +1983,50 @@ public class ProjectSetupTests
         Assert.Equal(SetupTone.Warning, result.Notes[0].Tone);
     }
 
+    [Fact]
+    public async Task TheQuestionsMarkWhatTheSettingsHaveNow()
+    {
+        tracker.Statuses = ["Ready", "Todo", "In Progress", "Done"];
+        store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        var setup = await OpenAsync();
+        dialog.Answer(TodoStatus, "Ready");
+        dialog.Confirm(false);
+
+        foreach (var setting in (SetupSetting[])[SetupSetting.Manual, SetupSetting.Interrupted, SetupSetting.PermissionMode, SetupSetting.Statuses])
+            await setup.ChangeAsync(setting, TestContext.Current.CancellationToken);
+        await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+
+        Assert.Equal("manual", dialog.Current[ManualLabel]);
+        Assert.Equal("interrupted", dialog.Current[InterruptLabel]);
+        Assert.Equal("dontAsk", dialog.Current["Permission mode"]);
+        Assert.Equal("Todo", dialog.Current[TodoStatus]);
+        Assert.Equal("In Progress", dialog.Current[InProgressStatus]);
+        Assert.Equal(Rocket, dialog.Question!.Saved);
+    }
+
+    [Fact]
+    public async Task AFirstSetupMarksNothing()
+    {
+        dialog.Board(new BoardAnswer.Existing(Rocket));
+
+        await RunAsync();
+
+        Assert.All(dialog.Current.Values, Assert.Null);
+        Assert.Null(dialog.Question!.Saved);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfAnotherBoardAreNotMarked()
+    {
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+        store.Current = Existing;
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        await RunAsync();
+
+        Assert.Null(dialog.Current[TodoStatus]);
+    }
+
     async Task<ProjectSetup> OpenAsync()
     {
         var setup = new ProjectSetup(dialog, machine, tracker, boards, store);
@@ -2024,6 +2068,9 @@ public class ProjectSetupTests
         // The options of a selection or of a multiple choice, under the label of the question.
         public Dictionary<string, string[]> Offered { get; } = [];
 
+        // The option of a selection that is marked as the one the settings have now, under the label of the question.
+        public Dictionary<string, string?> Current { get; } = [];
+
         public BoardQuestion? Question { get; private set; }
 
         public Action? BeforeConfirm { get; set; }
@@ -2056,6 +2103,7 @@ public class ProjectSetupTests
         {
             Asked.Add(label);
             Offered[label] = [.. options.Select(option => option.Name)];
+            Current[label] = options.SingleOrDefault(option => option.Current)?.Name;
             if (!Next(label, out var answer))
                 return proposed;
             return answer is null ? null : options.Select(option => option.Name).ToList().IndexOf(answer[0]);

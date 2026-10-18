@@ -559,7 +559,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 known.Owners,
                 text => SettingsValidator.IsBoard(BoardSuggestions.AddressOf(text)) ? null : "That is not a project. Use https://github.com/orgs/<org>/projects/<number>.",
                 title => string.IsNullOrWhiteSpace(title) ? "A project needs a title." : null,
-                proposed is BoardAnswer.Existing ? null : proposed));
+                proposed is BoardAnswer.Existing ? null : proposed)
+            { Saved = current?.Tracker.Board });
             if (answer is null)
                 return false;
 
@@ -713,6 +714,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             return true;
         }
 
+        // The statuses the settings name are those of their board: of another board none is the one of now.
+        var saved = current is { Tracker.Board: { } ofSettings } && ofSettings.Equals(taken.Address, StringComparison.OrdinalIgnoreCase) ? current.Tracker.Statuses.Names : null;
         var picked = wanted.ToArray();
         for (var at = 0; at < picked.Length;)
         {
@@ -729,7 +732,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             }
 
             Show(0, chosen: true);
-            var choice = dialog.Choose(StatusQuestions[at].Label, StatusQuestions[at].Hint, [.. rest.Select(one => new SetupOption(one, ""))], proposed);
+            var now = saved?[at];
+            var choice = dialog.Choose(StatusQuestions[at].Label, StatusQuestions[at].Hint, [.. rest.Select(one => new SetupOption(one, "", now is not null && BoardStatuses.Same(one, now)))], proposed);
             if (choice is null && at == 0)
                 return false;
             if (choice is null)
@@ -819,6 +823,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         ManualLabel,
         "A task that cannot go on without you gets this label, and is not taken while it has it.",
         manual ?? proposals.Manual?.Trim() ?? current?.Queue.Labels.Manual ?? ProposedManual,
+        current?.Queue.Labels.Manual,
         name => Has(take!, name) ? $"{name} is a label to take."
             : menu && name.Equals(interrupted, StringComparison.OrdinalIgnoreCase) ? $"{name} is the interrupt label."
             : null,
@@ -830,6 +835,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         InterruptLabel,
         "A task that a run had to stop gets this label, and the next run takes it first.",
         interrupted ?? proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
+        current?.Queue.Labels.Interrupted,
         name => Has(take!, name) ? $"{name} is a label to take."
             : Has(blocking!, name) ? $"{name} is a blocking label."
             : name.Equals(manual, StringComparison.OrdinalIgnoreCase) ? $"{name} is the manual label."
@@ -883,7 +889,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         var modes = ClaudeCodeOptions.PermissionModes;
         var at = Math.Max(0, modes.ToList().IndexOf(permissionMode ?? ClaudeCodeOptions.DefaultPermissionMode));
         Show(0);
-        if (dialog.Choose(PermissionModeLabel, PermissionModeHint, [.. modes.Select(mode => new SetupOption(mode, ClaudeCodeOptions.Checks(mode)))], at) is not { } picked)
+        var now = current!.Assistant.PermissionMode ?? ClaudeCodeOptions.DefaultPermissionMode;
+        if (dialog.Choose(PermissionModeLabel, PermissionModeHint, [.. modes.Select(mode => new SetupOption(mode, ClaudeCodeOptions.Checks(mode), mode == now))], at) is not { } picked)
             return false;
         permissionMode = permissionMode is null && modes[picked] == ClaudeCodeOptions.DefaultPermissionMode ? null : modes[picked];
         return true;
@@ -891,8 +898,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
     // One label that a run puts on a task: one of the labels of the repository that nothing speaks against, or a new
     // one, which is named here and made when the setup is confirmed. The proposed one is the label that was
-    // answered, the one of the settings, or the name a first setup proposes.
-    async Task<bool> AskLabelAsync(int step, string label, string hint, string proposed, Func<string, string?> refuse, Action<string> answer, CancellationToken cancellationToken)
+    // answered, the one of the settings, or the name a first setup proposes; `now` is the one of the settings.
+    async Task<bool> AskLabelAsync(int step, string label, string hint, string proposed, string? now, Func<string, string?> refuse, Action<string> answer, CancellationToken cancellationToken)
     {
         string? Refuse(string text) => string.IsNullOrWhiteSpace(text) ? "A label needs a name." : refuse(text.Trim());
 
@@ -912,7 +919,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         {
             var at = offered.FindIndex(name => name.Equals(proposed, StringComparison.OrdinalIgnoreCase));
             Show(step);
-            if (dialog.Choose(label, hint, [.. offered.Select(name => new SetupOption(name, "")), new SetupOption(NewLabel, "")], at < 0 ? offered.Count : at) is not { } picked)
+            if (dialog.Choose(label, hint, [.. offered.Select(name => new SetupOption(name, "", name.Equals(now, StringComparison.OrdinalIgnoreCase))), new SetupOption(NewLabel, "")], at < 0 ? offered.Count : at) is not { } picked)
                 return false;
             if (picked < offered.Count)
             {

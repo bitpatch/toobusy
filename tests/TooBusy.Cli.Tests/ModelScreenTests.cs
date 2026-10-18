@@ -77,7 +77,7 @@ public sealed class ModelScreenTests : IDisposable
         terminal.Keys.Press(Keys.Enter, Keys.Enter);
 
         Assert.Equal(new ModelChoice("claude-opus-4"), Ask(new ModelChoice("claude-opus-4")));
-        terminal.AssertSaw(" ❯ Other…           any model, by its name  claude-opus-4");
+        terminal.AssertSaw(" ❯ Other…           current  any model, by its name  claude-opus-4");
     }
 
     [Fact]
@@ -96,6 +96,29 @@ public sealed class ModelScreenTests : IDisposable
         terminal.Keys.Press(Keys.Escape, Keys.Escape);
 
         Assert.Null(Ask(null));
+    }
+
+    [Fact]
+    public void TheModelThatIsChosenIsMarked()
+    {
+        terminal.Keys.Press(Keys.Enter, Keys.Enter, Keys.Enter);
+
+        Ask(new ModelChoice("sonnet"));
+        terminal.AssertSaw(" ❯ sonnet           current\n");
+        Ask(ModelChoice.AssistantsOwn);
+        terminal.AssertSaw(" ❯ Assistant's own  current  no model is named: the assistant takes its default\n");
+        Ask(null);
+        Assert.DoesNotContain("current", terminal.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AModelOfAnotherNameIsMarkedOnOther()
+    {
+        terminal.Keys.Press(Keys.Escape, Keys.Escape);
+
+        Ask(new ModelChoice("claude-opus-5-5"));
+
+        terminal.AssertSaw(" ❯ Other…           current  any model, by its name  claude-opus-5-5\n");
     }
 
     ModelChoice? Ask(ModelChoice? chosen)

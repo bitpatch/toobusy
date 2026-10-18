@@ -2,8 +2,9 @@ namespace TooBusy.Cli.Terminal;
 
 // A choice of a list: what it is called, what explains it, and what is to be noticed about it. A choice that is off
 // cannot be chosen: it is muted, and Enter does nothing on it. One that waits has the dots of a wait where what is
-// to be noticed about it will stand. The note is in the colour of success unless it has one of its own.
-public sealed record Choice(string Name, string Detail = "", string Note = "", bool Off = false, bool Waits = false, Tone? NoteTone = null);
+// to be noticed about it will stand. The note is in the colour of success unless it has one of its own. Current is
+// the choice of now, which `current` marks right after its name.
+public sealed record Choice(string Name, string Detail = "", string Note = "", bool Off = false, bool Waits = false, Tone? NoteTone = null, bool Current = false);
 
 // The lists of every screen: a pointer on the chosen row, the name of a row with what explains it after it, and
 // marks above and below a list that does not fit. One look for the setup, the milestones and the menu.
@@ -17,6 +18,11 @@ public static class Picker
     // Escape does the same as, names it in the same way.
     public const string Back = "Back";
     public const string BackKey = "esc";
+
+    // What marks the choice of now, as the settings or the choices of the user have it, among the others: it stands
+    // right after the name, in the colour of success, in a column of its own, which the other rows of its list keep
+    // empty before what explains them, so that that stands in one column. `Back` names its key in that column.
+    public const string Current = "current";
 
     const int LabelWidth = 16;
 
@@ -108,7 +114,9 @@ public static class Picker
 
     // A row of a list: the pointer when it is on the row, the name, and after it what explains the name and what is
     // to be noticed about it.
-    public static Line Row(bool pointed, string name, string detail = "", string note = "") => Row(pointed, new Choice(name, detail, note), name);
+    // `current` is null in a list without a choice of now, and otherwise whether this row is that choice.
+    public static Line Row(bool pointed, string name, string detail = "", string note = "", bool? current = null) =>
+        Row(pointed, new Choice(name, detail, note, Current: current == true), name, current is not null);
 
     // The row that goes back, with its key at its right.
     public static Line BackRow(bool pointed) => Row(pointed, Back, BackKey);
@@ -138,14 +146,16 @@ public static class Picker
         return top;
     }
 
-    // The row of a choice, its name as wide as the list wants it. What is off is muted all through.
-    static Line Row(bool pointed, Choice choice, string name) => new(
+    // The row of a choice, its name as wide as the list wants it. What is off is muted all through. `marks` keeps the
+    // column of the mark of the choice of now, in a list that has one.
+    static Line Row(bool pointed, Choice choice, string name, bool marks = false) => new(
         new Part((pointed ? "❯ " : "  ") + name, choice.Off ? Tone.Muted : pointed ? Tone.Accent : Tone.Plain),
+        new Part(choice.Current ? "  " + Current : marks && Followed(choice) ? new string(' ', Current.Length + 2) : "", Tone.Success),
         new Part(choice.Detail.Length == 0 ? "" : "  " + choice.Detail, Tone.Muted),
         new Part(choice.Note.Length == 0 ? "" : "  " + choice.Note, choice.Off ? Tone.Muted : choice.NoteTone ?? Tone.Success),
         new Part(choice.Waits ? "  " + new string(Screen.Dot, Screen.Dots) : "", Tone.Muted));
 
-    // Whether something stands after the name of the choice.
+    // Whether something stands after the name of the choice, but for the mark of the choice of now.
     static bool Followed(Choice choice) => choice.Detail.Length + choice.Note.Length > 0 || choice.Waits;
 
     // A list on a page: where its pointer is and what of it is in the window, from one drawing to the next.
@@ -164,14 +174,18 @@ public static class Picker
             At = Math.Clamp(At, 0, choices.Count - 1);
 
             // Names that something follows are as wide as the widest of them, so that what follows stands in a column.
-            var widest = choices.Where(Followed).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
+            // In a list with a choice of now its mark has a column of its own, where `Back` names its key.
+            var marks = choices.Any(choice => choice.Current);
+            bool Padded(Choice choice) => Followed(choice) || choice.Current;
+            var widest = choices.Where(Padded).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
             var lines = new List<Line>();
             int? waits = null;
             top = Window(lines, choices.Count, At, top, rows, out var pointer, index =>
             {
                 if (choices[index].Waits)
                     waits = lines.Count;
-                return Row(index == At, choices[index], Followed(choices[index]) ? choices[index].Name.PadRight(widest) : choices[index].Name);
+                var name = Padded(choices[index]) ? choices[index].Name.PadRight(widest) : choices[index].Name;
+                return Row(index == At, choices[index], name, marks && !(back && index == choices.Count - 1));
             });
 
             // A choice that is off does not blink under the pointer: it does not wait to be chosen.

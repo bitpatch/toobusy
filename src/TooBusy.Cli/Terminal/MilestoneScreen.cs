@@ -11,11 +11,12 @@ public static class MilestoneScreen
     // is chosen.
     public static MilestoneChoice? Ask(Page page, IReadOnlyList<Milestone>? open, MilestoneStanding standing)
     {
+        // The milestone that is chosen now is marked among the others: one that is gone is not among them.
         var offered = MilestoneOrder.Sorted(open ?? []);
         Choice[] choices =
         [
-            .. offered.Select(milestone => new Choice(milestone.Title, Describe(milestone))),
-            new("No milestone", "take tasks whatever their milestone"),
+            .. offered.Select(milestone => new Choice(milestone.Title, Describe(milestone), Current: standing.Choice is { Title: { } title } && title == milestone.Title)),
+            new("No milestone", "take tasks whatever their milestone", Current: standing.Choice is { Title: null }),
         ];
         var reason = standing.State == MilestoneState.Gone ? $"The milestone “{standing.Name}” is not open any more. Choose again."
             : open is null ? "The milestones cannot be read from GitHub, so there are none to choose from."

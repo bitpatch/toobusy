@@ -211,7 +211,7 @@ Every command takes its colours from one palette, defined in one place. Each rol
 |---|---|---|---|
 | accent | `#D4503F` | `#B03A2E` | the selected line, the cursor, the chosen tab (as its ground, which is the light value in a dark terminal too), the step that is asked, the mark that turns and the steps of a plan that are done on the page of a run, the sign of a check that is running, a command in a message |
 | error | `#F0647E` | `#C2255C` | `✘` and the text of a failure, the reason an answer is refused, the blocking labels in the settings of the menu |
-| success | `#4EC97A` | `#1A7F37` | `✔`, steps that are done, a board that is linked |
+| success | `#4EC97A` | `#1A7F37` | `✔`, steps that are done, a board that is linked, a value in a list, `current` |
 | warning | `#E5C07B` | `#9A6700` | `!` and the text of a warning |
 | muted | `#808080` | `#767676` | `○`, steps to come and skipped checks, `fix:`, explanations, rules, what a key does, `toobusy:` in a message |
 | quiet | `#B0B0B0` | `#585858` | the name of a key among the hints, a tab that is not chosen |
@@ -329,6 +329,15 @@ An assistant that sets a project up for its owner starts with `toobusy init --as
 **The questions.** Every question has the shape the screen gives it: its name and a line that says what it is about and what to do, then the choices or the text, then the keys it understands. A refused answer stays in its question, and the reason takes the place of the line under the name; in the question about the project it takes the place of the line that explains the tab, and a board that cannot be reached is said over the question.
 
 - **`Back`.** Wherever Escape goes back and does not leave the page, a list ends with a row `Back` that does what Escape does: in the lists the menu opens, the settings among them, and in the questions they open, in a selection, a multiple choice, a confirmation and the lists of the boards. Where Escape would leave the page there is no `Back`: in the menu, which has `Exit`, in the first question of `init`, which is the one about the project and not those about its statuses, on the first run and in `toobusy milestone`, `model` and `effort`. A page that waits for the tracker has it under its dots. A question that is answered with a text has no list to end with it, and a list of the boards that a filter has emptied has none either; Escape goes back from them. The row names its key at its right, `Back  esc`, and the line of the keys does not say `esc back` then: it says so only where there is no such row. Where Escape leaves the page, the keys go on saying `esc exit`, except in the menu, whose `Exit` row names the key at its right in the same way: `Exit  esc`.
+- **`current`.** In a list where one choice is made, the one that the settings or the choices of the user have now is marked `current`, in the colour of success, wherever the pointer goes: in the questions of a setup over settings that exist, those of the menu among them, the label, the permission mode, the statuses of the board of the settings and the board itself, and in the lists of the milestone, the model and the effort, where it marks `Other…` for a model of another name. The mark stands right after the name, in a column of its own that the other rows keep empty, so that what explains the names stands in one column after it, and `Back` names its key in that column:
+
+  ```
+    auto     current  a model of Claude Code looks at every action before it is done
+  ❯ dontAsk           only what the settings of Claude Code in the project allow is done
+    Back     esc
+  ```
+
+  Where nothing is chosen yet, as in a first setup, nothing is marked, and the pointer starts on what is proposed all the same; a status of another board than that of the settings is not marked either. A multiple choice shows what is chosen by its marks, and a text has no list.
 - A selection moves with Up and Down, or with `k` and `j`, a multiple choice marks with the space bar, and the last question of a setup is `Save and exit` over `Exit without saving`. A list that does not fit shows eight rows, five for the boards, and says above and below how many rows are beyond them: `↑ 2 more`, `↓ 4 more`.
 - A text is edited where the cursor is: Left, Right, Home and End move it, Backspace and Delete remove a character, and Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W do what they do in a shell. A pasted text is drawn once.
 

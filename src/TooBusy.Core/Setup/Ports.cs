@@ -31,7 +31,8 @@ public interface ISetupDialog
     bool? Confirm(string question);
 }
 
-public sealed record SetupOption(string Name, string Detail);
+// Current is the option the settings have now, which the screen marks among the others.
+public sealed record SetupOption(string Name, string Detail, bool Current = false);
 
 // Steps are the names of the steps of the setup in their order; Step is the index of the one that is asked now,
 // and their number when they are all done and only the confirmation is left.
@@ -113,7 +114,12 @@ public sealed record BoardQuestion(
     IReadOnlyList<SetupOwner> Owners,
     Func<string, string?> RefuseAddress,
     Func<string, string?> RefuseTitle,
-    BoardAnswer? Proposed = null);
+    BoardAnswer? Proposed = null)
+{
+    // The address of the board the settings have now, which the screen marks among the others; null where they
+    // have none, or where there are no settings yet.
+    public string? Saved { get; init; }
+}
 
 public abstract record BoardAnswer
 {
