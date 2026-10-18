@@ -183,7 +183,7 @@ public sealed class RunScreenTests : IDisposable
         var run = new ScriptedRun(async (run, view) =>
         {
             view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null)) });
-            while (!narrow.Tape.Text.Contains("press / to show the menu", StringComparison.Ordinal))
+            while (!narrow.Tape.Text.Contains("Edit src/Export.cs", StringComparison.Ordinal))
                 await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
             return new RunResult(RunEnd.Emptied, 0);
         });
