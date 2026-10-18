@@ -749,7 +749,7 @@ public sealed class Supervisor(
                         told++;
                         steps = look.Steps;
                         (waiting, sendAt) = (false, null);
-                        var message = Briefing.NoAnswer(number, plan.Rules.Owner);
+                        var message = Briefing.NoAnswer(number, plan.Rules.Manual);
                         Say(RunMark.Attention, $"#{number} ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · {session.Open}");
                         Quote(look.Reply, session);
                         Say(RunMark.Note, $"“{message}”");
@@ -799,7 +799,7 @@ public sealed class Supervisor(
                 told++;
                 steps = look.Steps;
                 (waiting, sendAt) = (false, null);
-                var message = Briefing.Alone(number, plan.Rules.Owner);
+                var message = Briefing.Alone(number, plan.Rules.Manual);
                 Say(RunMark.GoesOn, $"#{number} is told to go on without the owner: its turn is cut, and this is the next message of its conversation · {session.Open}");
                 Say(RunMark.Note, $"“{message}”");
                 if (!await session.TellAsync(message, kill))
@@ -966,7 +966,7 @@ public sealed class Supervisor(
         }
         catch (TrackerException refused) when (outcome.Kind != OutcomeKind.Interrupted || closed)
         {
-            // The record is forgotten, so nothing but the label of the owner keeps the next run from the task. A
+            // The record is forgotten, so nothing but the manual label keeps the next run from the task. A
             // task that was wrapped up has its record, and the next run goes on with its session.
             await LeaveAsync(number, session, $"the tracker refused something after its session: {refused.Message}", outcome.Report, await Shut(), kill);
             throw;
@@ -1020,11 +1020,11 @@ public sealed class Supervisor(
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Owner:
-                await LabelAsync(number, rules.Owner, kill);
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Owner), kill);
+                await LabelAsync(number, rules.Manual, kill);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Manual), kill);
                 await MoveAsync(number, BoardStatus.Todo, kill);
                 Say(RunMark.Owner, $"#{number} {task.Title} — waits for the owner after {took}");
-                Say(RunMark.Note, $"#{number} has the {rules.Owner} label and a comment that says what is needed; no run takes it while it has the label");
+                Say(RunMark.Note, $"#{number} has the {rules.Manual} label and a comment that says what is needed; no run takes it while it has the label");
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Interrupted when closed:
@@ -1043,13 +1043,13 @@ public sealed class Supervisor(
         }
     }
 
-    // Leaves a task that the run stops over to the owner: it gets the label of the owner and a comment that says
+    // Leaves a task that the run stops over to the owner: it gets the manual label and a comment that says
     // what went wrong, and goes back among those to do, where the label holds it in a project with a board as in
     // one without. A tracker that refuses any of it is said, and changes nothing of why the run stops. A task that is
     // closed is left closed: it gets the comment only, and no run takes it until its owner opens it again.
     async Task LeaveAsync(int number, IAssistantSession session, string why, string report, bool closed, CancellationToken kill)
     {
-        var owner = plan.Rules.Owner;
+        var manual = plan.Rules.Manual;
         var missing = new List<string>();
         async Task<bool> Try(Func<Task> change)
         {
@@ -1067,7 +1067,7 @@ public sealed class Supervisor(
 
         if (closed)
         {
-            if (await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, owner, closed: true), kill)))
+            if (await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual, closed: true), kill)))
                 Say(RunMark.Note, $"#{number} was closed before its session ended, and is left closed, with a comment that says what went wrong; no run takes it until it is opened again");
             else
                 Say(RunMark.Attention, $"#{number} is closed and did not get the comment that says what went wrong: {missing[0]}");
@@ -1075,12 +1075,12 @@ public sealed class Supervisor(
         }
 
         // Without the label the status is all that holds the task, so it is moved only when the label is put.
-        var labelled = await Try(() => LabelAsync(number, owner, kill));
-        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, owner), kill));
+        var labelled = await Try(() => LabelAsync(number, manual, kill));
+        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual), kill));
         if (labelled)
         {
             await Try(() => MoveAsync(number, BoardStatus.Todo, kill));
-            Say(RunMark.Note, $"#{number} has the {owner} label{(missing.Count == 0 ? " and a comment that says what went wrong" : "")}; no run takes it while it has the label");
+            Say(RunMark.Note, $"#{number} has the {manual} label{(missing.Count == 0 ? " and a comment that says what went wrong" : "")}; no run takes it while it has the label");
         }
 
         if (missing.Count > 0)

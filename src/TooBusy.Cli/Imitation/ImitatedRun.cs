@@ -95,12 +95,12 @@ public sealed class ImitatedTasks : ITaskTracker
     static readonly string[] Types = ["feature", "bug", "chore", "docs"];
 
     readonly List<QueueTask> open = [];
-    readonly string owner;
+    readonly string manual;
     readonly BoardStatuses statuses;
 
     public ImitatedTasks(QueueRules rules, bool killed)
     {
-        owner = rules.Owner;
+        manual = rules.Manual;
         statuses = rules.Statuses;
         string Type(int kind) => rules.Take.Count > 0 ? rules.Take[kind % rules.Take.Count] : Types[kind];
         void Add(int number, string title, string[] labels, BoardStatus status = BoardStatus.Todo, int[]? after = null)
@@ -122,12 +122,12 @@ public sealed class ImitatedTasks : ITaskTracker
             Add(107, "Add a dark theme", [Type(0)], BoardStatus.InProgress);
     }
 
-    // What a made-up session does when it makes a task of what is left of its own: the new task has the label of
-    // the owner and the labels of the first one, and stands as that one does. It is made once.
+    // What a made-up session does when it makes a task of what is left of its own: the new task has the manual
+    // label and the labels of the first one, and stands as that one does. It is made once.
     public void Leave(int number, string title, int from)
     {
         if (open.Find(task => task.Number == from) is { } first && open.TrueForAll(task => task.Number != number))
-            open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [owner, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = statuses.Todo, BlockedBy = [], Parts = [] });
+            open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [manual, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = statuses.Todo, BlockedBy = [], Parts = [] });
     }
 
     // Whether a task carries the label that a run puts on one it had to stop.
@@ -286,7 +286,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
     const string Rounded =
         "A discount is rounded once, to the cent, half up, and the cart and the order show the same price.\n\n- Checked with the tests of the prices: 31 pass.\n- Commit c3d4e5f.\n\n"
         + "Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. "
-        + "I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
+        + "I made #108 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
         + "TOOBUSY: partial";
 
     // What the name of a made-up session starts with.

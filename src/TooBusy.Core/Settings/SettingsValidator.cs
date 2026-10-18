@@ -194,18 +194,31 @@ public static partial class SettingsValidator
 
             // The labels a run puts on a task must not make it a task to take, and a task that was interrupted
             // must not be kept out of the next run.
-            var owner = Label(SettingsKeys.OwnerLabel);
+            var manualKey = ManualKey();
+            var manual = Label(manualKey);
             var interrupted = Label(SettingsKeys.InterruptedLabel);
-            if (owner is not null && Has(take, owner))
-                Refuse(entries[SettingsKeys.OwnerLabel], $"the label `{owner}` is in `{SettingsKeys.TakeLabels}` too");
+            if (manual is not null && Has(take, manual))
+                Refuse(entries[manualKey], $"the label `{manual}` is in `{SettingsKeys.TakeLabels}` too");
             if (interrupted is not null && Has(take, interrupted))
                 Refuse(entries[SettingsKeys.InterruptedLabel], $"the label `{interrupted}` is in `{SettingsKeys.TakeLabels}` too");
             if (interrupted is not null && Has(blocking, interrupted))
                 Refuse(entries[SettingsKeys.InterruptedLabel], $"the label `{interrupted}` is in `{SettingsKeys.BlockingLabels}` too");
-            if (owner is not null && interrupted is not null && owner.Equals(interrupted, StringComparison.OrdinalIgnoreCase))
-                Refuse(entries[SettingsKeys.InterruptedLabel], $"must not be the label of `{SettingsKeys.OwnerLabel}`");
+            if (manual is not null && interrupted is not null && manual.Equals(interrupted, StringComparison.OrdinalIgnoreCase))
+                Refuse(entries[SettingsKeys.InterruptedLabel], $"must not be the label of `{manualKey}`");
 
-            return new LabelSettings(blocking ?? [], take ?? [], owner ?? "", interrupted ?? "");
+            return new LabelSettings(blocking ?? [], take ?? [], manual ?? "", interrupted ?? "");
+        }
+
+        // The key the file names the manual label by: its own, or the name it had before, which is read as it was.
+        // A file that sets both is told to leave one.
+        string ManualKey()
+        {
+            if (!entries.TryGetValue(SettingsKeys.FormerManualLabel, out var former))
+                return SettingsKeys.ManualLabel;
+            if (!entries.ContainsKey(SettingsKeys.ManualLabel))
+                return SettingsKeys.FormerManualLabel;
+            Refuse(former, $"is the name `{SettingsKeys.ManualLabel}` had before, and the file sets that too: leave one");
+            return SettingsKeys.ManualLabel;
         }
 
         static bool Has(string[]? labels, string label) => labels is not null && labels.Contains(label, StringComparer.OrdinalIgnoreCase);

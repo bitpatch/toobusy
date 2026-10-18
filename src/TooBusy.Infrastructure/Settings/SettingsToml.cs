@@ -19,7 +19,7 @@ public static class SettingsToml
             + "One that is not named here is called as GitHub calls it on a new board: Todo, In Progress, Done."),
         ("queue.labels",
             "A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.\n"
-            + "A run puts `owner` on a task that waits for the owner, which is not taken while it has it,\n"
+            + "A run puts `manual` on a task that waits for the owner, which is not taken while it has it,\n"
             + "and `interrupted` on a task it had to stop, which is taken first."),
         ("assistant", "Who does the tasks."),
         ("session", "What a session starts with: the skill of the project that says how a task is done here without its owner."),
@@ -47,8 +47,13 @@ public static class SettingsToml
         if (parsed.Errors.Count > 0)
             throw new FormatException("The existing settings are not valid TOML: " + parsed.Errors[0].Describe(SettingsFile.DisplayPath));
 
-        var wanted = Values(settings, [.. parsed.Document.Entries.Select(entry => entry.Key)]);
+        // A text that names the manual label by the name it had before has the key renamed where it stands, with
+        // its value and its comment.
         var edits = new List<Edit>();
+        if (parsed.Rename(SettingsKeys.FormerManualLabel, SettingsKeys.ManualLabel) is { } former)
+            edits.Add(new Edit(former.Span.Start.Offset, former.Span.End.Offset + 1, SettingsKeys.ManualLabel[(SettingsKeys.ManualLabel.LastIndexOf('.') + 1)..]));
+
+        var wanted = Values(settings, [.. parsed.Document.Entries.Select(entry => entry.Key)]);
         var additions = new Dictionary<string, StringBuilder>();
         foreach (var (key, value) in wanted)
         {
@@ -100,8 +105,11 @@ public static class SettingsToml
         (SettingsKeys.DoneStatus, Status(settings, SettingsKeys.DoneStatus, has, statuses => statuses.Done)),
         (SettingsKeys.BlockingLabels, settings.Queue.Labels.Blocking),
         (SettingsKeys.TakeLabels, settings.Queue.Labels.Take),
-        (SettingsKeys.OwnerLabel, settings.Queue.Labels.Owner),
+        (SettingsKeys.ManualLabel, settings.Queue.Labels.Manual),
         (SettingsKeys.InterruptedLabel, settings.Queue.Labels.Interrupted),
+
+        // What is left of the former name is a text that names the manual label by both: the old one goes.
+        (SettingsKeys.FormerManualLabel, null),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
         (SettingsKeys.PermissionMode, settings.Assistant.PermissionMode),
         (SettingsKeys.SessionSkill, settings.Skill),
@@ -271,6 +279,19 @@ public static class SettingsToml
             var key = prefix + Name(pair.Key!);
             Entries.Add(new SettingsEntry(key, Value(pair.Value!), pair.Span.Start.Line + 1));
             Places.Add((key, pair, pair.Value!));
+        }
+
+        // Takes the key that is written under one name as written under another, when the text does not have that
+        // one already: gives the last part of the key, which is to be written anew, or null when nothing is renamed.
+        public BareKeyOrStringValueSyntax? Rename(string from, string to)
+        {
+            if (Places.FindIndex(place => place.Key == from) is not (>= 0 and var at) || Places.Exists(place => place.Key == to))
+                return null;
+
+            var (_, pair, value) = Places[at];
+            Places[at] = (to, pair, value);
+            Entries[Entries.FindIndex(entry => entry.Key == from)] = Entries.Single(entry => entry.Key == from) with { Key = to };
+            return pair.Key!.DotKeys.Select(dotted => dotted.Key!).LastOrDefault() ?? pair.Key!.Key!;
         }
     }
 }

@@ -17,7 +17,7 @@ public sealed class CliAppTests : IDisposable
         [queue.labels]
         blocking = ["manual"]
         take = []
-        owner = "manual"
+        manual = "manual"
         interrupted = "interrupted"
 
         [assistant]
@@ -27,7 +27,7 @@ public sealed class CliAppTests : IDisposable
     // What the settings of a project that names a skill end with.
     const string SkillOfTheProject = "\n\n[session]\nskill = \"task-auto\"\n";
 
-    // The settings of a project with a board, labels that let a task in, and a label of the owner of its own.
+    // The settings of a project with a board, labels that let a task in, and a manual label of its own.
     const string SettingsWithABoard = """
         version = 1
 
@@ -38,7 +38,7 @@ public sealed class CliAppTests : IDisposable
         [queue.labels]
         blocking = ["draft"]
         take = ["feature", "bug"]
-        owner = "needs-owner"
+        manual = "needs-owner"
         interrupted = "interrupted"
 
         [assistant]
@@ -125,7 +125,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.StartsWith("# How toobusy works\n", output, StringComparison.Ordinal);
         Assert.Contains("No settings are read here, so its labels are not named below", output, StringComparison.Ordinal);
-        Assert.Contains(Briefing.Task(new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []), new NewTasks("<the label of the owner>", [], "<the milestone the user works on>", "<the address of the board>"), interrupted: false), output, StringComparison.Ordinal);
+        Assert.Contains(Briefing.Task(new(12, "<the title of the task>", "<the address of the task>", [], BoardStatus.Todo, "Todo", [], []), new NewTasks("<the manual label>", [], "<the milestone the user works on>", "<the address of the board>"), interrupted: false), output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1764,7 +1764,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    manual",
+                "✔ Manual label     manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
@@ -1804,8 +1804,9 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
         Assert.Contains("Assistant    own model · high", output, StringComparison.Ordinal);
-        Assert.Contains("Setting up this project", output, StringComparison.Ordinal);
-        Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
+        Assert.Contains("Changing the settings", output, StringComparison.Ordinal);
+        Assert.Contains("Choose a setting to change it: a change is saved when you say so.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("The setup was left", output, StringComparison.Ordinal);
         Assert.Contains("press esc again to exit", output, StringComparison.Ordinal);
     }
 
@@ -2122,15 +2123,100 @@ public sealed class CliAppTests : IDisposable
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        // Settings, which open on the tab without a project; `Back` under it; the last of the menu.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter);
+        // Settings; `Back`, the last of their list; the last of the menu.
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Up, Keys.Enter, Keys.Up, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("❯ Back", output, StringComparison.Ordinal);
-        Assert.Contains("The setup was left: nothing was changed.", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Back             esc", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("The setup was left", output, StringComparison.Ordinal);
         Assert.DoesNotContain("press esc again to exit", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheSettingsOfTheMenuListEverySettingWithItsValue()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+        await ChooseAllAsync();
+
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        foreach (var row in (string[])[
+            "❯ Project          none", "  Blocking labels  manual", "  Labels to take   any task", "  Manual label     manual", "  Interrupt label  interrupted",
+            "  Skill            task-auto", "  Before a task    none", "  After a task     none", "  Branch           none", "  Permission mode  auto by default", "  Back             esc"])
+        {
+            Assert.Contains(row, output, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task ASettingThatIsLeftChangedIsSavedWhenTheUserSaysSo()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Settings; the skill, typed and left with Escape; saved; out of the settings and of the menu.
+        var keys = new Keys()
+            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Down, Keys.Down, Keys.Down, Keys.Down, Keys.Enter)
+            .Type("night-shift")
+            .Press(Keys.Escape, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("  → Skill: none → night-shift", output, StringComparison.Ordinal);
+        Assert.Contains("Save the change?", output, StringComparison.Ordinal);
+        Assert.Contains("The settings are written to .toobusy/settings.toml. Commit the file.", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Skill            night-shift", output, StringComparison.Ordinal);
+        Assert.Contains("[session]\nskill = \"night-shift\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+        Assert.Contains("✔ Skill            night-shift", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ The settings are written to .toobusy/settings.toml. Commit the file.", Report(output), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASettingThatIsNotSavedLeavesTheFileAsItWas()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Settings; the branch, typed and confirmed; not saved; out.
+        var keys = new Keys()
+            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Up, Keys.Up, Keys.Up, Keys.Enter)
+            .Type("develop")
+            .Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("  → Branch: none → develop", output, StringComparison.Ordinal);
+        Assert.Contains("The change was not saved.", output, StringComparison.Ordinal);
+        Assert.Equal(Settings, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+        Assert.DoesNotContain("Branch", Report(output), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASettingThatIsLeftAsItWasAsksNothing()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // Settings; the blocking labels, typed as they are, and left; out.
+        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape, Keys.Escape);
+
+        var (exit, output, _) = await RunWithKeysAsync(keys, []);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Names separated by commas. A task with any of them is never taken.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Save the change?", output, StringComparison.Ordinal);
+        Assert.Equal(Settings, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
     }
 
     [Fact]
@@ -2151,7 +2237,7 @@ public sealed class CliAppTests : IDisposable
         Assert.DoesNotContain("Write the settings?", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          https://github.com/users/example/projects/1", output, StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  draft", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Owner's label    manual", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Manual label     manual", output, StringComparison.Ordinal);
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
@@ -2258,7 +2344,7 @@ public sealed class CliAppTests : IDisposable
               │ A discount is rounded once, to the cent, half up, and the cart and the order show the same price.
               │ - Checked with the tests of the prices: 31 pass.
               │ - Commit c3d4e5f.
-              │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.
+              │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.
               “No answer will come: the owner is away, and nobody reads your questions. Go on with task #103 from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `manual` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.”
             ◐ #103 Fix the rounding of a discount — done in part in 11 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
@@ -2311,7 +2397,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
 
-        // No project; `manual` blocks; any label; `manual` is the label of the owner too, the one the list points at
+        // No project; `manual` blocks; any label; `manual` is the manual label too, the one the list points at
         // as proposed; a new label for interrupted tasks, by the name that is proposed; no skill, the proposed name
         // being deleted; yes.
         var keys = new Keys().Press(
@@ -2328,7 +2414,7 @@ public sealed class CliAppTests : IDisposable
             StringComparison.Ordinal);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("blocking = [\"manual\"]", written, StringComparison.Ordinal);
-        Assert.Contains("owner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("manual = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
         Assert.DoesNotContain("session", written, StringComparison.Ordinal);
         Assert.Contains("✔ Skill            none", Report(output), StringComparison.Ordinal);
         Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
@@ -2412,7 +2498,7 @@ public sealed class CliAppTests : IDisposable
         var (exit, output, _) = await RunAsync("init", "--help");
 
         Assert.Equal(0, exit);
-        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--owner-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "--branch <name>", "--no-branch", "--permission-mode <mode>", "-y, --yes"])
+        foreach (var option in (string[])["--board <URL>", "--no-board", "--new-board <title>", "--board-owner <login>", "--blocking-label <name>", "--no-blocking-labels", "--take-label <name>", "--no-take-labels", "--manual-label <name>", "--interrupt-label <name>", "--skill <name>", "--no-skill", "--before <command>", "--no-before", "--after <command>", "--no-after", "--branch <name>", "--no-branch", "--permission-mode <mode>", "-y, --yes"])
             Assert.Contains(option, output, StringComparison.Ordinal);
     }
 
@@ -2460,7 +2546,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    manual",
+                "✔ Manual label     manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
@@ -2471,7 +2557,7 @@ public sealed class CliAppTests : IDisposable
             ],
             output.Split(Environment.NewLine));
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
-        Assert.Contains("blocking = []\ntake = []\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = []\ntake = []\nmanual = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
         Assert.EndsWith("[session]\nskill = \"task-auto\"\n", written, StringComparison.Ordinal);
         Assert.DoesNotContain("board", written.Replace("# ", "", StringComparison.Ordinal).Split('\n').Where(line => line.Contains('=', StringComparison.Ordinal)).Aggregate("", string.Concat), StringComparison.Ordinal);
     }
@@ -2665,12 +2751,12 @@ public sealed class CliAppTests : IDisposable
 
         var (exit, output, _) = await RunAsync(
             Context(processes),
-            ["init", "-y", "--board", "https://github.com/orgs/acme/projects/3/views/1", "--blocking-label", "manual", "--blocking-label", "draft", "--take-label", "bug", "--take-label", "feature", "--owner-label", "manual", "--interrupt-label", "paused"]);
+            ["init", "-y", "--board", "https://github.com/orgs/acme/projects/3/views/1", "--blocking-label", "manual", "--blocking-label", "draft", "--take-label", "bug", "--take-label", "feature", "--manual-label", "manual", "--interrupt-label", "paused"]);
 
         Assert.Equal(0, exit);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
         Assert.Contains("board = \"https://github.com/orgs/acme/projects/3\"", written, StringComparison.Ordinal);
-        Assert.Contains("blocking = [\"manual\", \"draft\"]\ntake = [\"bug\", \"feature\"]\nowner = \"manual\"\ninterrupted = \"paused\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = [\"manual\", \"draft\"]\ntake = [\"bug\", \"feature\"]\nmanual = \"manual\"\ninterrupted = \"paused\"", written, StringComparison.Ordinal);
         Assert.Contains("✔ Project          https://github.com/orgs/acme/projects/3", output, StringComparison.Ordinal);
         Assert.Contains("The project was linked to acme/rocket.", output, StringComparison.Ordinal);
         Assert.Contains("The label “paused” was made in acme/rocket.", output, StringComparison.Ordinal);
@@ -2685,7 +2771,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tTodo\nstatus\tDoing\nstatus\tDone\n");
 
-        var (exit, output, error) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--owner-label", "manual", "--no-skill"]);
+        var (exit, output, error) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--manual-label", "manual", "--no-skill"]);
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
@@ -2721,7 +2807,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tTodo\nstatus\tDoing\nstatus\tDone\n");
 
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--in-progress-status", "Working", "--owner-label", "manual", "--no-skill"]);
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--in-progress-status", "Working", "--manual-label", "manual", "--no-skill"]);
 
         Assert.Equal(1, exit);
         Assert.EndsWith("✘ In Progress status: The board has no status “Working”: it has Todo, Doing, Done. The settings were not written." + Environment.NewLine, output, StringComparison.Ordinal);
@@ -2745,7 +2831,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHubWithProjects(Labels);
 
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--owner-label", "manual", "--no-skill"]);
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--manual-label", "manual", "--no-skill"]);
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("status", output, StringComparison.Ordinal);
@@ -2762,7 +2848,7 @@ public sealed class CliAppTests : IDisposable
         // Enter on every question, the last one included.
         var keys = new Keys().Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--board", "https://github.com/orgs/acme/projects/3", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted", "--no-skill");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--board", "https://github.com/orgs/acme/projects/3", "--blocking-label", "manual", "--take-label", "bug", "--manual-label", "manual", "--interrupt-label", "interrupted", "--no-skill");
 
         Assert.Equal(0, exit);
         var page = output.Split(Screen.Leave)[0];
@@ -2786,7 +2872,7 @@ public sealed class CliAppTests : IDisposable
         // Enter on every question, the last one included.
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--board", "https://github.com/orgs/acme/projects/3", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted", "--no-skill");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--board", "https://github.com/orgs/acme/projects/3", "--blocking-label", "manual", "--take-label", "bug", "--manual-label", "manual", "--interrupt-label", "interrupted", "--no-skill");
 
         Assert.Equal(0, exit);
         var page = output.Split(Screen.Leave)[0];
@@ -2802,7 +2888,7 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHubWithProjects(labels: "manual\ninterrupted\n");
 
-        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--new-board", "Rocket", "--board-owner", "ann", "--owner-label", "manual"]);
+        var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--new-board", "Rocket", "--board-owner", "ann", "--manual-label", "manual"]);
 
         Assert.Equal(0, exit);
         Assert.Contains("✔ Project          new: Rocket (ann)", output, StringComparison.Ordinal);
@@ -2829,7 +2915,7 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(0, exit);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
-        Assert.Contains("blocking = []\ntake = [\"bug\"]\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = []\ntake = [\"bug\"]\nmanual = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
 
         (exit, _, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-take-labels", "--no-board"]);
 
@@ -2843,7 +2929,7 @@ public sealed class CliAppTests : IDisposable
     [InlineData("✘ Labels to take: manual is a blocking label. The settings were not written.", "--blocking-label", "manual", "--take-label", "manual")]
     [InlineData("✘ Project: rocket is not a project. Use https://github.com/orgs/<org>/projects/<number>. The settings were not written.", "--board", "rocket")]
     [InlineData("✘ Project: A project cannot be made for acme, only for ann. The settings were not written.", "--new-board", "Rocket", "--board-owner", "acme")]
-    [InlineData("✘ Interrupt label: manual is the label of the owner. The settings were not written.", "--owner-label", "manual", "--interrupt-label", "manual")]
+    [InlineData("✘ Interrupt label: manual is the manual label. The settings were not written.", "--manual-label", "manual", "--interrupt-label", "manual")]
     public async Task WithYesAValueThatFailsItsCheckIsAnErrorAndNothingIsWritten(string failure, params string[] options)
     {
         GitRepository();
@@ -2986,15 +3072,15 @@ public sealed class CliAppTests : IDisposable
         var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
 
         // Enter on every question, the last one included: no board, `manual` blocks, `bug` is taken, `manual` is
-        // the label of the owner, `interrupted` the one of interrupted tasks, and `night-shift` is the skill.
+        // the manual label, `interrupted` the one of interrupted tasks, and `night-shift` is the skill.
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--no-board", "--blocking-label", "manual", "--take-label", "bug", "--owner-label", "manual", "--interrupt-label", "interrupted", "--skill", "night-shift");
+        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--no-board", "--blocking-label", "manual", "--take-label", "bug", "--manual-label", "manual", "--interrupt-label", "interrupted", "--skill", "night-shift");
 
         Assert.Equal(0, exit);
         Assert.Contains("[No project]", output, StringComparison.Ordinal);
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
-        Assert.Contains("blocking = [\"manual\"]\ntake = [\"bug\"]\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = [\"manual\"]\ntake = [\"bug\"]\nmanual = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
         Assert.Contains("skill = \"night-shift\"", written, StringComparison.Ordinal);
         Assert.DoesNotContain("was made", Report(output), StringComparison.Ordinal);
     }
@@ -3026,7 +3112,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          Rocket (made up)  https://github.com/users/example/projects/1",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    manual",
+                "✔ Manual label     manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
@@ -3050,7 +3136,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  manual", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Owner's label    manual", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ Manual label     manual", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Skill            none", Report(output), StringComparison.Ordinal);
         Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, Report(output), StringComparison.Ordinal);
     }
@@ -3074,7 +3160,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("owner=bitpatch") && asked.Arguments.Contains("name=toobusy"));
         Assert.Contains("Toobusy  https://github.com/orgs/bitpatch/projects/4  linked to this repository", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          Toobusy  https://github.com/orgs/bitpatch/projects/4", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Owner's label    manual", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ Manual label     manual", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Interrupt label  interrupted", Report(output), StringComparison.Ordinal);
         Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Contains("create"));
     }
@@ -3478,7 +3564,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains(
             """
-            2. **Which tasks are taken.** Take: `feature`, `bug`; blocking: `draft`; owner: `needs-owner`; interrupted: `interrupted`.
+            2. **Which tasks are taken.** Take: `feature`, `bug`; blocking: `draft`; manual: `needs-owner`; interrupted: `interrupted`.
             3. **The board.** The board is https://github.com/orgs/acme/projects/1.
             4. **The owner's own choices.** Milestone: no milestone; model: the assistant's own; effort: high.
             5. **The instructions of the project.** The project's own; toobusy does not read them.
@@ -3517,7 +3603,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.StartsWith("## Step 2 of 9: Which tasks are taken\n\nAs things are: the labels to take: `feature`, `bug`;", labels, StringComparison.Ordinal);
         Assert.Contains("The labels of acme/rocket: `bug`, `feature`, `draft`, `question`. The settings name `needs-owner`, `interrupted`, which the repository does not have.", labels, StringComparison.Ordinal);
-        Assert.Contains("    toobusy init --yes --take-label feature,bug --blocking-label draft --owner-label needs-owner --interrupt-label interrupted\n", labels, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --take-label feature,bug --blocking-label draft --manual-label needs-owner --interrupt-label interrupted\n", labels, StringComparison.Ordinal);
         Assert.EndsWith("Next: `toobusy init --assist 3`\n", labels, StringComparison.Ordinal);
         Assert.DoesNotContain("# Setting a project up", labels, StringComparison.Ordinal);
 

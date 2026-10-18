@@ -6,14 +6,14 @@ namespace TooBusy.Core.Queue;
 // must stand as one to do. Statuses are what that board calls the statuses a run knows. Skip are the labels this run
 // was told to leave out, whatever the settings say: a task with one of them is held for this run, as one with a
 // blocking label is, but the task a run has a session for already is gone on with all the same.
-public sealed record QueueRules(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Owner, string Interrupted, bool Board)
+public sealed record QueueRules(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Manual, string Interrupted, bool Board)
 {
     public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
 
     public IReadOnlyList<string> Skip { get; init; } = [];
 
     public static QueueRules Of(ProjectSettings settings) => new(
-        settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Owner, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null)
+        settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Manual, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null)
     {
         Statuses = settings.Tracker.Statuses,
     };
@@ -80,8 +80,8 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
     {
         if (rules.Blocking.FirstOrDefault(task.Has) is { } blocking)
             return $"it has the {blocking} label";
-        if (task.Has(rules.Owner))
-            return $"it waits for the owner: it has the {rules.Owner} label";
+        if (task.Has(rules.Manual))
+            return $"it waits for the owner: it has the {rules.Manual} label";
         if (rules.Take.Count > 0 && !rules.Take.Any(task.Has))
             return $"it has none of the labels to take: {string.Join(", ", rules.Take)}";
         return null;

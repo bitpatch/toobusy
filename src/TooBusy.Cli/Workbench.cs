@@ -254,7 +254,7 @@ public sealed record Workbench(
             return (null, "`gh` is not logged in to github.com, so the labels cannot be read.");
 
         var named = settings.Queue.Labels;
-        string[] ofSettings = [.. named.Blocking, .. named.Take, named.Owner, named.Interrupted];
+        string[] ofSettings = [.. named.Blocking, .. named.Take, named.Manual, named.Interrupted];
         return ([.. (await Tracker.ReadLabelsAsync(Repository, cancellationToken)).Concat(ofSettings).Distinct(StringComparer.OrdinalIgnoreCase)], null);
     }
 

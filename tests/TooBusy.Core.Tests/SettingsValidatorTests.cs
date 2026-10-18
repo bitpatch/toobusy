@@ -14,14 +14,14 @@ public class SettingsValidatorTests
             (SettingsKeys.TrackerBoard, "https://github.com/orgs/bitpatch/projects/3"),
             (SettingsKeys.BlockingLabels, Labels("manual", "draft")),
             (SettingsKeys.TakeLabels, Labels("feature", "bug")),
-            (SettingsKeys.OwnerLabel, "manual"),
+            (SettingsKeys.ManualLabel, "manual"),
             (SettingsKeys.InterruptedLabel, "paused")));
 
         Assert.Empty(result.Errors);
         Assert.Equal(new TrackerSettings("github", "https://github.com/orgs/bitpatch/projects/3"), result.Settings!.Tracker);
         Assert.Equal(["manual", "draft"], result.Settings.Queue.Labels.Blocking);
         Assert.Equal(["feature", "bug"], result.Settings.Queue.Labels.Take);
-        Assert.Equal("manual", result.Settings.Queue.Labels.Owner);
+        Assert.Equal("manual", result.Settings.Queue.Labels.Manual);
         Assert.Equal("paused", result.Settings.Queue.Labels.Interrupted);
         Assert.Equal(new AssistantSettings("claude-code"), result.Settings.Assistant);
     }
@@ -42,7 +42,7 @@ public class SettingsValidatorTests
     [InlineData(SettingsKeys.TrackerType)]
     [InlineData(SettingsKeys.BlockingLabels)]
     [InlineData(SettingsKeys.TakeLabels)]
-    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.ManualLabel)]
     [InlineData(SettingsKeys.InterruptedLabel)]
     [InlineData(SettingsKeys.AssistantType)]
     public void ARequiredKeyMustBeThere(string key)
@@ -69,7 +69,7 @@ public class SettingsValidatorTests
     [InlineData(SettingsKeys.TrackerBoard, 3L)]
     [InlineData(SettingsKeys.BlockingLabels, "manual")]
     [InlineData(SettingsKeys.TakeLabels, 1L)]
-    [InlineData(SettingsKeys.OwnerLabel, 1L)]
+    [InlineData(SettingsKeys.ManualLabel, 1L)]
     [InlineData(SettingsKeys.InterruptedLabel, true)]
     [InlineData(SettingsKeys.AssistantType, 0L)]
     public void AValueOfTheWrongTypeIsRefused(string key, object value)
@@ -406,7 +406,7 @@ public class SettingsValidatorTests
     }
 
     [Theory]
-    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.ManualLabel)]
     [InlineData(SettingsKeys.InterruptedLabel)]
     public void ALabelOfARunNeedsAName(string key)
     {
@@ -416,7 +416,7 @@ public class SettingsValidatorTests
     }
 
     [Theory]
-    [InlineData(SettingsKeys.OwnerLabel)]
+    [InlineData(SettingsKeys.ManualLabel)]
     [InlineData(SettingsKeys.InterruptedLabel)]
     public void ALabelOfARunIsNotALabelToTake(string key)
     {
@@ -426,11 +426,36 @@ public class SettingsValidatorTests
     }
 
     [Fact]
-    public void TheLabelOfTheOwnerMayBeABlockingOne()
+    public void TheManualLabelMayBeABlockingOne()
     {
-        var result = SettingsValidator.Validate(Document((SettingsKeys.BlockingLabels, Labels("manual")), (SettingsKeys.OwnerLabel, "manual")));
+        var result = SettingsValidator.Validate(Document((SettingsKeys.BlockingLabels, Labels("manual")), (SettingsKeys.ManualLabel, "manual")));
 
         Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void TheManualLabelIsReadUnderTheNameItHadBefore()
+    {
+        var result = SettingsValidator.Validate(Document((SettingsKeys.ManualLabel, null), (SettingsKeys.FormerManualLabel, "ask")));
+
+        Assert.Empty(result.Errors);
+        Assert.Equal("ask", result.Settings!.Queue.Labels.Manual);
+    }
+
+    [Fact]
+    public void AnErrorOfTheManualLabelStandsAtTheNameTheFileGivesIt()
+    {
+        var error = OnlyError(Document((SettingsKeys.ManualLabel, null), (SettingsKeys.FormerManualLabel, "Bug"), (SettingsKeys.TakeLabels, Labels("bug"))));
+
+        Assert.Equal(new SettingsError(SettingsKeys.FormerManualLabel, LineOf(SettingsKeys.FormerManualLabel), "the label `Bug` is in `queue.labels.take` too"), error);
+    }
+
+    [Fact]
+    public void TheManualLabelIsNotNamedTwice()
+    {
+        var error = OnlyError(Document((SettingsKeys.FormerManualLabel, "ask")));
+
+        Assert.Equal(new SettingsError(SettingsKeys.FormerManualLabel, LineOf(SettingsKeys.FormerManualLabel), "is the name `queue.labels.manual` had before, and the file sets that too: leave one"), error);
     }
 
     [Fact]
@@ -444,9 +469,9 @@ public class SettingsValidatorTests
     [Fact]
     public void TheTwoLabelsOfARunDiffer()
     {
-        var error = OnlyError(Document((SettingsKeys.OwnerLabel, "manual"), (SettingsKeys.InterruptedLabel, "Manual")));
+        var error = OnlyError(Document((SettingsKeys.ManualLabel, "manual"), (SettingsKeys.InterruptedLabel, "Manual")));
 
-        Assert.Equal(new SettingsError(SettingsKeys.InterruptedLabel, LineOf(SettingsKeys.InterruptedLabel), "must not be the label of `queue.labels.owner`"), error);
+        Assert.Equal(new SettingsError(SettingsKeys.InterruptedLabel, LineOf(SettingsKeys.InterruptedLabel), "must not be the label of `queue.labels.manual`"), error);
     }
 
     [Fact]
@@ -526,13 +551,13 @@ public class SettingsValidatorTests
         ("queue.labels", ""),
         (SettingsKeys.BlockingLabels, Array.Empty<object>()),
         (SettingsKeys.TakeLabels, Array.Empty<object>()),
-        (SettingsKeys.OwnerLabel, "needs-owner"),
+        (SettingsKeys.ManualLabel, "needs-owner"),
         (SettingsKeys.InterruptedLabel, "interrupted"),
         ("assistant", ""),
         (SettingsKeys.AssistantType, "claude-code"),
     ];
 
-    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter, "workspace", SettingsKeys.WorkspaceBranch, SettingsKeys.PermissionMode];
+    static readonly string[] Order = [.. Valid.Select(pair => pair.Key), SettingsKeys.TrackerBoard, "tracker.statuses", SettingsKeys.TodoStatus, SettingsKeys.InProgressStatus, SettingsKeys.DoneStatus, "session", SettingsKeys.SessionSkill, "task", SettingsKeys.TaskBefore, SettingsKeys.TaskAfter, "workspace", SettingsKeys.WorkspaceBranch, SettingsKeys.PermissionMode, SettingsKeys.FormerManualLabel];
 
     // A valid document with the given keys changed, added, or left out when the value is null.
     // Every key and section has a line of its own, the same in every document.

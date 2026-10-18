@@ -21,7 +21,7 @@ public static class Briefing
     {
         // A task that waits for the owner must be one a run takes once the owner has answered: it gets the labels
         // of this task that let a task in.
-        var take = task.Labels.Where(label => ground.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(ground.Owner, StringComparison.OrdinalIgnoreCase)).ToList();
+        var take = task.Labels.Where(label => ground.Take.Contains(label, StringComparer.OrdinalIgnoreCase) && !label.Equals(ground.Manual, StringComparison.OrdinalIgnoreCase)).ToList();
         var labels = take.Count == 0 ? ""
             : $", and {(take.Count == 1 ? "the label" : "the labels")} {string.Join(", ", take.Select(label => $"`{label}`"))}, as task #{task.Number} has, so that a run takes it after that";
         var milestone = ground.Milestone is { } works ? $"Put it into the milestone `{works}`, the one the owner works on."
@@ -73,7 +73,7 @@ public static class Briefing
             Do everything that does not depend on the owner, leave nothing broken, and commit and push that part. What is left, make a new task of it yourself:
 
             - Describe it so that a session that has never seen this one knows exactly what to do: what is left, what is done already and where, and the questions for the owner with the answers you see. Name task #{task.Number} in it.
-            - Put the label `{ground.Owner}` on it, so that no run takes it before the owner answers{labels}.
+            - Put the label `{ground.Manual}` on it, so that no run takes it before the owner answers{labels}.
             - {milestone}{board}
             - Decide whether it blocks what task #{task.Number} blocks: toobusy closes task #{task.Number}, and what waits for it opens.
 
@@ -96,15 +96,15 @@ public static class Briefing
     public static string Command(string skill, QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"/{skill} #{task.Number} {task.Title}");
 
     // What a session that waits for the owner is told.
-    // It says in full what becomes of what the owner must decide, and names the label of the owner: `owner`.
-    public static string Alone(int task, string owner) => string.Create(CultureInfo.InvariantCulture, $"""
-        The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #{task} from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{owner}` on it, so that no run takes it before the owner answers. End your reply with a `{Outcome.Mark}` line.
+    // It says in full what becomes of what the owner must decide, and names the manual label: `manual`.
+    public static string Alone(int task, string manual) => string.Create(CultureInfo.InvariantCulture, $"""
+        The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #{task} from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{manual}` on it, so that no run takes it before the owner answers. End your reply with a `{Outcome.Mark}` line.
         """);
 
     // What a session is told whose reply ends with a line for toobusy and which the assistant still marks as waiting
     // for an answer: it is sent at once, and the next reply that ends with the line ends the task.
-    public static string NoAnswer(int task, string owner) => string.Create(CultureInfo.InvariantCulture, $"""
-        No answer will come: the owner is away, and nobody reads your questions. Go on with task #{task} from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{owner}` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `{Outcome.Mark}` line, and ask nothing after it.
+    public static string NoAnswer(int task, string manual) => string.Create(CultureInfo.InvariantCulture, $"""
+        No answer will come: the owner is away, and nobody reads your questions. Go on with task #{task} from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `{manual}` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `{Outcome.Mark}` line, and ask nothing after it.
         """);
 
     // What a session is told when the usage limit it ran into has reset.

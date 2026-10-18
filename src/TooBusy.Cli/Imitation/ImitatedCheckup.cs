@@ -30,7 +30,7 @@ public sealed class ImitatedCheckup(IClock clock, ISettingsStore settings) : ICh
 
     public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
         AfterAsync<IReadOnlyList<string>?>(
-            settings.Load()?.Settings?.Queue.Labels is { } labels ? [.. labels.Blocking, .. labels.Take, labels.Owner, labels.Interrupted] : [],
+            settings.Load()?.Settings?.Queue.Labels is { } labels ? [.. labels.Blocking, .. labels.Take, labels.Manual, labels.Interrupted] : [],
             cancellationToken);
 
     public SkillLook FindSkill(string name) => ImitatedSetup.Skill(name);

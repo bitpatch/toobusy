@@ -10,7 +10,7 @@ public class ProjectSetupTests
     const string Rocket = "https://github.com/orgs/acme/projects/1";
     const string Moon = "https://github.com/users/denis/projects/7";
 
-    const string OwnerLabel = "Owner's label";
+    const string ManualLabel = "Manual label";
     const string InterruptLabel = "Interrupt label";
     const string NewLabel = "New label…";
     const string TodoStatus = "Todo status";
@@ -37,12 +37,12 @@ public class ProjectSetupTests
         Assert.Equal(new TrackerSettings("github", null), store.Saved!.Tracker);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(new AssistantSettings("claude-code"), store.Saved.Assistant);
 
-        // The label of the owner is one of the repository, so the list points at it.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        // The manual label is one of the repository, so the list points at it.
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
         Assert.Equal("task-auto", store.Saved.Skill);
         Assert.Equal(["The answers above will be written to .toobusy/settings.toml."], dialog.Shown.Notes.Select(note => note.Text));
     }
@@ -62,9 +62,9 @@ public class ProjectSetupTests
             dialog.Shown.Notes);
         Assert.Equal(8, dialog.Shown.Answers.Count);
 
-        // The label of the owner is not one of the repository yet, so its name is asked for after the list.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
-        Assert.Equal("manual", store.Saved!.Queue.Labels.Owner);
+        // The manual label is not one of the repository yet, so its name is asked for after the list.
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, ManualLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        Assert.Equal("manual", store.Saved!.Queue.Labels.Manual);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class ProjectSetupTests
         dialog.Board(new BoardAnswer.Existing($" {Moon}/views/2?layout=board "));
         dialog.Answer("Blocking labels", "manual", "draft");
         dialog.Answer("Labels to take", "bug");
-        dialog.Answer(OwnerLabel, "manual");
+        dialog.Answer(ManualLabel, "manual");
         dialog.Answer(InterruptLabel, "interrupted");
 
         var result = await RunAsync();
@@ -81,7 +81,7 @@ public class ProjectSetupTests
         Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
         Assert.Equal(["draft", "manual"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(
             [
@@ -89,7 +89,7 @@ public class ProjectSetupTests
                 new SetupAnswer("Project", Moon),
                 new SetupAnswer("Blocking labels", "draft, manual"),
                 new SetupAnswer("Labels to take", "bug"),
-                new SetupAnswer(OwnerLabel, "manual"),
+                new SetupAnswer(ManualLabel, "manual"),
                 new SetupAnswer(InterruptLabel, "interrupted"),
                 new SetupAnswer("Skill", "task-auto"),
                 new SetupAnswer("Assistant", "Claude Code"),
@@ -103,7 +103,7 @@ public class ProjectSetupTests
         await RunAsync();
 
         // At the confirmation every step is done.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel, "Skill"], dialog.Shown.Steps);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill"], dialog.Shown.Steps);
         Assert.Equal([0, 1, 2, 3, 4, 5, 6], dialog.Places.Distinct());
         Assert.Equal(dialog.Shown.Steps.Count, dialog.Shown.Step);
     }
@@ -218,11 +218,11 @@ public class ProjectSetupTests
     [Fact]
     public async Task ALabelOfTheRepositoryIsChosenForTheOwnerAndNothingIsMade()
     {
-        dialog.Answer(OwnerLabel, "manual");
+        dialog.Answer(ManualLabel, "manual");
 
         await RunAsync();
 
-        Assert.Equal("manual", store.Saved!.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved!.Queue.Labels.Manual);
         Assert.Empty(tracker.Labelled);
         Assert.DoesNotContain(dialog.Shown.Notes, note => note.Text.Contains("will be made", StringComparison.Ordinal));
     }
@@ -230,45 +230,45 @@ public class ProjectSetupTests
     [Fact]
     public async Task ANewLabelIsNamedAndMadeOnlyWhenTheSetupIsConfirmed()
     {
-        dialog.Answer(OwnerLabel, NewLabel);
-        dialog.Answer(OwnerLabel, " ask the owner ");
+        dialog.Answer(ManualLabel, NewLabel);
+        dialog.Answer(ManualLabel, " ask the owner ");
         dialog.BeforeConfirm = () => Assert.Empty(tracker.Labelled);
 
         var result = await RunAsync();
 
         Assert.Contains(new SetupNote(SetupTone.Plain, "The label “ask the owner” will be made in acme/rocket."), dialog.Shown.Notes);
         Assert.Equal([("acme/rocket", "ask the owner")], tracker.Labelled);
-        Assert.Equal("ask the owner", store.Saved!.Queue.Labels.Owner);
-        Assert.Contains(new SetupAnswer(OwnerLabel, "ask the owner"), result.Answers);
+        Assert.Equal("ask the owner", store.Saved!.Queue.Labels.Manual);
+        Assert.Contains(new SetupAnswer(ManualLabel, "ask the owner"), result.Answers);
     }
 
     [Fact]
     public async Task GoingBackFromTheNameOfANewLabelComesBackToTheLabels()
     {
-        dialog.Answer(OwnerLabel, NewLabel);
-        dialog.Back(OwnerLabel);
-        dialog.Answer(OwnerLabel, "manual");
+        dialog.Answer(ManualLabel, NewLabel);
+        dialog.Back(ManualLabel);
+        dialog.Answer(ManualLabel, "manual");
 
         await RunAsync();
 
-        Assert.Equal([OwnerLabel, OwnerLabel, OwnerLabel, InterruptLabel], dialog.Asked.Skip(3).Take(4));
-        Assert.Equal("manual", store.Saved!.Queue.Labels.Owner);
+        Assert.Equal([ManualLabel, ManualLabel, ManualLabel, InterruptLabel], dialog.Asked.Skip(3).Take(4));
+        Assert.Equal("manual", store.Saved!.Queue.Labels.Manual);
     }
 
     [Fact]
     public async Task ALabelToTakeIsNotOfferedForTheOwnerAndIsRefusedAsANewOne()
     {
         dialog.Answer("Labels to take", "bug");
-        dialog.Answer(OwnerLabel, NewLabel);
-        dialog.Answer(OwnerLabel, "Bug");
-        dialog.Answer(OwnerLabel, "  ");
-        dialog.Answer(OwnerLabel, "manual");
+        dialog.Answer(ManualLabel, NewLabel);
+        dialog.Answer(ManualLabel, "Bug");
+        dialog.Answer(ManualLabel, "  ");
+        dialog.Answer(ManualLabel, "manual");
 
         await RunAsync();
 
-        Assert.Equal(["draft", "feature", "interrupted", "manual", NewLabel], dialog.Offered[OwnerLabel]);
+        Assert.Equal(["draft", "feature", "interrupted", "manual", NewLabel], dialog.Offered[ManualLabel]);
         Assert.Equal(["Bug", "  "], dialog.Refused);
-        Assert.Equal("manual", store.Saved!.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved!.Queue.Labels.Manual);
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public class ProjectSetupTests
     {
         dialog.Answer("Blocking labels", "draft");
         dialog.Answer("Labels to take", "bug");
-        dialog.Answer(OwnerLabel, "manual");
+        dialog.Answer(ManualLabel, "manual");
 
         await RunAsync();
 
@@ -437,7 +437,7 @@ public class ProjectSetupTests
         dialog.Board(new BoardAnswer.Existing(Moon));
         dialog.Answer("Blocking labels");
         dialog.Answer("Labels to take", "bug");
-        dialog.Answer(OwnerLabel, "draft");
+        dialog.Answer(ManualLabel, "draft");
         dialog.Answer(InterruptLabel, "feature");
 
         await RunAsync();
@@ -447,7 +447,7 @@ public class ProjectSetupTests
                 $"Project: Rocket  {Rocket} → Moon  {Moon}",
                 "Blocking labels: manual → none",
                 "Labels to take: bug, retired → bug",
-                "Owner's label: manual → draft",
+                "Manual label: manual → draft",
                 "Interrupt label: interrupted → feature",
             ],
             dialog.Shown.Notes.Where(note => note.Tone == SetupTone.Change).Select(note => note.Text));
@@ -497,7 +497,7 @@ public class ProjectSetupTests
         Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Equal(["manual", "draft"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug", "feature"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(["draft", "manual"], dialog.Refused);
     }
@@ -621,7 +621,7 @@ public class ProjectSetupTests
         Assert.Equal(new TrackerSettings("github", Moon), store.Saved!.Tracker);
         Assert.Equal(["draft"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug", "feature"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal([("acme/rocket", "paused")], tracker.Labelled);
     }
@@ -639,7 +639,7 @@ public class ProjectSetupTests
         Assert.Null(store.Saved!.Tracker.Board);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["feature"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("draft", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("draft", store.Saved.Queue.Labels.Manual);
 
         // No option names the interrupt label: the one of the settings stays.
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
@@ -701,7 +701,7 @@ public class ProjectSetupTests
         Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(8, result.Answers.Count);
         Assert.Equal(["The label “manual” was made in acme/rocket."], result.Done);
@@ -719,7 +719,7 @@ public class ProjectSetupTests
         // The labels are written in the order the repository lists them, as a choice among them is.
         Assert.Equal(["draft", "manual"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(["The project was linked to acme/rocket.", "The label “paused” was made in acme/rocket."], result.Done);
         Assert.Equal([(Moon, "acme/rocket")], tracker.Linked);
@@ -759,7 +759,7 @@ public class ProjectSetupTests
         Assert.Null(store.Saved!.Tracker.Board);
         Assert.Equal(["manual"], store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
-        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Empty(result.Done);
     }
 
@@ -791,9 +791,9 @@ public class ProjectSetupTests
     [InlineData("blocking", "Blocking labels: acme/rocket has no label “urgent”.")]
     [InlineData("take", "Labels to take: acme/rocket has no label “nice”.")]
     [InlineData("shared", "Labels to take: bug is a blocking label.")]
-    [InlineData("owner", "Owner's label: bug is a label to take.")]
-    [InlineData("unnamed", "Owner's label: A label needs a name.")]
-    [InlineData("interrupt", "Interrupt label: manual is the label of the owner.")]
+    [InlineData("manual", "Manual label: bug is a label to take.")]
+    [InlineData("unnamed", "Manual label: A label needs a name.")]
+    [InlineData("interrupt", "Interrupt label: manual is the manual label.")]
     public async Task WithoutQuestionsAnOptionThatFailsItsCheckFailsTheSetupAndNothingIsChanged(string wrong, string failure)
     {
         boards.Read = new SetupBoards([], [new("denis", false), new("acme", true)]);
@@ -807,9 +807,9 @@ public class ProjectSetupTests
             "blocking" => new SetupProposals(Blocking: ["manual", "urgent"]),
             "take" => new SetupProposals(Take: ["nice"]),
             "shared" => new SetupProposals(Blocking: ["bug"], Take: ["bug"]),
-            "owner" => new SetupProposals(Take: ["bug"], Owner: "bug"),
-            "unnamed" => new SetupProposals(Owner: " "),
-            _ => new SetupProposals(Owner: "manual", Interrupted: "manual"),
+            "manual" => new SetupProposals(Take: ["bug"], Manual: "bug"),
+            "unnamed" => new SetupProposals(Manual: " "),
+            _ => new SetupProposals(Manual: "manual", Interrupted: "manual"),
         };
 
         var result = await RunUnaskedAsync(proposals);
@@ -895,7 +895,7 @@ public class ProjectSetupTests
         Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Equal(["manual", "urgent"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["nice"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("waiting", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("waiting", store.Saved.Queue.Labels.Manual);
         Assert.Equal(0, tracker.Calls);
         Assert.Empty(result.Done);
         Assert.Equal([SetupTone.Failure, SetupTone.Muted, SetupTone.Warning], result.Notes.Select(note => note.Tone));
@@ -1599,6 +1599,334 @@ public class ProjectSetupTests
         Assert.Empty(tracker.Labelled);
     }
 
+    [Fact]
+    public async Task TheMenuListsEverySettingWithItsValue()
+    {
+        store.Current = Existing with { Skill = "task-auto", Branch = "develop" };
+
+        var setup = await OpenAsync();
+
+        Assert.Equal(
+            [
+                new SetupValue(SetupSetting.Project, "Project", Rocket, SetupLook.Set),
+                new SetupValue(SetupSetting.Blocking, "Blocking labels", "manual", SetupLook.KeepsOut),
+                new SetupValue(SetupSetting.Take, "Labels to take", "bug, retired", SetupLook.Set),
+                new SetupValue(SetupSetting.Manual, ManualLabel, "manual", SetupLook.Set),
+                new SetupValue(SetupSetting.Interrupted, InterruptLabel, "interrupted", SetupLook.Set),
+                new SetupValue(SetupSetting.Skill, "Skill", "task-auto", SetupLook.Set),
+                new SetupValue(SetupSetting.Before, "Before a task", "none", SetupLook.Unset),
+                new SetupValue(SetupSetting.After, "After a task", "none", SetupLook.Unset),
+                new SetupValue(SetupSetting.Branch, "Branch", "develop", SetupLook.Set),
+                new SetupValue(SetupSetting.PermissionMode, "Permission mode", "auto by default", SetupLook.Set),
+            ],
+            setup.Values);
+        Assert.Empty(dialog.Asked);
+        Assert.Null(setup.Changed);
+    }
+
+    [Fact]
+    public async Task TheMenuSaysThatNothingBlocksAndThatAnyTaskIsTaken()
+    {
+        store.Current = Existing with { Queue = new QueueSettings(new LabelSettings([], [], "manual", "interrupted")) };
+
+        var values = (await OpenAsync()).Values;
+
+        Assert.Equal(new SetupValue(SetupSetting.Blocking, "Blocking labels", "none", SetupLook.Unset), values[1]);
+        Assert.Equal(new SetupValue(SetupSetting.Take, "Labels to take", "any task", SetupLook.Set), values[2]);
+    }
+
+    [Fact]
+    public async Task SettingsThatDoNotValidateAreNotOpenedForTheMenu()
+    {
+        store.Errors = [new SettingsError("version", 1, "must be 1")];
+
+        Assert.False(await new ProjectSetup(dialog, machine, tracker, boards, store).OpenAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task TheMenuSavesTheChangeOfOneSettingWhenTheUserSaysSo()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Blocking labels", "draft", "manual");
+
+        var result = await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.True(SameSettings(Existing with { Queue = new QueueSettings(Existing.Queue.Labels with { Blocking = ["draft", "manual"] }) }, store.Saved));
+        Assert.Equal(["Blocking labels", "Save the change?"], dialog.Asked);
+        Assert.Equal([new SetupNote(SetupTone.Plain, "This will change in .toobusy/settings.toml:"), new SetupNote(SetupTone.Change, "Blocking labels: manual → draft, manual")], dialog.Shown.Notes);
+        Assert.True(dialog.Shown.Menu);
+        Assert.Empty(dialog.Shown.Steps);
+        Assert.Empty(dialog.Shown.Answers);
+        Assert.Equal([new SetupAnswer("Blocking labels", "draft, manual")], result.Answers);
+        Assert.Equal("draft, manual", setup.Values[1].Value);
+        Assert.Empty(tracker.Labelled);
+        Assert.Empty(tracker.Linked);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatChangesNothingAsksNothingMore()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        var result = await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Equal(["Blocking labels"], dialog.Asked);
+        Assert.Null(store.Saved);
+        Assert.Null(setup.Changed);
+    }
+
+    [Fact]
+    public async Task GoingBackFromASettingChangesNothing()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Back("Skill");
+
+        var result = await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Left, result.Outcome);
+        Assert.Equal(["Skill"], dialog.Asked);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task AChangeThatIsNotSavedIsNotProposedAgain()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Skill", "night-shift");
+        dialog.Confirm(false);
+
+        var declined = await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+        var again = await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Declined, declined.Outcome);
+        Assert.Equal(SetupOutcome.NothingToChange, again.Outcome);
+        Assert.Null(store.Saved);
+        Assert.Null(setup.Changed);
+    }
+
+    [Fact]
+    public async Task GoingBackFromTheChangeAsksTheSettingAgainWithTheAnswer()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Skill", "night-shift");
+        dialog.Confirm(null, true);
+
+        var result = await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(["Skill", "Save the change?", "Skill", "Save the change?"], dialog.Asked);
+        Assert.Equal("night-shift", store.Saved!.Skill);
+    }
+
+    [Fact]
+    public async Task LeavingASettingAfterGoingBackFromItsChangeShowsTheChangeAgain()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Permission mode", "dontAsk");
+        dialog.Back("Permission mode");
+        dialog.Confirm(null, false);
+
+        var result = await setup.ChangeAsync(SetupSetting.PermissionMode, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Declined, result.Outcome);
+        Assert.Equal(["Permission mode", "Save the change?", "Permission mode", "Save the change?"], dialog.Asked);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Permission mode: auto by default → dontAsk"), dialog.Shown.Notes);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task TheLabelsOfTheMenuLeaveOutWhatTheOtherSettingsHold()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        foreach (var setting in (SetupSetting[])[SetupSetting.Blocking, SetupSetting.Take, SetupSetting.Manual, SetupSetting.Interrupted])
+            await setup.ChangeAsync(setting, TestContext.Current.CancellationToken);
+
+        // The labels to take are `bug` and `retired`, the blocking one `manual`, the manual label `manual` and the
+        // interrupt label `interrupted`.
+        Assert.Equal(["draft", "feature", "manual"], dialog.Offered["Blocking labels"]);
+        Assert.Equal(["bug", "draft", "feature", "retired"], dialog.Offered["Labels to take"]);
+        Assert.Equal(["draft", "feature", "manual", NewLabel], dialog.Offered[ManualLabel]);
+        Assert.Equal(["draft", "feature", "interrupted", NewLabel], dialog.Offered[InterruptLabel]);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task TheTypedLabelsOfTheMenuRefuseWhatTheOtherSettingsHold()
+    {
+        machine.TrackerReachable = false;
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Blocking labels", "draft, bug");
+        dialog.Answer("Blocking labels", "draft, interrupted");
+        dialog.Answer("Blocking labels", "draft");
+        dialog.Answer("Labels to take", "bug, manual");
+        dialog.Answer("Labels to take", "bug");
+
+        await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
+        await setup.ChangeAsync(SetupSetting.Take, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["draft, bug", "draft, interrupted", "bug, manual"], dialog.Refused);
+        Assert.Equal(["draft"], store.Saved!.Queue.Labels.Blocking);
+        Assert.Equal(["bug"], store.Saved.Queue.Labels.Take);
+    }
+
+    [Fact]
+    public async Task TheProjectOfTheMenuReadsTheBoardsOnceAndLinksTheOneThatIsChosen()
+    {
+        boards.Read = new SetupBoards([new SetupBoard(Rocket, "Rocket", true), new SetupBoard(Moon, "Moon base", false)], [new SetupOwner("acme", true)]);
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        Assert.Empty(dialog.Waited);
+        dialog.Board(new BoardAnswer.Existing(Moon));
+
+        var result = await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+        var again = await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(Moon, store.Saved!.Tracker.Board);
+        Assert.Equal([(Moon, "acme/rocket")], tracker.Linked);
+        Assert.Equal([new SetupAnswer("Project", $"Moon base  {Moon}")], result.Answers);
+        Assert.Equal(SetupOutcome.NothingToChange, again.Outcome);
+        Assert.Equal(["Reading your projects from GitHub"], dialog.Waited);
+        Assert.Single(tracker.Linked);
+    }
+
+    [Fact]
+    public async Task ANewProjectOfTheMenuIsMadeWhenItIsSaved()
+    {
+        boards.Read = new SetupBoards([], [new SetupOwner("acme", true)]);
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket two"));
+
+        var result = await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal([(new SetupOwner("acme", true), "Rocket two")], tracker.Made);
+        Assert.Equal("https://github.com/orgs/acme/projects/42", store.Saved!.Tracker.Board);
+        Assert.Equal("https://github.com/orgs/acme/projects/42", setup.Values[0].Value);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfABoardOfTheMenuAreAskedUnderIt()
+    {
+        tracker.Statuses = ["Ready", "Doing", "Shipped"];
+        store.Current = Existing;
+        var setup = await OpenAsync();
+
+        var result = await setup.ChangeAsync(SetupSetting.Project, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
+        Assert.Contains(dialog.Seen, progress => progress is { Menu: true, Later: true } && progress.Answers.SequenceEqual([new SetupAnswer("Project", Rocket)]));
+        Assert.Contains(new SetupNote(SetupTone.Change, "Statuses: Todo, In Progress, Done → Ready, Doing, Shipped"), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task OnlyTheLabelThatIsChangedInTheMenuIsMade()
+    {
+        tracker.Labels = ["bug", "draft", "feature", "manual"];
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer(ManualLabel, NewLabel);
+        dialog.Answer(ManualLabel, "ask");
+
+        var result = await setup.ChangeAsync(SetupSetting.Manual, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, result.Outcome);
+        Assert.Equal([("acme/rocket", "ask")], tracker.Labelled);
+        Assert.Equal("ask", store.Saved!.Queue.Labels.Manual);
+        Assert.Contains(new SetupNote(SetupTone.Plain, "The label “ask” will be made in acme/rocket."), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task TheMenuAsksForTheCommandsTheBranchAndThePermissionMode()
+    {
+        store.Current = Existing with { Commands = new TaskCommands("scripts/up", "scripts/down") };
+        var setup = await OpenAsync();
+        dialog.Answer("Before a task", " scripts/dev.sh ports free ");
+        dialog.Answer("After a task", "  ");
+        dialog.Answer("Branch", "my branch");
+        dialog.Answer("Branch", "develop");
+        dialog.Answer("Permission mode", "dontAsk");
+
+        foreach (var setting in (SetupSetting[])[SetupSetting.Before, SetupSetting.After, SetupSetting.Branch, SetupSetting.PermissionMode])
+            Assert.Equal(SetupOutcome.Written, (await setup.ChangeAsync(setting, TestContext.Current.CancellationToken)).Outcome);
+
+        Assert.Equal(new TaskCommands("scripts/dev.sh ports free", null), store.Saved!.Commands);
+        Assert.Equal("develop", store.Saved.Branch);
+        Assert.Equal(["my branch"], dialog.Refused);
+        Assert.Equal("dontAsk", store.Saved.Assistant.PermissionMode);
+        Assert.Equal(["auto", "dontAsk"], dialog.Offered["Permission mode"]);
+        Assert.Contains(new SetupNote(SetupTone.Change, "Permission mode: auto by default → dontAsk"), dialog.Shown.Notes);
+    }
+
+    [Fact]
+    public async Task TheModeOfASessionWithoutOneNamedStaysUnnamed()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Permission mode", "auto");
+
+        var result = await setup.ChangeAsync(SetupSetting.PermissionMode, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+        Assert.Null(store.Saved);
+    }
+
+    [Fact]
+    public async Task WhatTheMenuChangedIsKeptForTheReportInTheOrderOfTheMenu()
+    {
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer("Skill", "night-shift");
+        dialog.Answer("Skill", "task-auto");
+        dialog.Answer("Blocking labels", "draft");
+
+        await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+        await setup.ChangeAsync(SetupSetting.Blocking, TestContext.Current.CancellationToken);
+        await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Written, setup.Changed!.Outcome);
+        Assert.True(setup.Changed.SettingsWritten);
+        Assert.Equal([new SetupAnswer("Blocking labels", "draft"), new SetupAnswer("Skill", "task-auto")], setup.Changed.Answers);
+    }
+
+    [Fact]
+    public async Task WhatGitHubRefusesInTheMenuIsKeptForTheReport()
+    {
+        tracker.RefuseToLabel = "GitHub said no";
+        store.Current = Existing;
+        var setup = await OpenAsync();
+        dialog.Answer(ManualLabel, NewLabel);
+        dialog.Answer(ManualLabel, "ask");
+
+        var result = await setup.ChangeAsync(SetupSetting.Manual, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupOutcome.Failed, result.Outcome);
+        Assert.Equal("GitHub said no", result.Failure);
+        Assert.Null(store.Saved);
+        Assert.Equal(SetupOutcome.Failed, setup.Changed!.Outcome);
+        Assert.Equal("manual", setup.Values[3].Value);
+    }
+
+    async Task<ProjectSetup> OpenAsync()
+    {
+        var setup = new ProjectSetup(dialog, machine, tracker, boards, store);
+        Assert.True(await setup.OpenAsync(TestContext.Current.CancellationToken));
+        return setup;
+    }
+
     Task<SetupResult> RunAsync(SetupProposals? proposals = null) => new ProjectSetup(dialog, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
 
     // A setup that asks nothing: it has no dialog.
@@ -1851,7 +2179,7 @@ public class ProjectSetupTests
             $"statuses = {string.Join(", ", settings.Tracker.Statuses.Names)}",
             $"blocking = {string.Join(", ", settings.Queue.Labels.Blocking)}",
             $"take = {string.Join(", ", settings.Queue.Labels.Take)}",
-            $"owner = {settings.Queue.Labels.Owner}",
+            $"manual = {settings.Queue.Labels.Manual}",
             $"interrupted = {settings.Queue.Labels.Interrupted}",
             $"skill = {settings.Skill}",
             $"before = {settings.Commands.Before}",

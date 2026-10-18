@@ -4,8 +4,10 @@ namespace TooBusy.Cli.Terminal;
 public static class Prompt
 {
     // Asks for a text, starting from the proposed one. `refuse` says why a text cannot be taken, or null when it
-    // can. Gives the text without the spaces around it, or null when Escape is pressed.
-    public static string? Ask(Page page, string label, string hint, string proposed, Func<string, string?> refuse)
+    // can. Gives the text without the spaces around it, or null when Escape is pressed. `keeps` makes Escape give the
+    // text too, as Enter does, when it can be taken: whoever asked looks whether that is a change. A text that cannot
+    // be taken is left then, and Escape gives null.
+    public static string? Ask(Page page, string label, string hint, string proposed, Func<string, string?> refuse, bool keeps = false)
     {
         var editor = new LineEditor(proposed);
         string? reason = null;
@@ -16,7 +18,7 @@ public static class Prompt
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Escape)
-                return null;
+                return keeps && refuse(editor.Text) is null ? editor.Text.Trim() : null;
             if (key.Key != ConsoleKey.Enter)
                 editor.Press(key);
             else if ((reason = refuse(editor.Text)) is null)

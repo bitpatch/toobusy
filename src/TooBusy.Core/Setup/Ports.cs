@@ -40,7 +40,39 @@ public sealed record SetupProgress(IReadOnlyList<SetupNote> Notes, IReadOnlyList
     // A question of the step that is not its first one: going back from it comes to the question before it, so it
     // never leaves the setup, in the first step either.
     public bool Later { get; init; }
+
+    // A question of one setting that the menu of the settings opened. There are no steps around it; going back from
+    // its first question gives what is chosen or typed there, as an answer, for the menu to look whether that
+    // changes the setting; and the last question saves the change and comes back to the menu.
+    public bool Menu { get; init; }
 }
+
+// The settings as the menu of the settings lists them, in its order.
+public enum SetupSetting
+{
+    Project,
+    Blocking,
+    Take,
+    Manual,
+    Interrupted,
+    Skill,
+    Before,
+    After,
+    Branch,
+    PermissionMode,
+}
+
+// How a value looks in the menu of the settings: one that is set; one that says nothing is, as `none`; and one that
+// keeps tasks out of a run, as the blocking labels do.
+public enum SetupLook
+{
+    Set,
+    Unset,
+    KeepsOut,
+}
+
+// A setting as the menu of the settings lists it: its name and its value as the settings have it.
+public sealed record SetupValue(SetupSetting Setting, string Label, string Value, SetupLook Look);
 
 public sealed record SetupNote(SetupTone Tone, string Text);
 
@@ -100,7 +132,7 @@ public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
     IReadOnlyList<string>? Take = null,
-    string? Owner = null,
+    string? Manual = null,
     string? Interrupted = null,
     string? Skill = null,
     CommandProposal? Before = null,

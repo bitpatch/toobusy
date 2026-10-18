@@ -179,7 +179,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
         if (await machine.ReadLabelsAsync(repository, cancellationToken) is not { } there)
             return new CheckResult(Labels, CheckState.Failed, $"The labels of {repository} cannot be read.");
 
-        string[] wanted = [.. named.Blocking, .. named.Take, named.Owner, named.Interrupted];
+        string[] wanted = [.. named.Blocking, .. named.Take, named.Manual, named.Interrupted];
         var missing = wanted
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(label => !there.Contains(label, StringComparer.OrdinalIgnoreCase))

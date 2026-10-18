@@ -254,6 +254,71 @@ public sealed class SetupScreenTests : IDisposable
     }
 
     [Fact]
+    public void AQuestionOfTheMenuOfTheSettingsHasNoSteps()
+    {
+        // The menu of the settings opens its questions where there is somewhere to go back to.
+        var menu = new SetupScreen(page, leavesPage: false);
+        menu.Show(new SetupProgress([new SetupNote(SetupTone.Warning, "nothing is verified")], [], [], 0) { Menu = true });
+        terminal.Keys.Press(Keys.Enter);
+
+        Assert.Equal(0, menu.Choose("Manual label", "", Rules, 0));
+        Assert.Contains(" ! nothing is verified", terminal.Frame);
+        Assert.Equal(" ↑↓ move · enter choose · ctrl+c exit", terminal.Frame[^1]);
+    }
+
+    [Fact]
+    public void LeavingTheFirstQuestionOfASettingOfTheMenuGivesWhatIsChosenOrTyped()
+    {
+        // The menu of the settings opens its questions where there is somewhere to go back to.
+        var menu = new SetupScreen(page, leavesPage: false);
+        menu.Show(new SetupProgress([], [], [], 0) { Menu = true });
+        // `bug` chosen and left; left as it is; `Back` with nothing changed; a text typed and left.
+        terminal.Keys.Press(Keys.Up, Keys.Space, Keys.Escape, Keys.Escape, Keys.Down, Keys.Enter);
+        terminal.Keys.Type("-2").Press(Keys.Escape);
+
+        Assert.Equal([0, 1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
+        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
+        Assert.Equal([1], menu.ChooseMany("Blocking labels", "", ["bug", "draft"], [1]));
+        Assert.Equal("v.1-2", menu.Ask("Milestone", "", "v.1", _ => null));
+    }
+
+    [Fact]
+    public void ATextOfTheMenuThatCannotBeTakenIsLeftWithEscape()
+    {
+        // The menu of the settings opens its questions where there is somewhere to go back to.
+        var menu = new SetupScreen(page, leavesPage: false);
+        menu.Show(new SetupProgress([], [], [], 0) { Menu = true });
+        terminal.Keys.Type(" branch").Press(Keys.Escape);
+
+        Assert.Null(menu.Ask("Branch", "", "my", text => text.Contains(' ', StringComparison.Ordinal) ? "no space" : null));
+    }
+
+    [Fact]
+    public void ALaterQuestionOfASettingOfTheMenuGoesBackWithEscape()
+    {
+        // The menu of the settings opens its questions where there is somewhere to go back to.
+        var menu = new SetupScreen(page, leavesPage: false);
+        menu.Show(new SetupProgress([], [], [], 0) { Menu = true, Later = true });
+        terminal.Keys.Type("ask").Press(Keys.Escape);
+
+        Assert.Null(menu.Ask("Manual label", "", "", _ => null));
+    }
+
+    [Fact]
+    public void TheChangeOfASettingOfTheMenuIsSavedOrNot()
+    {
+        // The menu of the settings opens its questions where there is somewhere to go back to.
+        var menu = new SetupScreen(page, leavesPage: false);
+        menu.Show(new SetupProgress([], [], [], 0) { Menu = true });
+        terminal.Keys.Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Escape);
+
+        Assert.True(menu.Confirm("Save the change?"));
+        terminal.AssertSaw(" Save the change?\n ❯ Save\n   Don't save\n   Back  esc\n ↑↓ move · enter choose · ctrl+c exit");
+        Assert.False(menu.Confirm("Save the change?"));
+        Assert.Null(menu.Confirm("Save the change?"));
+    }
+
+    [Fact]
     public void AProjectThatHasABoardKeepsItWithOneEnter()
     {
         terminal.Keys.Press(Keys.Enter);

@@ -106,7 +106,7 @@ public sealed class Session(Page page, Workbench bench)
                     tasks.Forget();
                     break;
                 case HomeAction.Settings:
-                    note = Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+                    note = await ChangeSettingsAsync(cancellationToken);
                     tasks.Forget();
                     break;
                 case HomeAction.SkipLabels:
@@ -163,6 +163,46 @@ public sealed class Session(Page page, Workbench bench)
         Clear("Setting up this project", null);
         page.Body = [];
         return Setup = await new ProjectSetup(new SetupScreen(page, leavesPage), bench.Environment, bench.Tracker, bench.Boards, bench.Settings, proposals).RunAsync(cancellationToken);
+    }
+
+    // What `Settings` of the menu opens: the settings one under another with their values, until Escape goes back to
+    // the menu. Each opens its questions, and a change is saved when the user says so; what became of it is said
+    // above the list, and the pointer stays on the setting that was opened. What was changed is remembered for the
+    // report as the change is made. Settings that do not validate have nothing to show there: the steps of `init`
+    // set them, as for a project that is set up anew, and the line that says how that ended is given for the menu.
+    async Task<string?> ChangeSettingsAsync(CancellationToken cancellationToken)
+    {
+        const string status = "Changing the settings";
+        if (bench.Settings.Load()?.Settings is null)
+            return Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+
+        Clear(status, null);
+        var setup = new ProjectSetup(new SetupScreen(page, leavesPage: false), bench.Environment, bench.Tracker, bench.Boards, bench.Settings);
+        if (!await setup.OpenAsync(cancellationToken))
+            return Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+
+        var at = 0;
+        string? note = null;
+        while (true)
+        {
+            // The values are in the list: over it stand what the setup says of the machine and what became of the
+            // last change.
+            Clear(status, null);
+            var told = setup.Notes.Select(SetupScreen.Told).ToList();
+            page.Body = note is null ? told : [.. told, .. told.Count > 0 ? [Line.Empty] : (Line[])[], Line.Of(note, Tone.Muted)];
+            if (SettingsScreen.Ask(page, setup.Values, at) is not { } setting)
+                return null;
+
+            at = (int)setting;
+            var result = await setup.ChangeAsync(setting, cancellationToken);
+            Setup = setup.Changed ?? Setup;
+            note = result.Outcome switch
+            {
+                SetupOutcome.Written or SetupOutcome.Failed => Ending(result, bench.Demo).Text,
+                SetupOutcome.Declined => "The change was not saved.",
+                _ => null,
+            };
+        }
     }
 
     // Asks for the milestone and remembers the answer; false when the user went back instead.
@@ -316,7 +356,7 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Project", settings.Tracker.Board ?? "none"));
             body.Add(Picker.Answer("Blocking labels", settings.Queue.Labels.Blocking.Count == 0 ? "none" : string.Join(", ", settings.Queue.Labels.Blocking)));
             body.Add(Picker.Answer("Labels to take", settings.Queue.Labels.Take.Count == 0 ? "any task" : string.Join(", ", settings.Queue.Labels.Take)));
-            body.Add(Picker.Answer("Owner's label", settings.Queue.Labels.Owner));
+            body.Add(Picker.Answer("Manual label", settings.Queue.Labels.Manual));
             body.Add(Picker.Answer("Interrupt label", settings.Queue.Labels.Interrupted));
             body.Add(Picker.Answer("Skill", settings.Skill ?? "none"));
         }

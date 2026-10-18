@@ -253,7 +253,7 @@ public class TaskLineupTests
 
         Assert.Equal(["manual"], rules.Blocking);
         Assert.Equal(["bug"], rules.Take);
-        Assert.Equal(("ask", "paused", false), (rules.Owner, rules.Interrupted, rules.Board));
+        Assert.Equal(("ask", "paused", false), (rules.Manual, rules.Interrupted, rules.Board));
         Assert.Empty(rules.Skip);
         Assert.True(QueueRules.Of(settings with { Tracker = new Settings.TrackerSettings("github", "https://github.com/orgs/acme/projects/1") }).Board);
     }

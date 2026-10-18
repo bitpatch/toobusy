@@ -132,7 +132,7 @@ public static class CliApp
         var noBlocking = new Option<bool>("--no-blocking-labels") { Description = "No label keeps a task out." };
         var take = new Option<string[]>("--take-label") { Description = "A label that lets a task in; give it again for every such label.", HelpName = "name" };
         var noTake = new Option<bool>("--no-take-labels") { Description = "Any task is taken, whatever its labels." };
-        var owner = new Option<string?>("--owner-label") { Description = "The label of a task that waits for the owner; it is made when the repository does not have it.", HelpName = "name" };
+        var manual = new Option<string?>("--manual-label") { Description = "The label of a task that waits for the owner; it is made when the repository does not have it.", HelpName = "name" };
         var interrupt = new Option<string?>("--interrupt-label") { Description = "The label of a task that a run had to stop; it is made when the repository does not have it.", HelpName = "name" };
         var skill = new Option<string?>("--skill") { Description = "The skill of the project a session starts with, by its name; it says how a task is done here without you.", HelpName = "name" };
         var noSkill = new Option<bool>("--no-skill") { Description = "No skill: a session starts with the message of toobusy alone." };
@@ -156,7 +156,7 @@ public static class CliApp
         };
         var command = new Command("init", $"Sets the project up or changes its settings: asks what it needs and writes them. `--before`, `--after`, `--branch` and `--permission-mode` are not asked: give them as options. {ForAnAssistant}")
         {
-            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes, assist,
+            board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, manual, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes, assist,
         };
         command.SetAction(async (result, cancellationToken) =>
         {
@@ -164,7 +164,7 @@ public static class CliApp
             // nothing of it: it changes nothing as it is.
             if (result.GetResult(assist) is { Implicit: false })
             {
-                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, owner, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes];
+                Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, manual, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes];
                 if (others.Any(other => result.GetResult(other) is { Implicit: false }))
                 {
                     Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
@@ -202,7 +202,7 @@ public static class CliApp
                     : null,
                 result.GetValue(noBlocking) ? [] : result.GetValue(blocking) is { Length: > 0 } blocks ? blocks : null,
                 result.GetValue(noTake) ? [] : result.GetValue(take) is { Length: > 0 } takes ? takes : null,
-                result.GetValue(owner),
+                result.GetValue(manual),
                 result.GetValue(interrupt),
                 result.GetValue(noSkill) ? "" : result.GetValue(skill),
                 result.GetValue(noBefore) ? new CommandProposal(null) : result.GetValue(before) is { } first ? new CommandProposal(first) : null,

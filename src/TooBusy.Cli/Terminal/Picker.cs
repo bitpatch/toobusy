@@ -25,10 +25,11 @@ public static class Picker
 
     // Asks to choose one of the choices, one under another, starting at the given one. Gives the index of the
     // chosen one, or null when Escape is pressed. `shortcut` lets a key choose at once. Wherever Escape goes back
-    // and does not leave the page, the list ends with `Back`, which does what Escape does.
-    public static int? Pick(Page page, IReadOnlyList<Line> question, IReadOnlyList<Choice> choices, string keys = "", int at = 0, Func<ConsoleKey, int?>? shortcut = null)
+    // and does not leave the page, the list ends with `Back`, which does what Escape does. A list longer than `rows`
+    // scrolls.
+    public static int? Pick(Page page, IReadOnlyList<Line> question, IReadOnlyList<Choice> choices, string keys = "", int at = 0, Func<ConsoleKey, int?>? shortcut = null, int rows = Rows)
     {
-        var list = new Listed(page, question, keys, at);
+        var list = new Listed(page, question, keys, at, rows);
         while (true)
         {
             list.Draw(choices);
@@ -43,7 +44,7 @@ public static class Picker
     // has chosen it.
     public static async Task<int?> PickAsync(Page page, IReadOnlyList<Line> question, Func<IReadOnlyList<Choice>> choices, Func<Task> changed, Action<int>? off = null, Func<int?>? settled = null)
     {
-        var list = new Listed(page, question, "", 0);
+        var list = new Listed(page, question, "", 0, Rows);
         while (true)
         {
             // Whether anything still goes on is looked at before the choices are asked for: what is done between the
@@ -68,8 +69,9 @@ public static class Picker
     // Asks to choose any of the options, one under another, with those that are proposed chosen at first: Space
     // chooses the option under the pointer or leaves it, and Enter gives the indexes of those that are chosen.
     // Escape gives null. Where there is somewhere to go back to the options end with `Back`, and Enter on it goes
-    // back; a list without options says so, and Enter there gives nothing chosen.
-    public static IReadOnlyList<int>? PickMany(Page page, IReadOnlyList<Line> question, IReadOnlyList<string> options, IReadOnlyList<int> proposed)
+    // back; a list without options says so, and Enter there gives nothing chosen. `keeps` makes going back give
+    // what is chosen too, as Enter does: whoever asked looks whether that is a change.
+    public static IReadOnlyList<int>? PickMany(Page page, IReadOnlyList<Line> question, IReadOnlyList<string> options, IReadOnlyList<int> proposed, bool keeps = false)
     {
         var chosen = new SortedSet<int>(proposed);
         var at = chosen.FirstOrDefault();
@@ -89,9 +91,9 @@ public static class Picker
 
             var key = page.Read();
             if (key.Key == ConsoleKey.Enter)
-                return at < options.Count || options.Count == 0 ? [.. chosen] : null;
+                return at < options.Count || options.Count == 0 || keeps ? [.. chosen] : null;
             if (key.Key == ConsoleKey.Escape)
-                return null;
+                return keeps ? [.. chosen] : null;
             if (options.Count == 0)
                 continue;
 
@@ -147,7 +149,7 @@ public static class Picker
     static bool Followed(Choice choice) => choice.Detail.Length + choice.Note.Length > 0 || choice.Waits;
 
     // A list on a page: where its pointer is and what of it is in the window, from one drawing to the next.
-    sealed class Listed(Page page, IReadOnlyList<Line> question, string keys, int at)
+    sealed class Listed(Page page, IReadOnlyList<Line> question, string keys, int at, int rows)
     {
         IReadOnlyList<Choice> choices = [];
         bool back;
@@ -165,7 +167,7 @@ public static class Picker
             var widest = choices.Where(Followed).Select(choice => choice.Name.Length).DefaultIfEmpty().Max();
             var lines = new List<Line>();
             int? waits = null;
-            top = Window(lines, choices.Count, At, top, Rows, out var pointer, index =>
+            top = Window(lines, choices.Count, At, top, rows, out var pointer, index =>
             {
                 if (choices[index].Waits)
                     waits = lines.Count;

@@ -6,7 +6,8 @@ namespace TooBusy.Cli.Terminal;
 // under them, and the steps of the setup, done and to come, in its foot. A question is its name and what to do, then
 // the lines where the user acts, one choice under another. The choice under the pointer is the chosen line of the
 // page, and a text is typed at its cursor. Escape goes back from every question; from the first one it leaves the
-// page, unless the setup was opened from somewhere to go back to.
+// page, unless the setup was opened from somewhere to go back to. The questions of one setting that the menu of the
+// settings opens have no steps, and going back from the first of them gives what is chosen or typed there.
 public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialog
 {
     // The boards are shown fewer at a time than other lists, because other things share their place.
@@ -15,16 +16,24 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     // Whether the question that is asked is the first one of the first step: going back from it leaves the setup.
     bool first;
 
+    // Whether the question is of a setting of the menu of the settings, and whether going back from it gives what is
+    // chosen or typed in it.
+    bool menu;
+    bool keeps;
+
+    // A note of the setup as a line of the body.
+    public static Line Told(SetupNote note) => note.Tone switch
+    {
+        SetupTone.Muted => Line.Of(note.Text, Tone.Muted),
+        SetupTone.Warning => Line.Of("! " + note.Text, Tone.Warning),
+        SetupTone.Failure => Line.Of("✘ " + note.Text, Tone.Error),
+        SetupTone.Change => new Line(new Part("  → ", Tone.Accent), new Part(note.Text)),
+        _ => Line.Of(note.Text),
+    };
+
     public void Show(SetupProgress progress)
     {
-        var body = progress.Notes.Select(note => note.Tone switch
-        {
-            SetupTone.Muted => Line.Of(note.Text, Tone.Muted),
-            SetupTone.Warning => Line.Of("! " + note.Text, Tone.Warning),
-            SetupTone.Failure => Line.Of("✘ " + note.Text, Tone.Error),
-            SetupTone.Change => new Line(new Part("  → ", Tone.Accent), new Part(note.Text)),
-            _ => Line.Of(note.Text),
-        }).ToList();
+        var body = progress.Notes.Select(Told).ToList();
 
         // The answers come first; what is said about them, and what is about to change, follows.
         page.Body =
@@ -35,11 +44,12 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         ];
 
         // The steps are marks on a line: those that are done, the one that is asked, those to come.
-        page.Foot = new Line([.. progress.Steps.Select((_, step) =>
+        page.Foot = progress.Steps.Count == 0 ? Line.Empty : new Line([.. progress.Steps.Select((_, step) =>
             step < progress.Step ? new Part(step == 0 ? "●" : "──●", Tone.Success)
             : step == progress.Step ? new Part(step == 0 ? "◉" : "──◉", Tone.Accent)
             : new Part(step == 0 ? "○" : "──○", Tone.Muted))]);
         first = progress.Step == 0 && !progress.Later && leavesPage;
+        (menu, keeps) = (progress.Menu, progress.Menu && !progress.Later);
         Leaves(first);
     }
 
@@ -58,13 +68,14 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         Picker.Pick(page, Head(label, hint), [.. options.Select(option => new Choice(option.Name, option.Detail))], at: proposed);
 
     public IReadOnlyList<int>? ChooseMany(string label, string hint, IReadOnlyList<string> options, IReadOnlyList<int> proposed) =>
-        Picker.PickMany(page, Head(label, hint), options, proposed);
+        Picker.PickMany(page, Head(label, hint), options, proposed, keeps);
 
-    public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse);
+    public string? Ask(string label, string hint, string proposed, Func<string, string?> refuse) => Prompt.Ask(page, label, hint, proposed, refuse, keeps);
 
     // The last question of the setup: what was answered is saved, or the setup is left as if nothing was answered.
+    // In the menu of the settings it is a change of one setting, and the menu is back either way.
     public bool? Confirm(string question) =>
-        Picker.Pick(page, [Line.Of(question, Tone.Strong)], [new Choice("Save and exit"), new Choice("Exit without saving")]) is { } picked ? picked == 0 : null;
+        Picker.Pick(page, [Line.Of(question, Tone.Strong)], menu ? [new Choice("Save"), new Choice("Don't save")] : [new Choice("Save and exit"), new Choice("Exit without saving")]) is { } picked ? picked == 0 : null;
 
     // A project that has a board keeps it with one Enter; `Change` opens the ways to name another one, and going back
     // from them leaves the board as it is.

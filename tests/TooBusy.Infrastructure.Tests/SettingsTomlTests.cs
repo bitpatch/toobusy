@@ -17,7 +17,7 @@ public class SettingsTomlTests
         [queue.labels]
         blocking = ["manual", "draft"]              # a task with any of these is never taken
         take = ["feature", "bug", "chore", "docs"]  # a task needs one of these; empty means any task
-        owner = "manual"                            # put on a task that waits for the owner
+        manual = "manual"                           # put on a task that waits for the owner
         interrupted = "interrupted"                 # put on a task that a run had to stop
 
         [assistant]
@@ -53,7 +53,7 @@ public class SettingsTomlTests
               "manual",  # by hand
             ]
             labels.take = []
-            labels.owner = "manual"
+            labels.manual = "manual"
             labels."interrupted" = 'paused'
             """);
 
@@ -135,12 +135,12 @@ public class SettingsTomlTests
             board = "https://github.com/orgs/bitpatch/projects/3"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
-            # A run puts `owner` on a task that waits for the owner, which is not taken while it has it,
+            # A run puts `manual` on a task that waits for the owner, which is not taken while it has it,
             # and `interrupted` on a task it had to stop, which is taken first.
             [queue.labels]
             blocking = ["manual", "draft"]
             take = ["feature", "bug", "chore", "docs"]
-            owner = "manual"
+            manual = "manual"
             interrupted = "interrupted"
 
             # Who does the tasks.
@@ -225,12 +225,12 @@ public class SettingsTomlTests
             board = "https://github.com/orgs/bitpatch/projects/3"
 
             # A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
-            # A run puts `owner` on a task that waits for the owner, which is not taken while it has it,
+            # A run puts `manual` on a task that waits for the owner, which is not taken while it has it,
             # and `interrupted` on a task it had to stop, which is taken first.
             [queue.labels]
             blocking = ["manual", "draft"]
             take = ["feature", "bug", "chore", "docs"]
-            owner = "manual"
+            manual = "manual"
             interrupted = "interrupted"
 
             # Who does the tasks.
@@ -244,14 +244,45 @@ public class SettingsTomlTests
     public void ARewriteAddsTheLabelsOfARunToAFileMadeBeforeThem()
     {
         var existing = Example
-            .Replace("owner = \"manual\"                            # put on a task that waits for the owner\n", "", StringComparison.Ordinal)
+            .Replace("manual = \"manual\"                           # put on a task that waits for the owner\n", "", StringComparison.Ordinal)
             .Replace("interrupted = \"interrupted\"                 # put on a task that a run had to stop\n", "", StringComparison.Ordinal);
 
         var text = SettingsToml.Write(Settings, existing);
 
         Assert.Equal(
-            existing.Replace("empty means any task\n", "empty means any task\nowner = \"manual\"\ninterrupted = \"interrupted\"\n", StringComparison.Ordinal),
+            existing.Replace("empty means any task\n", "empty means any task\nmanual = \"manual\"\ninterrupted = \"interrupted\"\n", StringComparison.Ordinal),
             text);
+    }
+
+    // The text of a file written before the manual label had its name.
+    static readonly string Former = Example.Replace("manual = \"manual\"                           # put", "owner = \"manual\"                            # put", StringComparison.Ordinal);
+
+    [Fact]
+    public void AFileThatNamesTheManualLabelAsBeforeIsRead()
+    {
+        var result = SettingsToml.Read(Former);
+
+        Assert.Empty(result.Errors);
+        AssertSame(Settings, result.Settings!);
+    }
+
+    [Fact]
+    public void ARewriteRenamesTheFormerKeyOfTheManualLabelWhereItStands()
+    {
+        Assert.Equal(Former.Replace("owner = ", "manual = ", StringComparison.Ordinal), SettingsToml.Write(Settings, Former));
+
+        var changed = SettingsToml.Write(Settings with { Queue = new QueueSettings(Settings.Queue.Labels with { Manual = "ask" }) }, Former);
+        Assert.Contains("take = [\"feature\", \"bug\", \"chore\", \"docs\"]  # a task needs one of these; empty means any task\nmanual = \"ask\" ", changed, StringComparison.Ordinal);
+        Assert.DoesNotContain("owner =", changed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARewriteRenamesTheLastPartOfADottedFormerKey()
+    {
+        var existing = "version = 1\ntracker.type = \"github\"\nassistant.type = \"claude-code\"\n\n[queue]\nlabels.blocking = []\nlabels.take = []\nlabels.owner = \"manual\" # ours\nlabels.interrupted = \"interrupted\"\n";
+        var settings = new ProjectSettings(new TrackerSettings("github", null), new QueueSettings(new LabelSettings([], [], "manual", "interrupted")), new AssistantSettings("claude-code"));
+
+        Assert.Equal(existing.Replace("labels.owner", "labels.manual", StringComparison.Ordinal), SettingsToml.Write(settings, existing));
     }
 
     const string TaskComment = "# The commands a run runs around a task, through the shell, at the root of the working copy:\n# `before` a task is taken, and `after` its session, however the task went.\n";
@@ -524,7 +555,7 @@ public class SettingsTomlTests
         Assert.Equal(expected.Tracker, actual.Tracker);
         Assert.Equal(expected.Queue.Labels.Blocking, actual.Queue.Labels.Blocking);
         Assert.Equal(expected.Queue.Labels.Take, actual.Queue.Labels.Take);
-        Assert.Equal(expected.Queue.Labels.Owner, actual.Queue.Labels.Owner);
+        Assert.Equal(expected.Queue.Labels.Manual, actual.Queue.Labels.Manual);
         Assert.Equal(expected.Queue.Labels.Interrupted, actual.Queue.Labels.Interrupted);
         Assert.Equal(expected.Assistant, actual.Assistant);
         Assert.Equal(expected.Skill, actual.Skill);

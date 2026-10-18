@@ -93,11 +93,11 @@ public class AboutTests
         var text = About.Text(null, RunPolicy.Default);
 
         Assert.Contains("No settings are read here, so its labels are not named below, and the statuses of a board are named as GitHub names them on a new one, where the settings of a project may call them otherwise: `toobusy init` sets a project up.", text, StringComparison.Ordinal);
-        Assert.Contains("- A task that has the label of the owner waits for the owner and is not taken.", text, StringComparison.Ordinal);
+        Assert.Contains("- A task that has the manual label waits for the owner and is not taken.", text, StringComparison.Ordinal);
         Assert.Contains("takes the label of interrupted tasks off a task that had it", text, StringComparison.Ordinal);
-        Assert.Contains("- Put the label `<the label of the owner>` on it", text, StringComparison.Ordinal);
+        Assert.Contains("- Put the label `<the manual label>` on it", text, StringComparison.Ordinal);
         Assert.Contains("- Put it on the board <the address of the board> with the status `Todo`.", text, StringComparison.Ordinal);
-        Assert.Contains("and put the label `<the label of the owner>` on it, so that no run takes it before the owner answers.", text, StringComparison.Ordinal);
+        Assert.Contains("and put the label `<the manual label>` on it, so that no run takes it before the owner answers.", text, StringComparison.Ordinal);
     }
 
     [Fact]

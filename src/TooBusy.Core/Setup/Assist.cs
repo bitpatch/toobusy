@@ -70,7 +70,7 @@ public static class Assist
     public const string Complete = "All the steps are done: the setup is complete.\n";
 
     // What the first setup of `toobusy init` proposes to call the two labels of a run and the skill.
-    const string ProposedOwner = ProjectSetup.ProposedOwner;
+    const string ProposedManual = ProjectSetup.ProposedManual;
     const string ProposedInterrupted = ProjectSetup.ProposedInterrupted;
     const string ProposedSkill = ProjectSetup.ProposedSkill;
 
@@ -209,11 +209,11 @@ public static class Assist
         var labels = settings?.Queue.Labels;
         var things = new StringBuilder(labels is null
             ? $"{Unstated(ground)}."
-            : $"the labels to take: {Named(labels.Take, "none, so any task is taken")}; the blocking labels: {Named(labels.Blocking, "none")}; the label of the owner: `{labels.Owner}`; the label of interrupted tasks: `{labels.Interrupted}`.");
+            : $"the labels to take: {Named(labels.Take, "none, so any task is taken")}; the blocking labels: {Named(labels.Blocking, "none")}; the manual label: `{labels.Manual}`; the label of interrupted tasks: `{labels.Interrupted}`.");
         if (ground.Labels is { } there)
         {
             things.Append(CultureInfo.InvariantCulture, $" The labels of {ground.Repository}: {Named(there, "none")}.");
-            string[] named = labels is null ? [] : [.. labels.Take, .. labels.Blocking, labels.Owner, labels.Interrupted];
+            string[] named = labels is null ? [] : [.. labels.Take, .. labels.Blocking, labels.Manual, labels.Interrupted];
             if (named.Distinct(StringComparer.OrdinalIgnoreCase).Where(label => !there.Contains(label, StringComparer.OrdinalIgnoreCase)).ToList() is { Count: > 0 } missing)
                 things.Append(CultureInfo.InvariantCulture, $" The settings name {Named(missing, "")}, which the repository does not have.");
         }
@@ -228,23 +228,23 @@ public static class Assist
 
             - **The labels to take.** Only a task with one of them is taken. With none, any open task of the milestone is taken.
             - **The blocking labels.** A task with any of them is never taken: the kinds of task a session must not do alone, such as a question, a discussion or what needs a person at the machine.
-            - **The label of the owner.** A run puts it on a task that cannot go on without the owner and on one that failed, and no run takes a task while it has it: the owner answers and takes it off. A session puts it on the task it makes of what is left for the owner.
+            - **The manual label.** A run puts it on a task that cannot go on without the owner and on one that failed, and no run takes a task while it has it: the owner answers and takes it off. A session puts it on the task it makes of what is left for the owner.
             - **The label of interrupted tasks.** A run puts it on a task it had to stop, and the next run takes that task first.
 
-            What must not share a label: a label to take is not a blocking label; the label of the owner is not a label to take; the label of interrupted tasks is not a label to take, a blocking label or the label of the owner. The labels to take and the blocking labels are labels the repository has. The other two are made in the repository by the command when it does not have them, which is why they are decided here, before the board: the first writing of the settings makes them.
+            What must not share a label: a label to take is not a blocking label; the manual label is not a label to take; the label of interrupted tasks is not a label to take, a blocking label or the manual label. The labels to take and the blocking labels are labels the repository has. The other two are made in the repository by the command when it does not have them, which is why they are decided here, before the board: the first writing of the settings makes them.
             """);
         Part(text, "Look at", "`CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, the issue templates, and how the open tasks are labelled: `gh issue list --limit 50`.");
         Part(text, "Ask the owner", "show the four answers before you set them, and say that the last two labels are made in the repository when it does not have them: everyone who works there sees them.");
 
         var take = labels is null ? "--take-label <label>,<label>" : labels.Take.Count == 0 ? "--no-take-labels" : $"--take-label {Joined(labels.Take)}";
         var blocking = labels is null ? "--blocking-label <label>,<label>" : labels.Blocking.Count == 0 ? "--no-blocking-labels" : $"--blocking-label {Joined(labels.Blocking)}";
-        var line = $"{take} {blocking} --owner-label {Word(labels?.Owner ?? ProposedOwner)} --interrupt-label {Word(labels?.Interrupted ?? ProposedInterrupted)}";
+        var line = $"{take} {blocking} --manual-label {Word(labels?.Manual ?? ProposedManual)} --interrupt-label {Word(labels?.Interrupted ?? ProposedInterrupted)}";
         Set(text, ground.Settings is null
             ? [$"toobusy init --yes --no-board --no-skill {line}"]
             : [$"toobusy init --yes {line}"]);
         var notes = new StringBuilder();
         notes.Append(labels is null
-            ? $"Put the answers in place of what stands in angle brackets; `{ProposedOwner}` and `{ProposedInterrupted}` are the names a first setup proposes."
+            ? $"Put the answers in place of what stands in angle brackets; `{ProposedManual}` and `{ProposedInterrupted}` are the names a first setup proposes."
             : "The command names the labels as they are set now: change what is to change.");
         notes.Append(" An option that names labels names all of them, separated by commas. `--no-take-labels` in place of `--take-label` takes any task, and `--no-blocking-labels` in place of `--blocking-label` blocks nothing.");
         if (ground.Settings is null)
@@ -360,7 +360,7 @@ public static class Assist
 
     static void Instructions(StringBuilder text, AssistGround ground)
     {
-        var owner = Stated(ground)?.Queue.Labels.Owner;
+        var manual = Stated(ground)?.Queue.Labels.Manual;
         Part(text, "As things are", "toobusy does not read the instructions of the project: they are yours to read.");
         Part(text, "Decide", """
             what the instructions of the project say for a project that is worked on by toobusy. Read `toobusy about` first: it tells what a session meets, and under “What holds over the instructions of a project” what a session does not follow of them. Then compare the instructions with it, and give them what such a project needs:
@@ -372,7 +372,7 @@ public static class Assist
             - what a session without the owner does in another way than one with them. The skill of step 6 is the place for that, when the project has one.
             """);
         Part(text, "Look at", "`CLAUDE.md`, `AGENTS.md`, the skills and the commands in `.claude/`, `CONTRIBUTING.md` and whatever else tells an assistant how the work of this project is done. Where the project ran its tasks without its owner before, the old way is found in a script of the project that starts sessions of the assistant, a section of its process on it, a folder of its state, and tasks of the tracker that are about it: `gh issue list --search \"<the name of the script>\"`.");
-        Part(text, "Ask the owner", $"what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `{Command(2)}`.{(owner is null ? "" : $" A single task that waits for the owner gets the `{owner}` label.")} Where the project has an old way of running its tasks without the owner: whether the script, its state and its instructions are taken out of the project, and what becomes of the tasks about it. Nothing is deleted without the owner. Show the owner the changes of the instructions before they are kept.");
+        Part(text, "Ask the owner", $"what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `{Command(2)}`.{(manual is null ? "" : $" A single task that waits for the owner gets the `{manual}` label.")} Where the project has an old way of running its tasks without the owner: whether the script, its state and its instructions are taken out of the project, and what becomes of the tasks about it. Nothing is deleted without the owner. Show the owner the changes of the instructions before they are kept.");
         Part(text, "Set it", "no command of toobusy sets this step: the instructions are edited as any file of the project.");
         Part(text, "Check", "read `toobusy about` once more against the instructions as they are now: nothing in them tells a session of a run to do what toobusy does.");
     }
@@ -534,7 +534,7 @@ public static class Assist
     static string Unstated(AssistGround ground) => ground.Settings is null ? "not set: there are no settings yet" : "not read: the settings do not validate";
 
     static string LabelsInShort(AssistGround ground) => Stated(ground)?.Queue.Labels is { } labels
-        ? $"take: {Named(labels.Take, "any task")}; blocking: {Named(labels.Blocking, "none")}; owner: `{labels.Owner}`; interrupted: `{labels.Interrupted}`"
+        ? $"take: {Named(labels.Take, "any task")}; blocking: {Named(labels.Blocking, "none")}; manual: `{labels.Manual}`; interrupted: `{labels.Interrupted}`"
         : Unstated(ground);
 
     static string SkillInShort(AssistGround ground) => (Stated(ground), ground.Skill) switch
