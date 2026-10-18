@@ -2058,6 +2058,45 @@ public sealed class CliAppTests : IDisposable
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
     }
 
+    // An error of the file system, and a cancellation that the menu did not ask for, as of a part that gave up by
+    // itself.
+    [Theory]
+    [InlineData(nameof(IOException), "The disk is gone.")]
+    [InlineData(nameof(OperationCanceledException), "The login gave up.")]
+    public async Task RunOfTheMenuOpensNoRunWhenTheChecksCannotBeMadeAndSaysWhyAboveTheMenu(string kind, string words)
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        // A task to take; the login of Claude Code fails with an error nobody foresaw.
+        Exception unforeseen = kind == nameof(IOException) ? new IOException(words) : new OperationCanceledException(words);
+        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        {
+            ("claude", "auth") => throw unforeseen,
+            ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
+            ("gh", "label") => new ProcessResult(ProcessStatus.Exited, 0, Labels, ""),
+            ("gh", "api") when arguments[1] == "graphql" => new ProcessResult(ProcessStatus.Exited, 0, "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n", ""),
+            _ => new ProcessResult(ProcessStatus.Exited, 0, "", ""),
+        });
+        using var terminal = new TestTerminal(width: 160, height: 30);
+
+        // `Run`, which opens nothing; then the last of the menu.
+        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        terminal.AssertSaw($"""
+             ✘ checks             The checks could not be made: {words}
+               This is an error toobusy did not foresee ({kind}): run `toobusy doctor` with TOOBUSY_TRACE=1 to see where it happened.
+             The run did not start. `toobusy doctor` checks all of it again.
+             What to do
+             ❯ Run          1 task
+            """.ReplaceLineEndings("\n").TrimEnd(' '));
+        Assert.False(terminal.Saw("Running the queue"));
+        Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude" && asked.Arguments[0] == "--bg");
+    }
+
     [Fact]
     public async Task RunOfTheMenuOpensNothingOverABoardThatLacksAStatusOfARun()
     {

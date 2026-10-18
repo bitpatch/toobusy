@@ -40,11 +40,11 @@ public sealed class Session(Page page, Workbench bench)
     // Opens with the menu. A project that is not set up is set up first, and a user who has no milestone to work
     // on, no model or no effort chooses them; leaving any of these leaves the page. A run that is opened from the
     // menu comes back to it when it is over, with how it went said above the menu. No run is opened while one goes on in the working copy. Before it is opened the checks
-    // of `doctor` are made, as `toobusy run` makes them: while one fails no run is opened, and the failures stand
-    // above the menu with their fixes. A demo has it all and checks nothing. The labels to skip that are chosen in
-    // the menu hold for every run it opens, until the page is closed. A row that is chosen while another one waits
-    // under the menu is gone on with as if it was chosen there, and one that waits is stopped by Escape: the menu is
-    // asked again then.
+    // of `doctor` are made, as `toobusy run` makes them: while one fails, or they cannot be made, no run is opened,
+    // and the failures stand above the menu with their fixes. A demo has it all and checks nothing. The labels to
+    // skip that are chosen in the menu hold for every run it opens, until the page is closed. A row that is chosen
+    // while another one waits under the menu is gone on with as if it was chosen there, and one that waits is
+    // stopped by Escape: the menu is asked again then.
     public async Task HomeAsync(CancellationToken cancellationToken)
     {
         if (bench.Settings.Load()?.Settings is null)
@@ -134,7 +134,8 @@ public sealed class Session(Page page, Workbench bench)
 
     // Makes the checks of `doctor` under the menu, which shows the one that is running at `Run` and stays what
     // it is: gives `Run` with the checks that failed once they are over, or what was chosen meanwhile, which stops
-    // them; null when Escape stopped them.
+    // them; null when Escape stopped them. Checks that an error stops before they are over, one that toobusy did
+    // not foresee, failed too, as `toobusy run` starts no run over them; only the stop of the menu is no failure.
     async Task<(HomeAction? Action, IReadOnlyList<CheckResult> Failed)> CheckAsync(TaskCount tasks, CancellationToken cancellationToken)
     {
         var checks = new RunChecks();
@@ -148,8 +149,12 @@ public sealed class Session(Page page, Workbench bench)
             {
                 await bench.Checkup.RunAsync(checks, stopping.Token);
             }
-            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException)
+            catch (Exception stopped) when (stopping.IsCancellationRequested && stopped is OperationCanceledException or ObjectDisposedException)
             {
+            }
+            catch (Exception unforeseen)
+            {
+                checks.Done(Unmade(unforeseen));
             }
             finally
             {
@@ -157,6 +162,14 @@ public sealed class Session(Page page, Workbench bench)
             }
         }
     }
+
+    // The failure of checks that an error toobusy did not foresee stopped: its words, its kind, and how `doctor`
+    // shows where it happened, as an error of a command is said.
+    static CheckResult Unmade(Exception unforeseen) =>
+        new("checks", CheckState.Failed, $"The checks could not be made: {CliApp.Words(unforeseen)}")
+        {
+            Details = [$"This is an error toobusy did not foresee ({unforeseen.GetType().Name}): run `toobusy doctor` with TOOBUSY_TRACE=1 to see where it happened."],
+        };
 
     // Waits under the menu for the work a row needs before it opens: gives the row once the work is over, another
     // row that was chosen meanwhile, or null when Escape stopped the wait. Work that was not waited for is told to

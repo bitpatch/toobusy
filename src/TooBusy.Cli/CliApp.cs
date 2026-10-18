@@ -138,13 +138,17 @@ public static class CliApp
     // An error the tool did not foresee: its words, and where it happened only when `TOOBUSY_TRACE=1` asks for it.
     static int Unforeseen(CliContext context, Exception unforeseen)
     {
-        Fail(context, $"toobusy: {string.Join(' ', unforeseen.Message.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))}");
+        Fail(context, $"toobusy: {Words(unforeseen)}");
         if (!context.Trace)
             return Fail(context, $"This is an error toobusy did not foresee ({unforeseen.GetType().Name}): run the command again with TOOBUSY_TRACE=1 to see where it happened.");
 
         context.Error.WriteLine(unforeseen.ToString());
         return ExitCode.Failed;
     }
+
+    // The words of an error on one line.
+    public static string Words(Exception failed) =>
+        string.Join(' ', failed.Message.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
 
     // What `--version` does: prints the version of the tool, and the commit of a build in development after it.
     sealed class PrintVersion : SynchronousCommandLineAction
