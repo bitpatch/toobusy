@@ -147,6 +147,71 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task TheBarCountsTheStepsAndFillsFromTheLeftWhateverOrderTheSessionMarksThemIn()
+    {
+        var bars = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            // The third step is done before the second, and the session is at the fourth: the bar has no hole, and
+            // without colours the step it is at is an empty cell after the full ones.
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Pending, PlanStep.Done, PlanStep.Active, PlanStep.Pending] });
+            bars.Add(await CellsAsync(5));
+
+            // A step that went back from done is counted where it is now.
+            view.Show(Working with { Plan = [PlanStep.Pending, PlanStep.Done, PlanStep.Active, PlanStep.Pending] });
+            bars.Add(await CellsAsync(4));
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["   ▰▰▱▱▱", "   ▰▱▱▱"], bars);
+    }
+
+    [Fact]
+    public async Task WhatBlinksIsTheCellsRightAfterTheFullOnesWhereverItsStepsStandInThePlan()
+    {
+        var palette = Palette.Dark;
+        var frames = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Pending, PlanStep.Done, PlanStep.Active, PlanStep.Pending] });
+            await CellsAsync(5);
+            frames.Add(terminal.Output.ToString());
+
+            // The session is at two steps that are apart, the second and the fourth.
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Active, PlanStep.Pending, PlanStep.Active] });
+            await CellsAsync(4);
+            frames.Add(terminal.Output.ToString()[frames[0].Length..]);
+
+            // Between two steps it is at none, and nothing blinks.
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Pending, PlanStep.Done] });
+            await CellsAsync(3);
+            frames.Add(terminal.Output.ToString()[(frames[0].Length + frames[1].Length)..]);
+            return new RunResult(RunEnd.Emptied, 0);
+        });
+
+        using var page = terminal.Open(palette: palette);
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        // The first cell of the bar stands in the fourth column. The third blinks, right after the two that are done,
+        // and not the fourth, whose step the session is at.
+        static string Lit(int column) => $"\u001b\\[{column}G\u001b\\[38;2;[0-9;]+m▰";
+        Assert.Contains(palette.Accent("▰▰") + palette.Muted("▱▱▱"), frames[0], StringComparison.Ordinal);
+        Assert.Matches(Lit(6), frames[0]);
+        Assert.DoesNotMatch(Lit(7), frames[0]);
+
+        Assert.Contains(palette.Accent("▰") + palette.Muted("▱▱▱"), frames[1], StringComparison.Ordinal);
+        Assert.Matches(Lit(5), frames[1]);
+        Assert.Matches(Lit(6), frames[1]);
+        Assert.DoesNotMatch(Lit(7), frames[1]);
+
+        Assert.Contains(palette.Accent("▰▰") + palette.Muted("▱"), frames[2], StringComparison.Ordinal);
+        Assert.DoesNotMatch("\u001b\\[[0-9]+G\u001b\\[38;2;[0-9;]+m▰", frames[2]);
+    }
+
+    [Fact]
     public async Task TheLineOfTheCommandsShowsTheWindowsOfTheLastStatusAndNothingForOneThatIsNotKnown()
     {
         var edges = new List<string>();
@@ -281,6 +346,15 @@ public sealed class RunScreenTests : IDisposable
         var rows = terminal.Tape.Text.Split('\n');
         var at = Array.FindIndex(rows, row => row.Contains("1:24 · Edit src/Export.cs", StringComparison.Ordinal));
         return at < 0 || at + 1 >= rows.Length ? null : rows[at + 1];
+    }
+
+    // Waits until that line is a bar of so many cells, whatever they are, and gives it.
+    async Task<string> CellsAsync(int count)
+    {
+        string? bar;
+        while ((bar = Bar()) is null || bar.Trim().Length != count || bar.Trim().Any(cell => cell is not ('▰' or '▱')))
+            await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+        return bar;
     }
 
     [Fact]

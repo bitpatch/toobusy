@@ -59,11 +59,12 @@ public static class RunLook
     // that is done, empty and muted for the others. It stands under the text of the lines above it.
     public static Line Plan(IReadOnlyList<PlanStep> plan)
     {
+        var steps = Filled(plan);
         var parts = new List<Part> { new(new string(' ', Inset)) };
-        for (var from = 0; from < plan.Count;)
+        for (var from = 0; from < steps.Length;)
         {
-            var done = plan[from] == PlanStep.Done;
-            var count = plan.Skip(from).TakeWhile(step => step == PlanStep.Done == done).Count();
+            var done = steps[from] == PlanStep.Done;
+            var count = steps.Skip(from).TakeWhile(step => step == PlanStep.Done == done).Count();
             parts.Add(new Part(string.Concat(Enumerable.Repeat(done ? Tape.Full : "▱", count)), done ? Tone.Accent : Tone.Muted));
             from += count;
         }
@@ -72,8 +73,17 @@ public static class RunLook
     }
 
     // The columns of the cells of that bar whose steps the session is at: they blink.
-    public static IEnumerable<int> Active(IReadOnlyList<PlanStep> plan) =>
-        Enumerable.Range(0, plan.Count).Where(step => plan[step] == PlanStep.Active).Select(step => Inset + step);
+    public static IEnumerable<int> Active(IReadOnlyList<PlanStep> plan)
+    {
+        var steps = Filled(plan);
+        return Enumerable.Range(0, steps.Length).Where(step => steps[step] == PlanStep.Active).Select(step => Inset + step);
+    }
+
+    // The steps of a plan in the order the bar draws them: those that are done, then those the session is at, then
+    // those that are not begun. A cell does not say which step it is, so the bar fills from the left whatever order
+    // the session marks its steps in, and what blinks stands right after what is done.
+    static PlanStep[] Filled(IReadOnlyList<PlanStep> plan) =>
+        [.. plan.OrderBy(step => step switch { PlanStep.Done => 0, PlanStep.Active => 1, _ => 2 })];
 
     const int Inset = 2;
 
