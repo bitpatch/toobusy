@@ -700,7 +700,12 @@ public sealed class Supervisor(
     }
 
     // Whether the look shows a session that ended with a line for toobusy: it is not watched, only settled.
-    static bool Over(SessionLook look) => look.Limit is null && look.Phase is SessionPhase.Ended or SessionPhase.Lost && Outcome.Read(look.Reply) is not null;
+    static bool Over(SessionLook look) => look.Limit is null && look.Phase is SessionPhase.Ended or SessionPhase.Lost && OutcomeOf(look) is not null;
+
+    // How the task went, as the session says: null unless it has reported, its reply ending with a line for toobusy
+    // and nothing done after it. A line with a question after it says nothing: it may be one the session wrote before
+    // it went on, and a session lost after such a reply has not said how the task went.
+    static Outcome? OutcomeOf(SessionLook look) => look.Reported ? Outcome.Read(look.Reply) : null;
 
     // Settles a task that was closed while nobody watched and whose session ended with a line for toobusy: null when
     // the run goes on to the next one. Nothing is moved and nobody is assigned before: the task is not taken again,
@@ -839,10 +844,12 @@ public sealed class Supervisor(
                         Say(RunMark.GoesOn, $"The sessions are read again: #{number} is watched");
                     unseen = false;
 
-                    // A turn that ends without saying how the task went waits for the owner as a question does. One
-                    // that the assistant marks as waiting for an answer and whose reply ends with a line for toobusy
-                    // does not: the session has reported, and there is nothing for the owner to answer.
-                    var silent = look.Phase == SessionPhase.Ended && Outcome.Read(look.Reply) is null && !aborting;
+                    // A turn that ends without saying how the task went waits for the owner as a question does, and
+                    // while the run aborts its session gets the request to wrap up as a message, as one that waits
+                    // does; a turn that ends so after that message is over. One that the assistant marks as waiting
+                    // for an answer and whose reply ends with a line for toobusy does not wait: the session has
+                    // reported, and there is nothing for the owner to answer.
+                    var silent = look.Phase == SessionPhase.Ended && OutcomeOf(look) is null && !cut;
                     var reported = look is { Phase: SessionPhase.Asking, Reported: true };
                     if (look.Limit is { } refusal && look.Phase != SessionPhase.Working)
                     {
@@ -893,10 +900,13 @@ public sealed class Supervisor(
                     }
                     else if (!waiting)
                     {
-                        // A step of its own since it was told last makes this a new stop, not the old one again.
+                        // A step of its own since it was told last makes this a new stop, not the old one again. While
+                        // the run aborts, a session that did not get the request to wrap up as a message yet is not
+                        // left to the owner for the messages before: it gets that one first.
                         waiting = true;
                         idle = told > 0 && look.Steps == steps ? idle + 1 : 0;
-                        var left = idle >= policy.IdleMessages ? $"{policy.IdleMessages} messages in a row brought no step of its own"
+                        var left = aborting && !cut ? null
+                            : idle >= policy.IdleMessages ? $"{policy.IdleMessages} messages in a row brought no step of its own"
                             : told >= policy.Messages ? $"it was told to go on alone {policy.Messages} times"
                             : null;
                         sendAt = left is null && !aborting ? clock.Now + policy.OwnerWait : null;
@@ -1056,7 +1066,7 @@ public sealed class Supervisor(
         {
             await Quietly(() => session.StopAsync(kill));
             kill.ThrowIfCancellationRequested();
-            if (Outcome.Read(look.Reply) is { Kind: not OutcomeKind.Failed })
+            if (OutcomeOf(look) is { Kind: not OutcomeKind.Failed })
                 tree = await workspace.ReadAsync(kill);
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
@@ -1104,7 +1114,7 @@ public sealed class Supervisor(
 
         // A failure is for the owner: the record is forgotten, the task is left to them, and no run goes on with
         // it by itself.
-        if (Outcome.Read(look.Reply) is not { } outcome)
+        if (OutcomeOf(look) is not { } outcome)
         {
             state.Clear();
             Say(RunMark.Failed, $"#{number} {task.Title} — ended after {took} without saying how the task went");

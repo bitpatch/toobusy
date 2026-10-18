@@ -1010,6 +1010,19 @@ public sealed class SupervisorTests : IDisposable
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), await RunAsync());
     }
 
+    // A line with something after it is no report: the session may have written it before it went on.
+    [Fact]
+    public async Task ASessionThatIsLostAfterAQuestionThatFollowsTheLineHasNotSaidHowTheTaskWent()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works().Lost($"{Done}\n\nShould I also update the docs?");
+
+        var result = await RunAsync();
+
+        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
+        Assert.DoesNotContain("close 3", tracker.Did);
+    }
+
     [Fact]
     public async Task ATrackerThatRefusesStopsTheRun()
     {
@@ -1533,6 +1546,19 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
+    public async Task ATurnThatEndsWithAQuestionAfterTheLineWaitsAsOneWithoutItDoes()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Ends($"{Done}\n\nShall I go on with the docs?").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(1, result.Done);
+        Assert.Equal([Briefing.Alone(3, Rules.Manual)], session.Told);
+        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+    }
+
+    [Fact]
     public async Task NudgeTellsTheSessionAtOnce()
     {
         tracker.Add(3);
@@ -1709,7 +1735,25 @@ public sealed class SupervisorTests : IDisposable
     }
 
     [Fact]
-    public async Task AnAbortedSessionThatEndsWithoutSayingSoIsNotToldToGoOnAlone()
+    public async Task AnAbortedTurnThatEndsWithoutTheLineIsToldToWrapUpAndThenWrapsUp()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works(20).WhenAsked().Ends("I stopped.").Then().Works().Ends("Undone.\nTOOBUSY: interrupted");
+        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
+        Assert.Equal([Briefing.WrapUp(3)], session.Asked);
+        Assert.Equal([Briefing.WrapUp(3)], session.Told);
+        Assert.Contains("‖ #3 ended its turn without saying how the task went · fake attach 3", log.Lines);
+        Assert.Contains("■ #3 waits for the owner: its turn is cut, and it is told to wrap up", log.Lines);
+        Assert.Contains("label 3 +interrupted", tracker.Did);
+        Assert.DoesNotContain("#3 waits for an answer", machine.Notified);
+    }
+
+    [Fact]
+    public async Task AnAbortedTurnThatEndsWithoutTheLineAgainAfterTheRequestFails()
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works(20).WhenAsked().Ends("I stopped.");
@@ -1717,8 +1761,28 @@ public sealed class SupervisorTests : IDisposable
 
         var result = await RunAsync();
 
-        Assert.Empty(session.Told);
+        Assert.Equal([Briefing.WrapUp(3)], session.Told);
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
+        Assert.Contains("label 3 +needs-owner", tracker.Did);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("go on alone", StringComparison.Ordinal));
+    }
+
+    // The messages it got before do not leave it to the owner: the request to wrap up comes first.
+    [Fact]
+    public async Task AnAbortedTurnThatEndsWithoutTheLineIsToldToWrapUpHoweverOftenItWasToldToGoOnAlone()
+    {
+        policy = policy with { Messages = 1 };
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Ends("What now?")
+            .Then().Works(and: () => Run.Send(RunCommand.Abort)).Ends("Still nothing.")
+            .Then().Ends("Undone.\nTOOBUSY: interrupted");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
+        Assert.Equal([Briefing.Alone(3, Rules.Manual), Briefing.WrapUp(3)], session.Told);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("it is left to the owner", StringComparison.Ordinal));
+        Assert.Contains("label 3 +interrupted", tracker.Did);
     }
 
     [Fact]
@@ -2772,6 +2836,22 @@ public sealed class SupervisorTests : IDisposable
 
         Assert.Equal([Briefing.WrapUp(3)], session.Told);
         Assert.Contains("✖ #3 did not go on with the request to wrap up: it is deaf", log.Lines);
+    }
+
+    // The look it is settled by is the one of its question: the line before the question is not read.
+    [Fact]
+    public async Task AnAbortedSessionThatAsksAfterItsLineAndDoesNotGoOnIsNotSettledByTheLine()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks("input needed", $"{Done}\n\nShould I also update the docs?");
+        session.Deaf = "it is deaf";
+        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal([Briefing.WrapUp(3)], session.Told);
+        Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
+        Assert.DoesNotContain("close 3", tracker.Did);
     }
 
     [Fact]

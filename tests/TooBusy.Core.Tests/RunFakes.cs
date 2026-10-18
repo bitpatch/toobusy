@@ -299,7 +299,7 @@ sealed class FakeSession(int task) : IAssistantSession
     public FakeSession Limit(string refusal = "You have hit your usage limit.", SessionPhase phase = SessionPhase.Ended, string? reply = null) =>
         Add(new SessionLook(phase, Steps: steps, Reply: reply, Limit: refusal, Reported: Outcome.Ends(reply)));
 
-    public FakeSession Lost(string? reply = null, string? odd = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply, Odd: odd));
+    public FakeSession Lost(string? reply = null, string? odd = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply), Odd: odd));
 
     public FakeSession Unseen(int looks = 1, Action? and = null)
     {

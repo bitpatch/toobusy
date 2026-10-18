@@ -280,7 +280,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
         return new UsageLimits(near, new UsageWindow("weekly", far, null));
     }
 
-    static SessionLook Ended(string reply) => new(SessionPhase.Ended, Reply: reply);
+    static SessionLook Ended(string reply) => new(SessionPhase.Ended, Reply: reply, Reported: Outcome.Ends(reply));
 
     // A session that ended its turn with the line for toobusy and that Claude Code marks as waiting all the same, as
     // it marks a report that leaves something to the owner. Told that no answer will come, it answers with the same.

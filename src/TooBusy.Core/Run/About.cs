@@ -248,11 +248,11 @@ public static class About
             {Briefing.WrapUp(Sample.Number)}
             ```
 
-            A session that works reads it after its next step, beside what that step gave, and its turn is not cut: a subagent may read it too, which is why it says what a subagent does. A session that has not wrapped up in {Spoken.Time(policy.AbortGrace)} has its turn cut and is told again, and so is one that waits for the owner, at once. A session whose reply ends with the line for toobusy ends the task then, whatever Claude Code marks it as, and is told nothing more.
+            A session that works reads it after its next step, beside what that step gave, and its turn is not cut: a subagent may read it too, which is why it says what a subagent does. A session that has not wrapped up in {Spoken.Time(policy.AbortGrace)} has its turn cut and is told again, and so is one that waits for the owner, at once: one whose turn ended without the line among them, however many messages it was told before. It is told so once: a turn that ends without the line after that ends the task as one that did not say how it went. A session whose reply ends with the line for toobusy ends the task then, whatever Claude Code marks it as, and is told nothing more.
 
             ## How a task ends
 
-            The last reply of a session is the report of the task, and its last line says how the task went. The line is read whatever its case and whatever marks of emphasis stand around it, and the last such line of the reply counts.
+            The last reply of a session is the report of the task, and its last line says how the task went. The line is read whatever its case and whatever marks of emphasis stand around it, and the last such line of the reply counts, only when the reply ends with it: a line with a question after it says nothing of how the task went.
 
             | Last line | toobusy checks | toobusy does |
             |---|---|---|
