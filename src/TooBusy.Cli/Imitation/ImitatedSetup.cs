@@ -136,7 +136,7 @@ public sealed class UnwrittenSettings(ISettingsStore file, bool madeUp = false) 
     ProjectSettings? saved = madeUp && file.Load() is null
         ? new ProjectSettings(
             new TrackerSettings(SettingsKeys.GitHubTracker, "https://github.com/users/example/projects/1"),
-            new QueueSettings(new LabelSettings(["manual", "draft"], ["feature", "bug", "chore", "docs"], "needs-owner", "interrupted")),
+            new QueueSettings(new LabelSettings(["draft"], ["feature", "bug", "chore", "docs"], "manual", "interrupted")),
             new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
         {
             Skill = "task-auto",

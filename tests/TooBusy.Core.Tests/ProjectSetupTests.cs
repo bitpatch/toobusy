@@ -37,27 +37,34 @@ public class ProjectSetupTests
         Assert.Equal(new TrackerSettings("github", null), store.Saved!.Tracker);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
-        Assert.Equal("needs-owner", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(new AssistantSettings("claude-code"), store.Saved.Assistant);
 
-        // The label of the owner is not one of the repository yet, so its name is asked for after the list.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        // The label of the owner is one of the repository, so the list points at it.
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
         Assert.Equal("task-auto", store.Saved.Skill);
+        Assert.Equal(["The answers above will be written to .toobusy/settings.toml."], dialog.Shown.Notes.Select(note => note.Text));
     }
 
     [Fact]
     public async Task AFirstSetupSaysThatTheAnswersWillBeWritten()
     {
+        tracker.Labels = ["bug", "draft", "feature", "interrupted"];
+
         await RunAsync();
 
         Assert.Equal(
             [
                 new SetupNote(SetupTone.Plain, "The answers above will be written to .toobusy/settings.toml."),
-                new SetupNote(SetupTone.Plain, "The label “needs-owner” will be made in acme/rocket."),
+                new SetupNote(SetupTone.Plain, "The label “manual” will be made in acme/rocket."),
             ],
             dialog.Shown.Notes);
         Assert.Equal(8, dialog.Shown.Answers.Count);
+
+        // The label of the owner is not one of the repository yet, so its name is asked for after the list.
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", OwnerLabel, OwnerLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        Assert.Equal("manual", store.Saved!.Queue.Labels.Owner);
     }
 
     [Fact]
@@ -279,12 +286,13 @@ public class ProjectSetupTests
     [Fact]
     public async Task ALabelThatCannotBeMadeFailsTheSetupAndWritesNothing()
     {
-        tracker.RefuseToLabel = "The label “needs-owner” could not be made in acme/rocket.";
+        tracker.Labels = ["bug", "draft", "feature", "interrupted"];
+        tracker.RefuseToLabel = "The label “manual” could not be made in acme/rocket.";
 
         var result = await RunAsync();
 
         Assert.Equal(SetupOutcome.Failed, result.Outcome);
-        Assert.Equal("The label “needs-owner” could not be made in acme/rocket.", result.Failure);
+        Assert.Equal("The label “manual” could not be made in acme/rocket.", result.Failure);
         Assert.Null(store.Saved);
     }
 
@@ -323,7 +331,7 @@ public class ProjectSetupTests
         var result = await RunAsync();
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal(["Skill", "Write the settings?", "Skill", "Write the settings?"], dialog.Asked.Skip(6));
+        Assert.Equal(["Skill", "Write the settings?", "Skill", "Write the settings?"], dialog.Asked.Skip(5));
     }
 
     [Fact]
@@ -478,7 +486,7 @@ public class ProjectSetupTests
         dialog.Answer("Blocking labels", "manual, draft,");
         dialog.Answer("Labels to take", "draft");
         dialog.Answer("Labels to take", "bug, feature");
-        dialog.Answer(InterruptLabel, "needs-owner");
+        dialog.Answer(InterruptLabel, "manual");
         dialog.Answer(InterruptLabel, " paused ");
 
         await RunAsync();
@@ -489,9 +497,9 @@ public class ProjectSetupTests
         Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Equal(["manual", "draft"], store.Saved.Queue.Labels.Blocking);
         Assert.Equal(["bug", "feature"], store.Saved.Queue.Labels.Take);
-        Assert.Equal("needs-owner", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
         Assert.Equal("paused", store.Saved.Queue.Labels.Interrupted);
-        Assert.Equal(["draft", "needs-owner"], dialog.Refused);
+        Assert.Equal(["draft", "manual"], dialog.Refused);
     }
 
     [Fact]
@@ -683,6 +691,7 @@ public class ProjectSetupTests
     [Fact]
     public async Task WithoutQuestionsAFirstSetupTakesWhatIsProposedAndSaysWhatItDid()
     {
+        tracker.Labels = ["bug", "draft", "feature", "interrupted"];
         boards.Read = new SetupBoards([new(Moon, "Moon", false), new(Rocket, "Rocket", true)], []);
 
         var result = await RunUnaskedAsync(SetupProposals.None);
@@ -692,10 +701,10 @@ public class ProjectSetupTests
         Assert.Equal(Rocket, store.Saved!.Tracker.Board);
         Assert.Empty(store.Saved.Queue.Labels.Blocking);
         Assert.Empty(store.Saved.Queue.Labels.Take);
-        Assert.Equal("needs-owner", store.Saved.Queue.Labels.Owner);
+        Assert.Equal("manual", store.Saved.Queue.Labels.Owner);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
         Assert.Equal(8, result.Answers.Count);
-        Assert.Equal(["The label “needs-owner” was made in acme/rocket."], result.Done);
+        Assert.Equal(["The label “manual” was made in acme/rocket."], result.Done);
         Assert.Empty(result.Notes);
     }
 
@@ -719,6 +728,7 @@ public class ProjectSetupTests
     [Fact]
     public async Task WithoutQuestionsANewBoardIsMadeLinkedAndWritten()
     {
+        tracker.Labels = ["bug", "draft", "feature", "interrupted"];
         boards.Read = new SetupBoards([], [new("acme", true)]);
 
         var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Created("Rocket", null)));
@@ -729,7 +739,7 @@ public class ProjectSetupTests
             [
                 "The project “Rocket” was made for acme: https://github.com/orgs/acme/projects/42",
                 "The project was linked to acme/rocket.",
-                "The label “needs-owner” was made in acme/rocket.",
+                "The label “manual” was made in acme/rocket.",
             ],
             result.Done);
     }
@@ -861,6 +871,7 @@ public class ProjectSetupTests
     [Fact]
     public async Task WithoutQuestionsWhatGitHubRefusesFailsTheSetupAfterWhatWasDone()
     {
+        tracker.Labels = ["bug", "draft", "feature", "interrupted"];
         boards.Read = new SetupBoards([new(Moon, "Moon", false)], []);
         tracker.RefuseToLabel = "labels cannot be made";
 
@@ -1546,7 +1557,7 @@ public class ProjectSetupTests
 
         await RunAsync();
 
-        Assert.Equal([InterruptLabel, "Skill", InterruptLabel, "Skill", "Write the settings?"], dialog.Asked.Skip(5));
+        Assert.Equal([InterruptLabel, "Skill", InterruptLabel, "Skill", "Write the settings?"], dialog.Asked.Skip(4));
     }
 
     [Fact]
@@ -1782,10 +1793,13 @@ public class ProjectSetupTests
             return Task.FromResult(Statuses);
         }
 
+        // The labels of the repository.
+        public IReadOnlyList<string> Labels { get; set; } = ["bug", "draft", "feature", "interrupted", "manual"];
+
         public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult<IReadOnlyList<string>>(["bug", "draft", "feature", "interrupted", "manual"]);
+            return Task.FromResult(Labels);
         }
 
         public Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)

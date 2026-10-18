@@ -26,7 +26,7 @@ public class AssistTests
         new SettingsValidation(
             new ProjectSettings(
                 new TrackerSettings("github", board),
-                new QueueSettings(new LabelSettings(blocking ?? ["question"], take ?? ["feature", "bug"], "needs-owner", "interrupted")),
+                new QueueSettings(new LabelSettings(blocking ?? ["question"], take ?? ["feature", "bug"], "manual", "interrupted")),
                 new AssistantSettings("claude-code") { PermissionMode = mode })
             {
                 Skill = skill,
@@ -98,7 +98,7 @@ public class AssistTests
 
         Assert.Contains(
             """
-            2. **Which tasks are taken.** Take: `feature`, `bug`; blocking: `question`; owner: `needs-owner`; interrupted: `interrupted`.
+            2. **Which tasks are taken.** Take: `feature`, `bug`; blocking: `question`; owner: `manual`; interrupted: `interrupted`.
             3. **The board.** The board is https://github.com/orgs/acme/projects/1.
             4. **The owner's own choices.** Milestone: v1; model: the assistant's own; effort: high.
             5. **The instructions of the project.** The project's own; toobusy does not read them.
@@ -113,7 +113,7 @@ public class AssistTests
     public void TheListTellsAProjectWithoutABoardAndWithoutASkillAndASkillThatIsNotWritten()
     {
         var bare = Assist.Introduction(Set(take: [], blocking: []) with { Milestone = MilestoneChoice.None, Model = new ModelChoice("opus") });
-        Assert.Contains("2. **Which tasks are taken.** Take: any task; blocking: none; owner: `needs-owner`; interrupted: `interrupted`.\n3. **The board.** No board.\n4. **The owner's own choices.** Milestone: no milestone; model: opus; effort: not chosen.", bare, StringComparison.Ordinal);
+        Assert.Contains("2. **Which tasks are taken.** Take: any task; blocking: none; owner: `manual`; interrupted: `interrupted`.\n3. **The board.** No board.\n4. **The owner's own choices.** Milestone: no milestone; model: opus; effort: not chosen.", bare, StringComparison.Ordinal);
         Assert.Contains("6. **The skill a session starts with.** No skill.\n7. **The branch and the commands around a task.** Branch: none; before: none; after: none.", bare, StringComparison.Ordinal);
 
         var unwritten = Assist.Introduction(Set(skill: "task-auto") with { Skill = new SkillLook(false, ".claude/skills/task-auto/SKILL.md") });
@@ -200,7 +200,7 @@ public class AssistTests
         var text = Assist.Step(2, Unset with { Labels = ["bug", "feature", "docs", "question", "wontfix"] });
 
         Assert.Contains("As things are: not set: there are no settings yet. The labels of acme/rocket: `bug`, `feature`, `docs`, `question`, `wontfix`.\n", text, StringComparison.Ordinal);
-        Assert.Contains("Set it:\n\n    toobusy init --yes --no-board --no-skill --take-label <label>,<label> --blocking-label <label>,<label> --owner-label needs-owner --interrupt-label interrupted\n\n", text, StringComparison.Ordinal);
+        Assert.Contains("Set it:\n\n    toobusy init --yes --no-board --no-skill --take-label <label>,<label> --blocking-label <label>,<label> --owner-label manual --interrupt-label interrupted\n\n", text, StringComparison.Ordinal);
         Assert.Contains("`--no-board` and `--no-skill` stand there only because nothing is set yet: steps 3 and 6 set them.", text, StringComparison.Ordinal);
         Assert.Contains("What must not share a label: a label to take is not a blocking label; the label of the owner is not a label to take; the label of interrupted tasks is not a label to take, a blocking label or the label of the owner.", text, StringComparison.Ordinal);
         Assert.Contains("Ask the owner: show the four answers before you set them", text, StringComparison.Ordinal);
@@ -210,10 +210,10 @@ public class AssistTests
     [Fact]
     public void OverSettingsThatExistTheStepOfTheLabelsNamesTheOptionsOfTheLabelsAlone()
     {
-        var text = Assist.Step(2, Set(Rocket, take: ["feature", "good first issue"]) with { Labels = ["feature", "question", "needs-owner"] });
+        var text = Assist.Step(2, Set(Rocket, take: ["feature", "good first issue"]) with { Labels = ["feature", "question", "manual"] });
 
-        Assert.Contains("As things are: the labels to take: `feature`, `good first issue`; the blocking labels: `question`; the label of the owner: `needs-owner`; the label of interrupted tasks: `interrupted`. The labels of acme/rocket: `feature`, `question`, `needs-owner`. The settings name `good first issue`, `interrupted`, which the repository does not have.\n", text, StringComparison.Ordinal);
-        Assert.Contains("    toobusy init --yes --take-label \"feature,good first issue\" --blocking-label question --owner-label needs-owner --interrupt-label interrupted\n", text, StringComparison.Ordinal);
+        Assert.Contains("As things are: the labels to take: `feature`, `good first issue`; the blocking labels: `question`; the label of the owner: `manual`; the label of interrupted tasks: `interrupted`. The labels of acme/rocket: `feature`, `question`, `manual`. The settings name `good first issue`, `interrupted`, which the repository does not have.\n", text, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --take-label \"feature,good first issue\" --blocking-label question --owner-label manual --interrupt-label interrupted\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("--no-board", text, StringComparison.Ordinal);
         Assert.DoesNotContain("--no-skill", text, StringComparison.Ordinal);
         Assert.Contains("What the command does not name stays as it is: the board, the skill, the branch and the commands around a task.", text, StringComparison.Ordinal);
@@ -221,7 +221,7 @@ public class AssistTests
         var none = Assist.Step(2, Set(take: [], blocking: []) with { Labels = [] });
         Assert.Contains("the labels to take: none, so any task is taken; the blocking labels: none;", none, StringComparison.Ordinal);
         Assert.Contains("The labels of acme/rocket: none.", none, StringComparison.Ordinal);
-        Assert.Contains("    toobusy init --yes --no-take-labels --no-blocking-labels --owner-label needs-owner --interrupt-label interrupted\n", none, StringComparison.Ordinal);
+        Assert.Contains("    toobusy init --yes --no-take-labels --no-blocking-labels --owner-label manual --interrupt-label interrupted\n", none, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public class AssistTests
         Assert.Contains("- that an assistant that works with the owner looks at `toobusy status` before it commits", text, StringComparison.Ordinal);
         Assert.Contains("that in a session of a run the task is kept by toobusy", text, StringComparison.Ordinal);
         Assert.Contains("- how a session brings its branch up to date when the branch has moved on the remote by the time it pushes: by a rebase or by a merge.", text, StringComparison.Ordinal);
-        Assert.Contains("Ask the owner: what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `toobusy init --assist 2`. A single task that waits for the owner gets the `needs-owner` label.", text, StringComparison.Ordinal);
+        Assert.Contains("Ask the owner: what a session may do alone in this project, and what it must not. A kind of task that it must not do gets a blocking label, back in step 2: `toobusy init --assist 2`. A single task that waits for the owner gets the `manual` label.", text, StringComparison.Ordinal);
         Assert.Contains("Set it: no command of toobusy sets this step", text, StringComparison.Ordinal);
         Assert.DoesNotContain("toobusy init --yes", text, StringComparison.Ordinal);
     }

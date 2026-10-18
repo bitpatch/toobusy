@@ -84,7 +84,7 @@ Run it in a terminal, in the folder of the project. It asks:
 | Todo status, In Progress status, Done status | which status of the board is which; asked only of a board that does not call them as GitHub does |
 | Blocking labels | a task with any of these labels is never taken |
 | Labels to take | a task needs one of these labels; none chosen means any task |
-| Owner's label | the label a run puts on a task that waits for you; such a task is not taken while it has it. `needs-owner` is proposed |
+| Owner's label | the label a run puts on a task that waits for you; such a task is not taken while it has it. `manual` is proposed |
 | Interrupt label | the label a run puts on a task it had to stop; such a task is taken first. `interrupted` is proposed |
 | Skill | the skill of your project a session starts with, by its name; leave it empty for none. `task-auto` is proposed |
 

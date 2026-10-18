@@ -349,7 +349,7 @@ public sealed class CliAppTests : IDisposable
 
     [Theory]
     [InlineData("105", "it waits for #102")]
-    [InlineData("106", "it has the manual label")]
+    [InlineData("106", "it has the draft label")]
     [InlineData("107", "its status is In Progress")]
     [InlineData("999", "it is not among the open tasks of the milestone v0.1.0 (made up)")]
     public async Task ARunOfATaskThatARunWouldNotTakeStartsNothingAndFails(string number, string why)
@@ -377,7 +377,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("✻ v0.1.0 (made up) · 2 tasks in the queue · skips docs, Feature, chore · the assistant's own model · high effort · auto mode", lines[1]);
         Assert.Equal(
             "  Held: #101 it has the feature label, which this run skips · #102 it has the feature label, which this run skips · #104 it has the chore label, which this run skips"
-            + " · #105 it has the docs label, which this run skips · #106 it has the manual label · #107 it has the feature label, which this run skips",
+            + " · #105 it has the docs label, which this run skips · #106 it has the draft label · #107 it has the feature label, which this run skips",
             lines[2]);
 
         // The task an earlier run left with a session has a label the run skips, and is gone on with all the same.
@@ -1021,7 +1021,7 @@ public sealed class CliAppTests : IDisposable
               #101 Show the total of an order in its header  it has the feature label, which this run skips
               #102 Export the orders as a file               it has the feature label, which this run skips
               #105 Describe the export in the manual         it has the docs label, which this run skips
-              #106 Move the site to the new hosting          it has the manual label
+              #106 Move the site to the new hosting          it has the draft label
               #107 Add a dark theme                          it has the feature label, which this run skips
 
             """.ReplaceLineEndings(),
@@ -1728,7 +1728,7 @@ public sealed class CliAppTests : IDisposable
     public async Task WithoutACommandAProjectIsSetUpTheChoicesAreMadeAndTheMenuOpens()
     {
         GitRepository();
-        var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\nmanual\n");
+        var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\n");
 
         // No project, no blocking labels, any label; a new label for the owner and one for interrupted tasks, each
         // by the name that is proposed; the skill that is proposed; yes; the first milestone; the model after the
@@ -1752,7 +1752,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    needs-owner",
+                "✔ Owner's label    manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
@@ -1765,11 +1765,11 @@ public sealed class CliAppTests : IDisposable
             ],
             Report(output).Split(Environment.NewLine));
         Assert.Contains("type = \"github\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
-        Assert.Contains("The label “needs-owner” will be made in acme/rocket.", output, StringComparison.Ordinal);
+        Assert.Contains("The label “manual” will be made in acme/rocket.", output, StringComparison.Ordinal);
         Assert.Contains("There is no skill “task-auto” yet: write .claude/skills/task-auto/SKILL.md before a run.", output, StringComparison.Ordinal);
         Assert.Contains("✔ Skill            task-auto", output, StringComparison.Ordinal);
         Assert.Contains("[session]\nskill = \"task-auto\"", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
-        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "create", "needs-owner", "--repo", "acme/rocket"]));
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["label", "create", "manual", "--repo", "acme/rocket"]));
         Assert.Equal("Milestone: v0.2.0", (await ShownAsync(processes)).Output.Trim());
         Assert.Equal("Model: fable", (await RunAsync("model")).Output.Trim());
         Assert.Equal("Effort: high", (await RunAsync("effort")).Output.Trim());
@@ -2138,7 +2138,8 @@ public sealed class CliAppTests : IDisposable
         Assert.Equal("", error);
         Assert.DoesNotContain("Write the settings?", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          https://github.com/users/example/projects/1", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Blocking labels  manual, draft", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Blocking labels  draft", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Owner's label    manual", output, StringComparison.Ordinal);
         Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
@@ -2222,7 +2223,7 @@ public sealed class CliAppTests : IDisposable
             Demo: nothing is changed.
             ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort · auto mode
               Opens later: #105 after #102
-              Held: #106 it has the manual label · #107 its status is In Progress
+              Held: #106 it has the draft label · #107 its status is In Progress
             → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
               #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #100 Rename the settings page — done in 6 s
@@ -2236,7 +2237,7 @@ public sealed class CliAppTests : IDisposable
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
               │ The task does not say what kind of file the export is. Should it be CSV or JSON?
             ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
-              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `needs-owner` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.”
+              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `manual` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.”
             ✔ #102 Export the orders as a file — done in 21 s
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session with the skill task-auto · claude attach 4f2a103 (made up)
@@ -2246,7 +2247,7 @@ public sealed class CliAppTests : IDisposable
               │ - Checked with the tests of the prices: 31 pass.
               │ - Commit c3d4e5f.
               │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the label of the owner and the two answers I see: the price is zero, or the discount is refused when it is entered.
-              “No answer will come: the owner is away, and nobody reads your questions. Go on with task #103 from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `needs-owner` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.”
+              “No answer will come: the owner is away, and nobody reads your questions. Go on with task #103 from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `manual` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.”
             ◐ #103 Fix the rounding of a discount — done in part in 11 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
             → #104 Update the dependencies — started · a new session with the skill task-auto · claude attach 4f2a104 (made up)
@@ -2260,7 +2261,7 @@ public sealed class CliAppTests : IDisposable
               #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
-              Held: #106 it has the manual label · #107 its status is In Progress · #108 it waits for the owner: it has the needs-owner label
+              Held: #106 it has the draft label · #107 its status is In Progress · #108 it waits for the owner: it has the manual label
             ✔ No task is left · 5 done · 1 done in part
               Worked 70 s
 
@@ -2298,12 +2299,12 @@ public sealed class CliAppTests : IDisposable
         GitRepository();
         var processes = GitHub(milestones: "", labels: "bug\nmanual\n");
 
-        // No project; `manual` blocks; any label; `manual` is the label of the owner too, the one above `New label…`;
-        // a new label for interrupted tasks, by the name that is proposed; no skill, the proposed name being
-        // deleted; yes.
+        // No project; `manual` blocks; any label; `manual` is the label of the owner too, the one the list points at
+        // as proposed; a new label for interrupted tasks, by the name that is proposed; no skill, the proposed name
+        // being deleted; yes.
         var keys = new Keys().Press(
             Keys.Tab, Keys.Tab, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter, Keys.Enter,
-            Keys.Up, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Control('u'), Keys.Enter, Keys.Enter);
+            Keys.Enter, Keys.Enter, Keys.Enter, Keys.Control('u'), Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init");
 
@@ -2447,11 +2448,10 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          none",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    needs-owner",
+                "✔ Owner's label    manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
-                "The label “needs-owner” was made in acme/rocket.",
                 "The label “interrupted” was made in acme/rocket.",
                 "✔ The settings are written to .toobusy/settings.toml. Commit the file.",
                 "`toobusy about` tells how a run works, for you and for your assistant.",
@@ -2459,7 +2459,7 @@ public sealed class CliAppTests : IDisposable
             ],
             output.Split(Environment.NewLine));
         var written = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
-        Assert.Contains("blocking = []\ntake = []\nowner = \"needs-owner\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
+        Assert.Contains("blocking = []\ntake = []\nowner = \"manual\"\ninterrupted = \"interrupted\"", written, StringComparison.Ordinal);
         Assert.EndsWith("[session]\nskill = \"task-auto\"\n", written, StringComparison.Ordinal);
         Assert.DoesNotContain("board", written.Replace("# ", "", StringComparison.Ordinal).Split('\n').Where(line => line.Contains('=', StringComparison.Ordinal)).Aggregate("", string.Concat), StringComparison.Ordinal);
     }
@@ -2502,7 +2502,7 @@ public sealed class CliAppTests : IDisposable
     public async Task WithYesTheOptionsOfTheCommandsSetChangeAndTakeThemAway()
     {
         GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
         var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
 
         // A first setup has none without the options, and writes what they say.
@@ -2543,7 +2543,7 @@ public sealed class CliAppTests : IDisposable
     public async Task WithYesTheOptionsOfTheBranchNameItAndTakeItAway()
     {
         GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
         var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
 
         var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill", "--branch", "develop"]);
@@ -2567,7 +2567,7 @@ public sealed class CliAppTests : IDisposable
     public async Task WithYesTheOptionOfThePermissionModeNamesItInTheSectionOfTheAssistant()
     {
         GitRepository();
-        var processes = GitHub(milestones: "", labels: "bug\nneeds-owner\ninterrupted\n");
+        var processes = GitHub(milestones: "", labels: "bug\nmanual\ninterrupted\n");
         var file = Path.Combine(folder.FullName, ".toobusy", "settings.toml");
 
         var (exit, output, _) = await RunAsync(Context(processes), ["init", "--yes", "--no-skill", "--permission-mode", "dontAsk"]);
@@ -2992,9 +2992,9 @@ public sealed class CliAppTests : IDisposable
     {
         GitRepository();
 
-        // The first of the boards, no blocking labels, any label, a new label for the owner by the name that is
-        // proposed, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        // The first of the boards, no blocking labels, any label, the label `manual` of the made-up ones for the
+        // owner, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--demo");
 
@@ -3003,7 +3003,7 @@ public sealed class CliAppTests : IDisposable
         Assert.StartsWith("\u001b[?1049h", output, StringComparison.Ordinal);
         Assert.Contains("Setting up this project · demo", output, StringComparison.Ordinal);
         Assert.Contains("The answers above will be written to .toobusy/settings.toml.", output, StringComparison.Ordinal);
-        Assert.Contains("The label “needs-owner” will be made in example/project.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("will be made", output, StringComparison.Ordinal);
         Assert.DoesNotContain("[tracker]", output, StringComparison.Ordinal);
         Assert.Contains("A session starts with this skill of the project. Leave empty to start without one.", output, StringComparison.Ordinal);
         Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
@@ -3014,7 +3014,7 @@ public sealed class CliAppTests : IDisposable
                 "✔ Project          Rocket (made up)  https://github.com/users/example/projects/1",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
-                "✔ Owner's label    needs-owner",
+                "✔ Owner's label    manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
@@ -3051,9 +3051,9 @@ public sealed class CliAppTests : IDisposable
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
 
-        // The board that is linked, no blocking labels, any label, a new label for the owner by the name that is
-        // proposed, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        // The board that is linked, no blocking labels, any label, the label `manual` of the made-up ones for the
+        // owner, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -3062,7 +3062,7 @@ public sealed class CliAppTests : IDisposable
         Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("owner=bitpatch") && asked.Arguments.Contains("name=toobusy"));
         Assert.Contains("Toobusy  https://github.com/orgs/bitpatch/projects/4  linked to this repository", output, StringComparison.Ordinal);
         Assert.Contains("✔ Project          Toobusy  https://github.com/orgs/bitpatch/projects/4", Report(output), StringComparison.Ordinal);
-        Assert.Contains("The label “needs-owner” will be made in bitpatch/toobusy.", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Owner's label    manual", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Interrupt label  interrupted", Report(output), StringComparison.Ordinal);
         Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Contains("create"));
     }
@@ -3123,7 +3123,7 @@ public sealed class CliAppTests : IDisposable
     public async Task DecliningTheSetupFails()
     {
         GitRepository();
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter);
+        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
