@@ -494,8 +494,12 @@ public sealed class Supervisor(
 
             // The tracker is told only when the session goes on: one that does not is tried again by the next
             // run, with the task and the record as they are.
-            if (message is not null && !await found.TellAsync(message, kill))
-                return Stop($"the session of #{number} did not go on · {found.Open} · the next run tries again");
+            var former = found.Trace.Id;
+            var tell = message is null ? Telling.WentOn : await found.TellAsync(message, kill);
+            if (!tell.Went)
+                return Stop($"the session of #{number} did not go on: {tell.Why} · {found.Open} · the next run tries again");
+            if (tell.AsCopy)
+                how += $", {AsCopy(former)}";
 
             session = found;
         }
@@ -791,8 +795,16 @@ public sealed class Supervisor(
                     ? $"#{number} waits for the owner: its turn is cut, and it is told to wrap up"
                     : $"#{number} did not wrap up in {Spoken.Time(policy.AbortGrace)}: its turn is cut, and it is asked again");
                 waiting = false;
-                if (!await session.TellAsync(Briefing.WrapUp(number), kill))
+                var former = session.Trace.Id;
+                var tell = await session.TellAsync(Briefing.WrapUp(number), kill);
+                if (!tell.Went)
+                {
+                    Say(RunMark.Failed, $"#{number} did not go on with the request to wrap up: {tell.Why}");
                     return new Watched(look with { Phase = SessionPhase.Lost });
+                }
+
+                if (tell.AsCopy)
+                    NoteCopy(number, former, session);
 
                 look = look with { Phase = SessionPhase.Working };
                 next = clock.Now + policy.Poll;
@@ -860,11 +872,16 @@ public sealed class Supervisor(
                         Say(RunMark.Attention, $"#{number} ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · {session.Open}");
                         Quote(look.Reply, session);
                         Say(RunMark.Note, $"“{message}”");
-                        if (!await session.TellAsync(message, kill))
+                        var former = session.Trace.Id;
+                        var tell = await session.TellAsync(message, kill);
+                        if (!tell.Went)
                         {
-                            Say(RunMark.Failed, $"#{number} did not go on with the message");
+                            Say(RunMark.Failed, $"#{number} did not go on with the message: {tell.Why}");
                             return new Watched(look with { Phase = SessionPhase.Lost });
                         }
+
+                        if (tell.AsCopy)
+                            NoteCopy(number, former, session);
 
                         look = look with { Phase = SessionPhase.Working };
                         next = clock.Now + policy.Poll;
@@ -909,11 +926,16 @@ public sealed class Supervisor(
                 var message = Briefing.Alone(number, plan.Rules.Manual);
                 Say(RunMark.GoesOn, $"#{number} is told to go on without the owner: its turn is cut, and this is the next message of its conversation · {session.Open}");
                 Say(RunMark.Note, $"“{message}”");
-                if (!await session.TellAsync(message, kill))
+                var former = session.Trace.Id;
+                var tell = await session.TellAsync(message, kill);
+                if (!tell.Went)
                 {
-                    Say(RunMark.Failed, $"#{number} did not go on with the message");
+                    Say(RunMark.Failed, $"#{number} did not go on with the message: {tell.Why}");
                     return new Watched(look with { Phase = SessionPhase.Lost });
                 }
+
+                if (tell.AsCopy)
+                    NoteCopy(number, former, session);
 
                 look = look with { Phase = SessionPhase.Working };
                 next = clock.Now + policy.Poll;
@@ -966,10 +988,12 @@ public sealed class Supervisor(
 
         if (!waited)
             return await PauseAsync(task, session, "toobusy was stopped while it waited for the limit", kill);
-        if (!await session.TellAsync(Briefing.AfterLimit(number), kill))
-            return await PauseAsync(task, session, "its session did not go on after the reset", kill);
+        var former = session.Trace.Id;
+        var tell = await session.TellAsync(Briefing.AfterLimit(number), kill);
+        if (!tell.Went)
+            return await PauseAsync(task, session, $"its session did not go on after the reset: {tell.Why}", kill);
 
-        Say(RunMark.GoesOn, $"#{number} goes on after the reset of the limit · {session.Open}");
+        Say(RunMark.GoesOn, $"#{number} goes on after the reset of the limit{(tell.AsCopy ? $", {AsCopy(former)}" : "")} · {session.Open}");
         return true;
     }
 
@@ -1440,6 +1464,13 @@ public sealed class Supervisor(
 
     // What nobody foresaw, in a line: its kind and its words, for a report of the bug.
     static string Unforeseen(Exception failed) => $"an error toobusy did not foresee: {failed.GetType().Name}: {string.Join(' ', Lines(failed.Message))}";
+
+    // How a session that went on as a copy is said to go on: the copy is named after the session it was of.
+    static string AsCopy(string? former) => former is null ? "as a copy of its session" : $"as a copy of {former}";
+
+    // A session that went on as a copy in the middle of its task is noted: it is opened by another name from now on.
+    void NoteCopy(int number, string? former, IAssistantSession session) =>
+        Say(RunMark.Note, $"#{number} goes on {AsCopy(former)}: Claude Code started a new session with the whole conversation · {session.Open}");
 
     // Takes the sign down however the run ended. A sign that stays says nothing once the process of the run ends, so
     // the run ends as it would have, and the log says so.

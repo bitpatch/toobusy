@@ -1610,13 +1610,13 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks("input needed", Half);
-        session.Deaf = true;
+        session.Deaf = "it is deaf";
 
         var result = await RunAsync();
 
         Assert.Equal(1, result.Partial);
         Assert.Single(session.Told);
-        Assert.Contains("✖ #3 did not go on with the message", log.Lines);
+        Assert.Contains("✖ #3 did not go on with the message: it is deaf", log.Lines);
         Assert.Contains("close 3", tracker.Did);
     }
 
@@ -1720,12 +1720,12 @@ public sealed class SupervisorTests : IDisposable
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks();
-        session.Deaf = true;
+        session.Deaf = "it is deaf";
 
         var result = await RunAsync();
 
         Assert.Single(session.Told);
-        Assert.Contains("✖ #3 did not go on with the message", log.Lines);
+        Assert.Contains("✖ #3 did not go on with the message: it is deaf", log.Lines);
         Assert.Equal(RunEnd.Problem, result.End);
     }
 
@@ -2797,13 +2797,75 @@ public sealed class SupervisorTests : IDisposable
         state.Record = Record(5, RecordState.Paused);
         tracker.Add(5, labels: ["feature", "interrupted"]);
         workspace.State = new WorkspaceState(1, 0);
-        assistant.Session(5).Deaf = true;
+        assistant.Session(5).Deaf = "it is deaf";
 
         var result = await RunAsync();
 
-        Assert.Equal("the session of #5 did not go on · fake attach 5 · the next run tries again", result.Why);
+        Assert.Equal("the session of #5 did not go on: it is deaf · fake attach 5 · the next run tries again", result.Why);
         Assert.Equal(Record(5, RecordState.Paused), state.Record);
         Assert.Empty(tracker.Did);
+    }
+
+    // Claude Code may go on with a session as a copy, a new session with the whole conversation: the task is gone
+    // on with by the copy, which the record names from then on.
+    [Fact]
+    public async Task ASessionThatGoesOnAsACopyIsTheSessionOfTheTaskFromThenOn()
+    {
+        state.Record = Record(5, RecordState.WrappedUp);
+        tracker.Add(5, labels: ["feature", "interrupted"]);
+        var session = assistant.Session(5);
+        session.Copies = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Equal([Briefing.AfterAbort(5)], session.Told);
+        Assert.Contains("→ #5 Task 5 — taken again · its session goes on after /abort, as a copy of fake-5 · fake attach 5-copy", log.Lines);
+        Assert.Contains(state.Written, record => record is { Session: { Id: "fake-5-copy", Conversation: "copy-5" } });
+    }
+
+    [Fact]
+    public async Task ASessionThatGoesOnAsACopyInTheMiddleOfItsTaskIsNoted()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
+        session.Copies = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Contains("  #3 goes on as a copy of fake-3: Claude Code started a new session with the whole conversation · fake attach 3-copy", log.Lines);
+        Assert.Contains(state.Written, record => record is { Session.Id: "fake-3-copy" });
+    }
+
+    [Fact]
+    public async Task ASessionThatGoesOnAsACopyAfterTheResetOfTheLimitIsSaidSo()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Limit("You have hit your limit · resets 10am")
+            .Then().Works().Ends(Done);
+        session.Copies = true;
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Contains("▶ #3 goes on after the reset of the limit, as a copy of fake-3 · fake attach 3-copy", log.Lines);
+    }
+
+    [Fact]
+    public async Task ASessionThatDoesNotGoOnWithTheRequestToWrapUpSaysWhy()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks();
+        session.Deaf = "it is deaf";
+        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+
+        await RunAsync();
+
+        Assert.Equal([Briefing.WrapUp(3)], session.Told);
+        Assert.Contains("✖ #3 did not go on with the request to wrap up: it is deaf", log.Lines);
     }
 
     [Fact]

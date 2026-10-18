@@ -253,11 +253,14 @@ sealed class FakeSession(int task) : IAssistantSession
     int at;
     int steps;
 
-    public string Open => $"fake attach {task}";
+    // What the session is known by: another name once it went on as a copy.
+    public string Id { get; private set; } = $"fake-{task}";
+
+    public string Open => $"fake attach {Id["fake-".Length..]}";
 
     public string? Conversation { get; set; } = $"conversation-{task}";
 
-    public SessionTrace Trace => new($"fake-{task}", Conversation, FakeClock.Start);
+    public SessionTrace Trace => new(Id, Conversation, FakeClock.Start);
 
     public List<string> Told { get; } = [];
 
@@ -269,8 +272,12 @@ sealed class FakeSession(int task) : IAssistantSession
     // whose token the kill cancels is cut then, and not counted.
     public Action? Stopping { get; set; }
 
-    // A session that does not go on when it is told something.
-    public bool Deaf { get; set; }
+    // Why the session does not go on when it is told something; null for one that goes on.
+    public string? Deaf { get; set; }
+
+    // A session that goes on as a copy the next time it is told something: it is known by another name from then
+    // on, with a conversation of its own.
+    public bool Copies { get; set; }
 
     public int Looks { get; private set; }
 
@@ -331,17 +338,25 @@ sealed class FakeSession(int task) : IAssistantSession
         return Task.FromResult(look);
     }
 
-    public Task<bool> TellAsync(string message, CancellationToken cancellationToken)
+    public Task<Telling> TellAsync(string message, CancellationToken cancellationToken)
     {
         Told.Add(message);
-        if (Deaf)
-            return Task.FromResult(false);
+        if (Deaf is { } why)
+            return Task.FromResult(new Telling(why));
+
+        var copied = Copies;
+        if (copied)
+        {
+            Id = $"fake-{task}-copy";
+            Conversation = $"copy-{task}";
+            Copies = false;
+        }
 
         // The acts written for a question that is asked are not those of a session that is told.
         var next = act + 1;
         if (next < acts.Count && next != onAsk)
             (act, at) = (next, 0);
-        return Task.FromResult(true);
+        return Task.FromResult(copied ? Telling.Copied : Telling.WentOn);
     }
 
     public Task AskAsync(string message, CancellationToken cancellationToken)

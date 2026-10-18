@@ -348,7 +348,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
             return Task.FromResult(act.End with { Steps = steps + act.Steps.Length, Context = Context(steps + act.Steps.Length), Plan = Plan(act.Steps.Length) });
         }
 
-        public Task<bool> TellAsync(string message, CancellationToken cancellationToken)
+        public Task<Telling> TellAsync(string message, CancellationToken cancellationToken)
         {
             if (message == Briefing.WrapUp(task))
                 Next(WrapUp, false);
@@ -356,7 +356,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
                 Next(acts[++played], acts != Plain);
             else
                 Next(Plain[0], false);
-            return Task.FromResult(true);
+            return Task.FromResult(Telling.WentOn);
         }
 
         public Task AskAsync(string message, CancellationToken cancellationToken)

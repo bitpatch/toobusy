@@ -10,6 +10,12 @@ public sealed class ClaudeCodeTests : IDisposable
     const string Id = "15555bc6";
     const string Conversation = "15555bc6-0c7f-4efb-a0a0-211c72424c97";
     const string Backgrounded = "Starting background service…\nbackgrounded · 15555bc6 · #12 Export the data\n  claude attach 15555bc6    open in this terminal\n";
+    const string Copy = "aaaa1111";
+    const string CopyConversation = "aaaa1111-0c7f-4efb-a0a0-211c72424c97";
+
+    // What Claude Code says when it starts a copy of a session instead of going on with it.
+    static string CopyOf(string copy) =>
+        $"note: session 15555bc6 is already running in the background, so this started a copy as {copy}. `claude attach 15555bc6` opens the original.\nbackgrounded · {copy}\n  claude attach {copy}    open in this terminal\n";
 
     static readonly SessionStart Start = new(12, "#12 Export the data", "Do the task.", new ModelChoice("opus"), "high");
 
@@ -58,18 +64,49 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(["--model", "opus", "--effort", "high", "-n", "#12 Export the data", "Do the task."], arguments.Skip(7));
     }
 
-    // A session of an earlier run goes on in the mode of the settings as they are now, whatever it was started in.
+    // A session that Claude Code lists keeps the options it was started with, and goes on with them: given any
+    // again, Claude Code would start a copy instead.
     [Fact]
-    public async Task ASessionGoesOnInThePermissionModeOfTheSettings()
+    public async Task ASessionThatIsListedGoesOnWithTheOptionsItWasStartedWith()
     {
         Write(Said("I was stopped by the limit.\nTOOBUSY: interrupted"));
         claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
         var session = await Assistant("dontAsk").FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken);
         Assert.NotNull(session);
 
-        Assert.True(await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken));
+        Assert.Equal(Telling.WentOn, await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken));
 
-        Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "dontAsk", "The limit has reset."], claude.Asked[^1]);
+        Assert.Equal(["--bg", "--resume", Conversation, "The limit has reset."], claude.Asked[^1]);
+    }
+
+    // A session that Claude Code does not list any more has no options kept: it is given the mode of the settings as
+    // they are now, and the settings of a session, once more.
+    [Fact]
+    public async Task ASessionThatIsNotListedAnyMoreIsGivenTheOptionsOfASessionAgain()
+    {
+        Write(Said("I was stopped by the limit.\nTOOBUSY: interrupted"));
+        var session = await Assistant("dontAsk").FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+
+        Assert.Equal(Telling.WentOn, await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken));
+
+        var arguments = claude.Asked[^1];
+        Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "dontAsk", "--permission-prompts", "none", "--settings"], arguments.Take(8));
+        Assert.Contains("\"hooks\"", arguments[8]);
+        Assert.Equal(["The limit has reset."], arguments.Skip(9));
+    }
+
+    [Fact]
+    public async Task ASessionThatClaudeCodeDoesNotAnswerForDoesNotGoOn()
+    {
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Answer = _ => new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
+
+        var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+
+        Assert.Equal(new Telling("Claude Code did not answer in 2 min"), told);
+        Assert.Equal("claude attach 15555bc6", session.Open);
     }
 
     [Fact]
@@ -371,41 +408,102 @@ public sealed class ClaudeCodeTests : IDisposable
 
         var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
 
-        Assert.True(told);
+        Assert.Equal(Telling.WentOn, told);
         Assert.Equal(
-            [["agents", "--json", "--all"], ["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"], ["--bg", "--resume", Conversation, "--permission-mode", "auto", "Go on alone."]],
+            [["agents", "--json", "--all"], ["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"], ["--bg", "--resume", Conversation, "Go on alone."]],
             claude.Asked.Skip(1));
         Assert.Equal(TimeSpan.FromMilliseconds(500), clock.Passed);
         Assert.Equal(Conversation, session.Trace.Conversation);
     }
 
+    // Claude Code may start a copy of the session all the same, and says so: a copy of a session that nothing has,
+    // by the list, is the session from then on, with the conversation of its own and nothing of what the one before
+    // said.
     [Fact]
-    public async Task ACopyOfASessionIsStoppedAndForgottenAndTheSessionIsTriedAgain()
+    public async Task ACopyOfASessionThatNothingHasIsTheSessionFromThenOn()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        Write(Said("What I said before."));
+        claude.Listings.Enqueue(Listing(Entry(Id, Conversation, "stopped")));
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"), Entry(Copy, CopyConversation, "working", "running"));
+        claude.Answer = arguments => Exited(arguments[0] == "--bg" ? CopyOf(Copy) : "");
+        File.WriteAllText(folders.Transcript(CopyConversation), Said("On it again.") + "\n");
+
+        var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+        var look = await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(Telling.Copied, told);
+        Assert.Equal("claude attach aaaa1111", session.Open);
+        Assert.Equal(new SessionTrace(Copy, CopyConversation, clock.Now), session.Trace);
+        Assert.DoesNotContain(claude.Asked, arguments => arguments[0] is "stop" or "rm");
+        Assert.Equal((SessionPhase.Working, "On it again."), (look.Phase, look.Reply));
+    }
+
+    [Fact]
+    public async Task ACopyThatIsNotListedYetIsTheSessionAllTheSame()
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
         claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
-        var resumes = 0;
-        claude.Answer = arguments => Exited(arguments[0] != "--bg" ? ""
-            : ++resumes == 1 ? "note: session 15555bc6 is already running; started a copy.\nbackgrounded · aaaa1111 · #12 Export the data\n"
-            : Backgrounded);
+        claude.Answer = arguments => Exited(arguments[0] == "--bg" ? CopyOf(Copy) : "");
 
         var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
 
-        Assert.True(told);
-        Assert.Equal(2, resumes);
-        Assert.Contains(claude.Asked, arguments => arguments.SequenceEqual(["stop", "aaaa1111"]));
-        Assert.Contains(claude.Asked, arguments => arguments.SequenceEqual(["rm", "aaaa1111"]));
+        Assert.Equal(Telling.Copied, told);
+        Assert.Equal(new SessionTrace(Copy, null, clock.Now), session.Trace);
+        Assert.Equal("claude attach aaaa1111", session.Open);
+    }
+
+    [Fact]
+    public async Task ACopyOfASessionThatSomethingStillHasIsStoppedAndTheSessionIsTriedAgain()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "running"));
+        string[] copies = ["aaaa1111", "bbbb2222", "cccc3333"];
+        var resumes = 0;
+        claude.Answer = arguments => Exited(arguments[0] == "--bg" ? CopyOf(copies[resumes++]) : "");
+
+        var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+
+        Assert.Equal(new Telling("Claude Code started a copy of the session 3 times: something still has it"), told);
+        Assert.Equal(3, resumes);
+        foreach (var copy in copies)
+        {
+            Assert.Contains(claude.Asked, arguments => arguments.SequenceEqual(["stop", copy]));
+            Assert.Contains(claude.Asked, arguments => arguments.SequenceEqual(["rm", copy]));
+        }
+
+        Assert.Equal("claude attach 15555bc6", session.Open);
+        Assert.Equal(new SessionTrace(Id, Conversation, clock.Now - clock.Passed), session.Trace);
+    }
+
+    // A list that cannot be read does not say that nothing has the session: the copy is not taken on its word.
+    [Fact]
+    public async Task AListThatCannotBeReadAfterACopyMeansATryAgain()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        claude.Answer = arguments =>
+        {
+            if (arguments[0] == "--bg")
+                claude.List = new ProcessResult(ProcessStatus.Exited, 1, "", "");
+            return Exited(arguments[0] == "--bg" ? CopyOf(Copy) : "");
+        };
+
+        var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+
+        Assert.Equal(new Telling("Claude Code started a copy of the session 3 times: something still has it"), told);
+        Assert.Equal(3, claude.Asked.Count(arguments => arguments.SequenceEqual(["rm", Copy])));
         Assert.Equal("claude attach 15555bc6", session.Open);
     }
 
     [Fact]
-    public async Task ASessionThatDoesNotGoOnSaysSo()
+    public async Task ASessionThatDoesNotGoOnSaysWhatClaudeCodeSaid()
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
         claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
-        claude.Answer = _ => new ProcessResult(ProcessStatus.Exited, 1, "", "error: no conversation found");
+        claude.Answer = _ => new ProcessResult(ProcessStatus.Exited, 1, "", "error: no conversation found\nmore of it");
 
-        Assert.False(await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
+        Assert.Equal(new Telling("error: no conversation found"), await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -413,7 +511,7 @@ public sealed class ClaudeCodeTests : IDisposable
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
 
-        Assert.False(await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
+        Assert.Equal(new Telling("its conversation is not known"), await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
         Assert.DoesNotContain(claude.Asked, arguments => arguments.Contains("--resume"));
     }
 
@@ -506,8 +604,8 @@ public sealed class ClaudeCodeTests : IDisposable
         var told = await session.TellAsync("The limit has reset.", TestContext.Current.CancellationToken);
 
         Assert.Equal((SessionPhase.Lost, "I was stopped by the limit.\nTOOBUSY: interrupted", true), (before.Phase, before.Reply, before.Reported));
-        Assert.True(told);
-        Assert.Equal(["--bg", "--resume", Conversation, "--permission-mode", "auto", "The limit has reset."], claude.Asked[^1]);
+        Assert.Equal(Telling.WentOn, told);
+        Assert.Equal(["--bg", "--resume", Conversation, "The limit has reset."], claude.Asked[^1]);
         Assert.Equal(new SessionTrace(Id, Conversation, clock.Now), session.Trace);
 
         // What it said before it was told does not count any more, and a request that waited for it is forgotten.

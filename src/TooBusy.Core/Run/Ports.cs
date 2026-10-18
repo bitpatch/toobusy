@@ -43,9 +43,9 @@ public interface IAssistantSession
 
     Task<SessionLook> LookAsync(CancellationToken cancellationToken);
 
-    // Cuts the turn of the session and goes on with the message as the next one of the same conversation.
-    // False when the session did not go on.
-    Task<bool> TellAsync(string message, CancellationToken cancellationToken);
+    // Cuts the turn of the session and goes on with the message as the next one of the same conversation. Says
+    // why when the session did not go on, and whether it goes on as a copy.
+    Task<Telling> TellAsync(string message, CancellationToken cancellationToken);
 
     // Lets the session read the message after its next step, cutting nothing. A message that cannot be left where
     // the session reads it, a file of the machine, throws LocalStateException.
@@ -53,6 +53,18 @@ public interface IAssistantSession
 
     // Stops the session; its conversation is kept.
     Task StopAsync(CancellationToken cancellationToken);
+}
+
+// How a session took a message. Why is null when it went on, and otherwise says why it did not, in words for the
+// log. AsCopy tells that the assistant went on with a copy of the conversation, a new session that has all of it
+// and the message: Open and Trace name the copy from then on.
+public sealed record Telling(string? Why = null, bool AsCopy = false)
+{
+    public bool Went => Why is null;
+
+    public static Telling WentOn { get; } = new();
+
+    public static Telling Copied { get; } = new(AsCopy: true);
 }
 
 public enum SessionPhase

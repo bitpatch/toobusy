@@ -174,7 +174,6 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
 
     static string First(string said) =>
         said.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "it said nothing";
-
     // What Claude Code answers when a session went to the background: the name the session is known by from then on.
     [GeneratedRegex(@"backgrounded · ([0-9a-f]+)")]
     private static partial Regex Backgrounded();
@@ -240,15 +239,20 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             return new SessionLook(phase, asks, transcript?.Step, transcript?.Steps ?? 0, transcript?.Context ?? 0, transcript?.Reply, transcript?.Limit, transcript?.Plan, transcript?.Reported ?? false);
         }
 
-        public async Task<bool> TellAsync(string message, CancellationToken cancellationToken)
+        // A session goes on only when nothing has it: it is stopped first, and waited for. Claude Code may start a
+        // copy all the same, a new session with the whole conversation and the message, and says so. A copy of a
+        // session that nothing has, by the list, is the session from then on; one of a session that something
+        // still has is stopped and forgotten, and the session is tried again.
+        public async Task<Telling> TellAsync(string message, CancellationToken cancellationToken)
         {
             // A request that waits for the session was for what it did before the message.
             var told = claude.clock.Now;
             claude.Forget();
             for (var attempt = 0; attempt < Tries; attempt++)
             {
-                // A session goes on only when nothing has it: it is stopped first, and waited for.
-                if (await claude.ListAsync(cancellationToken) is { } listed && Find(listed, id, Conversation) is { } found)
+                var listed = await claude.ListAsync(cancellationToken);
+                var found = listed is null ? null : Find(listed, id, Conversation);
+                if (found is not null)
                 {
                     Conversation ??= found.Conversation;
                     if (found.Alive)
@@ -256,33 +260,54 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 }
 
                 if (Conversation is not { } known)
-                    return false;
+                    return new Telling("its conversation is not known");
 
-                var result = await claude.AskAsync(["--bg", "--resume", known, "--permission-mode", claude.permissionMode, message], cancellationToken);
+                // A session that Claude Code lists keeps the options it was started with and goes on with them:
+                // given any again, Claude Code starts a copy instead. One that it does not list any more, whose
+                // conversation is on the machine all the same, is given the options of a session once more.
+                string[] options = found is null ? ["--permission-mode", claude.permissionMode, "--permission-prompts", "none", "--settings", SessionSettings.Json(claude.folders)] : [];
+                var result = await claude.AskAsync(["--bg", "--resume", known, .. options, message], cancellationToken);
                 var said = result.Output + "\n" + result.Error;
+                if (result.Status == ProcessStatus.TimedOut)
+                    return new Telling($"Claude Code did not answer in {Spoken.Time(Patience)}");
                 if (Started(said) is not { } woken)
-                    return false;
+                    return new Telling(First(said));
 
-                // Claude Code may start a copy of a session that something still has: that copy is stopped and
-                // forgotten, and the session is tried again.
                 if (said.Contains("already running", StringComparison.OrdinalIgnoreCase) || said.Contains("started a copy", StringComparison.OrdinalIgnoreCase))
                 {
-                    await claude.AskAsync(["stop", woken], cancellationToken);
-                    await claude.AskAsync(["rm", woken], cancellationToken);
-                    await claude.clock.DelayAsync(Clearing, cancellationToken);
-                    continue;
+                    // The list says whether something still has the session; one that cannot be read does not say
+                    // that nothing has it.
+                    var after = await claude.ListAsync(cancellationToken);
+                    if (after is null || Find(after, id, known) is { Alive: true })
+                    {
+                        await claude.AskAsync(["stop", woken], cancellationToken);
+                        await claude.AskAsync(["rm", woken], cancellationToken);
+                        await claude.clock.DelayAsync(Clearing, cancellationToken);
+                        continue;
+                    }
+
+                    // The copy has a conversation of its own, which is learnt from the list when it is there.
+                    Conversation = after.FirstOrDefault(entry => entry.Id == woken)?.Conversation;
+                    transcript = null;
+                    GoOn(woken, told);
+                    return Telling.Copied;
                 }
 
-                // What the session said before the message does not count from here on.
-                id = woken;
-                silent = null;
-                missing = null;
-                since = told;
-                transcript?.From(told);
-                return true;
+                GoOn(woken, told);
+                return Telling.WentOn;
             }
 
-            return false;
+            return new Telling($"Claude Code started a copy of the session {Tries} times: something still has it");
+        }
+
+        // The session is the one that woke from here on, and what it said before the message does not count.
+        void GoOn(string woken, DateTimeOffset told)
+        {
+            id = woken;
+            silent = null;
+            missing = null;
+            since = told;
+            transcript?.From(told);
         }
 
         public Task AskAsync(string message, CancellationToken cancellationToken)
