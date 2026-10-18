@@ -817,8 +817,10 @@ public static class CliApp
             {
                 await open(session);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested || session.Runs is [.., { End: RunEnd.Killed }])
             {
+                // The page was left. A run that was killed on it is told as one, even where one more Ctrl+C stopped
+                // the tool from outside while the run did what the kill does not cut.
             }
         }
 

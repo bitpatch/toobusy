@@ -5,7 +5,8 @@ namespace TooBusy.Cli.Terminal;
 // thing that is drawn; a tape can be unrolled over the terminal's own screen instead. Ctrl+C leaves the screen, but only when it
 // is pressed twice in a row: the first one asks, any other key takes the question back. Leaving this way throws
 // OperationCanceledException, which the command that opened the page catches. Escape is asked about in the same way
-// where the page is told that it leaves: the first one is read as a key that means nothing.
+// where the page is told that it leaves: the first one is read as a key that means nothing. A page that is being
+// left may give Ctrl+C back to the terminal before it is closed, so that one more stops the program.
 public sealed class Page : IDisposable
 {
     readonly Screen screen;
@@ -152,6 +153,10 @@ public sealed class Page : IDisposable
         var name = hint.Split(' ')[0];
         return (Part[])[new Part(index == 0 ? "" : " · ", Tone.Muted), new Part(name, Tone.Quiet), new Part(hint[name.Length..], Tone.Muted)];
     })]);
+
+    // Gives Ctrl+C back to the terminal for the rest of the page: it is no key any more, and it stops the program as
+    // it does where no page is open.
+    public void GiveBackControlC() => device.TakeControlC(false);
 
     public ConsoleKeyInfo Read()
     {

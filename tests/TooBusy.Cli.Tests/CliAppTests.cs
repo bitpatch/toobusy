@@ -441,25 +441,34 @@ public sealed class CliAppTests : IDisposable
         Assert.True(Scroll.Read(output).Wraps);
     }
 
-    [Fact]
-    public async Task CtrlCTwiceKillsARunAndTheTapeSaysWhatIsLeft()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CtrlCTwiceKillsARunAndTheTapeSaysWhatIsLeft(bool stoppedMeanwhile)
     {
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        // One open task, and a session of Claude Code that works on it for as long as it is let.
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        // One open task, and a session of Claude Code that works on it for as long as it is let. One more Ctrl+C
+        // while the session is stopped is the terminal's own, and stops the tool from outside.
+        using var outside = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var processes = new FakeProcesses((command, arguments) =>
         {
-            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-            ("gh", "label") => Labels,
-            ("gh", "issue") => "Write it as CSV.\n",
-            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"working","status":"busy","pid":1}]""",
-            _ => "",
-        }, ""));
+            if (stoppedMeanwhile && command == "claude" && arguments.Contains("stop"))
+                outside.Cancel();
+            return new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+            {
+                ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+                ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+                ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+                ("gh", "label") => Labels,
+                ("gh", "issue") => "Write it as CSV.\n",
+                ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+                ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"working","status":"busy","pid":1}]""",
+                _ => "",
+            }, "");
+        });
         // The clock is the real one here: with a clock that makes nobody wait, a session that never ends would be
         // looked at without end while the keys are waited for.
         var context = Context(processes) with { Home = personal.FullName, Clock = new TooBusy.Infrastructure.Machine.SystemClock() };
@@ -470,10 +479,11 @@ public sealed class CliAppTests : IDisposable
             .Hold(() => Shown("Bash: dotnet test")).Press(Keys.ControlC)
             .Hold(() => Shown("press ctrl+c again to stop the session and exit")).Press(Keys.ControlC);
 
-        var (exit, output, error) = await RunAsync(context with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting } }, ["run"]);
+        var (exit, output, error) = await RunAsync(context with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting } }, ["run"], outside.Token);
 
         Assert.Equal("", error);
         Assert.Equal(130, exit);
+        Assert.Equal(stoppedMeanwhile, outside.IsCancellationRequested);
         var rows = Scroll.Read(output).Rows.Where(row => row.Length > 0).ToList();
         Assert.Matches(@"^ ■ #12 Export the data  [\d:]+$", rows[1]);
         Assert.Matches(@"^ 1 task in .+ · 1 interrupted$", rows[2]);
@@ -3671,12 +3681,13 @@ public sealed class CliAppTests : IDisposable
         return title + new string(' ', width - 2 - title.Length - status.Length) + status;
     }
 
-    async Task<(int Exit, string Output, string Error)> RunAsync(CliContext context, string[] args)
+    // `stopped` stops the tool from outside, as a signal does; the end of the test does where none is given.
+    async Task<(int Exit, string Output, string Error)> RunAsync(CliContext context, string[] args, CancellationToken? stopped = null)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
         shown = output;
-        var exit = await CliApp.RunAsync(args, context with { Output = output, Error = error }, TestContext.Current.CancellationToken);
+        var exit = await CliApp.RunAsync(args, context with { Output = output, Error = error }, stopped ?? TestContext.Current.CancellationToken);
         return (exit, output.ToString(), error.ToString());
     }
 

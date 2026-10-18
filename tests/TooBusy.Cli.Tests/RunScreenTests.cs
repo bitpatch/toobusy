@@ -482,6 +482,90 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task AKilledRunIsShownUntilItIsOverAndNoKeyDoesAnythingMeanwhile()
+    {
+        var settled = new TaskCompletionSource();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working);
+            try
+            {
+                return await run.ForEverAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                // What the kill does not cut takes its time, and what the run says meanwhile goes on the tape.
+                view.Say(new RunLine(RunMark.Attention, "#3 could not be labelled: GitHub did not answer"));
+                await Settled(settled);
+                return new RunResult(RunEnd.Killed, 0);
+            }
+        });
+        var stopping = "  toobusy · ~/rocket\n ▲ #3 could not be labelled: GitHub did not answer\n ● Stopping the run and leaving #3 as it should be…";
+        bool? taken = null;
+        terminal.Keys
+            .Hold(() => Has("1:24")).Press(Keys.ControlC)
+            .Hold(() => Has("press ctrl+c again to stop the session and exit")).Press(Keys.ControlC)
+            .Hold(() => terminal.Tape.Text == stopping).Type("/").Press(Keys.Enter)
+            .Hold(() =>
+            {
+                // Every key was read, and the foot drawn after it: the run may be over now.
+                taken = terminal.ControlCTaken;
+                settled.TrySetResult();
+                return true;
+            });
+
+        using var page = terminal.Open();
+        var screen = new RunScreen(page, () => now);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => screen.RunAsync(run, TestContext.Current.CancellationToken));
+
+        // Ctrl+C was the terminal's own meanwhile, the keys opened no menu, and how the run ended is kept.
+        Assert.False(taken);
+        Assert.False(terminal.Saw("finish the current task, then stop"));
+        Assert.Equal(new RunResult(RunEnd.Killed, 0), screen.Result);
+        Assert.Equal(["  toobusy · ~/rocket", " ▲ #3 could not be labelled: GitHub did not answer", " 0 tasks in 0 s", " ■ Killed"], terminal.Tape.Text.Split('\n'));
+    }
+
+    [Fact]
+    public async Task ARunThatIsKilledFromOutsideBetweenTasksSaysThatItStopsUntilItIsOver()
+    {
+        using var outside = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var settled = new TaskCompletionSource();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(new RunStatus(RunPhase.Preparing, "Reading the queue…") { Available = RunCommands.Stop | RunCommands.Abort });
+            try
+            {
+                return await run.ForEverAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                await Settled(settled);
+                return new RunResult(RunEnd.Killed, 0);
+            }
+        });
+        terminal.Keys
+            .Hold(() =>
+            {
+                if (Has("● Reading the queue…"))
+                    outside.Cancel();
+                return terminal.Tape.Text == "  toobusy · ~/rocket\n ● Stopping the run…";
+            })
+            .Type("/")
+            .Hold(() =>
+            {
+                settled.TrySetResult();
+                return true;
+            });
+
+        using var page = terminal.Open();
+        var result = await new RunScreen(page, () => now).RunAsync(run, outside.Token);
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 0), result);
+        Assert.False(terminal.Saw("finish the current task, then stop"));
+        Assert.Equal(["  toobusy · ~/rocket", " 0 tasks in 0 s", " ■ Killed"], terminal.Tape.Text.Split('\n'));
+    }
+
+    [Fact]
     public async Task TheTimesGoOnWhileNothingElseChanges()
     {
         var run = new ScriptedRun(async (run, view) =>
@@ -662,6 +746,10 @@ public sealed class RunScreenTests : IDisposable
               ↑↓ move · enter run · esc close
             """.ReplaceLineEndings("\n").TrimEnd('\n').Replace("\n ", "\n", StringComparison.Ordinal)[1..]);
     }
+
+    // The end of what a killed run does not cut, which the keys of the test give: a page that stops reading them
+    // fails the test instead of keeping it waiting.
+    static Task Settled(TaskCompletionSource settled) => settled.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
 
     // Moves the time of the page on, once, and says that it did.
     bool Later(TimeSpan time)

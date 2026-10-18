@@ -72,8 +72,19 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
     static volatile Screen? open;
 
     // What a program that is stopped from outside must still write, whatever has the terminal at the moment: the
-    // cursor and the terminal as they were. Nothing when nothing has it.
-    public static string Rescue => open?.Held ?? "";
+    // cursor and the terminal as they were. Nothing when nothing has it. A tape that had it is abandoned, as a run
+    // may go on for a moment after it: what is written after the foot leaves it where the tape does not find it.
+    public static string Rescue() => open?.Rescued() ?? "";
+
+    string Rescued()
+    {
+        lock (drawing)
+        {
+            var held = Held;
+            tape?.Abandon();
+            return held;
+        }
+    }
 
     // The blink is counted in beats: so many of them take it from its brightest to nothing and back.
     public static readonly TimeSpan Beat = TimeSpan.FromMilliseconds(80);

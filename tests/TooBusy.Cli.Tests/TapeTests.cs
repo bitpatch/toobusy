@@ -284,6 +284,23 @@ public sealed class TapeTests : IDisposable
     }
 
     [Fact]
+    public void AnAbandonedTapeDrawsNothingMoreAndErasesNothing()
+    {
+        using var page = terminal.Open(palette: Palette.Dark);
+        var tape = Unroll(page);
+        tape.Draw(Settled("✔ Export the data  1:24"), new Strip([Line.Empty, Line.Of("● Ship it")], Mark: new Caret(1, 0)));
+        var written = terminal.Output.ToString();
+
+        tape.Abandon();
+        tape.Draw(Settled("✔ Ship it  0:09"), Foot("● Describe it"));
+        terminal.Tick!();
+        tape.Close();
+
+        Assert.Equal(written, terminal.Output.ToString());
+        Assert.Equal(Screen.Shown, page.Held);
+    }
+
+    [Fact]
     public void TheNextFrameTakesTheTerminalBackFromTheTape()
     {
         using (var page = terminal.Open())

@@ -22,7 +22,8 @@ namespace TooBusy.Cli.Terminal;
 //
 // The run goes on by itself while the page waits for a key: the page looks for one again and again and draws what
 // has changed. When the run is over the page writes how it went, rolls the tape up and gives the result: it does
-// not wait to be left. Ctrl+C, twice, kills the run: its session is stopped, and its task stays as it is.
+// not wait to be left. Ctrl+C, twice, kills the run: its session is stopped, and its task stays as it is. Until the
+// run has done what the kill does not cut, the foot says that it stops, and Ctrl+C is the terminal's own again.
 public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 {
     // How often the page is drawn anew for the times it shows.
@@ -74,23 +75,27 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         var any = false;
         var counted = "";
         var drawn = "";
-        try
+
+        // Draws what changes and answers the keys until the run is over. A run that is killed only says that it
+        // stops, and no key does anything then.
+        async Task WatchAsync()
         {
             while (!working.IsCompleted)
             {
                 var settled = Settled(feed.Take());
                 any |= settled.Count > 0;
                 var status = feed.Status;
+                var killed = kill.IsCancellationRequested;
                 var waits = status.Phase == RunPhase.WaitingForOwner;
                 away &= waits;
                 List<Entry> offered = [.. Commands.Where(entry => status.Available.HasFlag(entry.Flag))];
-                var listed = open ? offered : waits && !away ? [.. offered.Where(entry => ForOwner.HasFlag(entry.Flag))] : [];
+                var listed = killed ? [] : open ? offered : waits && !away ? [.. offered.Where(entry => ForOwner.HasFlag(entry.Flag))] : [];
                 at = Math.Clamp(at, 0, Math.Max(0, listed.Count - 1));
                 if (status.Task is not null)
                     counted = Counted(status);
 
                 // A foot that shows nothing new is not drawn again: the times it shows change once in a second.
-                var foot = Foot(status, listed, at, any, counted, tape);
+                var foot = killed ? Killing(status, any) : Foot(status, listed, at, any, counted, tape);
                 var showing = string.Join('\n', foot.Lines.Select(Told).Append($"{foot.Chosen}").Append(string.Join(' ', foot.Lit ?? [])));
                 if (settled.Count > 0 || showing != drawn)
                 {
@@ -98,7 +103,8 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                     drawn = showing;
                 }
 
-                if (await page.ReadAsync(Task.WhenAny(working, feed.Changed, Task.Delay(Refresh, CancellationToken.None))) is not { } key)
+                // The keys of a run that is killed are read all the same, so that they are not left to the shell.
+                if (await page.ReadAsync(Task.WhenAny(working, feed.Changed, Task.Delay(Refresh, CancellationToken.None))) is not { } key || killed)
                     continue;
 
                 // A key is answered at once, whatever the page showed before it.
@@ -116,14 +122,30 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                 else if (key.Key == ConsoleKey.Escape)
                     (away, open, at) = (away || !open, false, 0);
             }
+        }
 
+        try
+        {
+            await WatchAsync();
             return Result = await working;
         }
         catch
         {
             // The page is left while the run works, with Ctrl+C or because something went wrong on it: the run is
-            // killed, never left to go on with nobody watching it, and what it says of that is kept.
+            // killed, never left to go on with nobody watching it, and what it says of that is kept. What the kill
+            // does not cut may take a while, and the page goes on showing the run until it is over. Ctrl+C is the
+            // terminal's own meanwhile: one more stops the tool from outside, which waits for the run a while at most.
             await kill.CancelAsync();
+            page.GiveBackControlC();
+            try
+            {
+                await WatchAsync();
+            }
+            catch
+            {
+                // What went wrong on the page may go wrong again: the run is waited for all the same.
+            }
+
             Result = await working;
             throw;
         }
@@ -208,6 +230,17 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         lines.Add(rule);
         lines.Add(Edged(Keys(listed.Count > 0), width, counted));
         return new Strip(lines, mark, Chosen: chosen, Lit: lit);
+    }
+
+    // The foot of a run that is killed, while it does what the kill does not cut: that the run stops, after the
+    // mark that turns, and nothing else, as nothing can be done meanwhile.
+    static Strip Killing(RunStatus status, bool spaced)
+    {
+        List<Line> lines = spaced ? [Line.Empty] : [];
+        var mark = new Caret(lines.Count, 0);
+        var stopping = status.Task is { } task ? $"Stopping the run and leaving #{task.Number} as it should be…" : "Stopping the run…";
+        lines.Add(new Line(new Part("● ", Tone.Accent), new Part(stopping, Tone.Warning)));
+        return new Strip(lines, mark);
     }
 
     // What the run is doing, in two lines: the task under the mark, and under it the time and what goes on; and in a

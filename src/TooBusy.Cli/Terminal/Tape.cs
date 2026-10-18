@@ -143,6 +143,14 @@ public sealed class Tape
         }
     }
 
+    // Leaves the terminal as it is: what was written under the foot has taken the cursor away from it, so nothing
+    // more is drawn and nothing is erased.
+    public void Abandon()
+    {
+        lock (drawing)
+            Closed = true;
+    }
+
     // Draws the tape again: the size of the window has changed.
     internal void Redraw() => DrawFitted([], foot);
 

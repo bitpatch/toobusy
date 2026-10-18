@@ -5,9 +5,9 @@ using TooBusy.Cli.Terminal;
 // still give it back. Where there is no terminal there is no screen: the lines that are printed are left alone.
 if (!Console.IsOutputRedirected)
 {
-    Console.CancelKeyPress += (_, _) => Console.Out.Write(Screen.Rescue);
-    AppDomain.CurrentDomain.ProcessExit += (_, _) => Console.Out.Write(Screen.Rescue);
-    AppDomain.CurrentDomain.UnhandledException += (_, _) => Console.Out.Write(Screen.Rescue);
+    Console.CancelKeyPress += (_, _) => Console.Out.Write(Screen.Rescue());
+    AppDomain.CurrentDomain.ProcessExit += (_, _) => Console.Out.Write(Screen.Rescue());
+    AppDomain.CurrentDomain.UnhandledException += (_, _) => Console.Out.Write(Screen.Rescue());
 }
 
 return await CliApp.RunAsync(args, CliContext.OfProcess());
