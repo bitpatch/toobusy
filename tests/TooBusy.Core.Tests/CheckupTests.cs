@@ -100,6 +100,20 @@ public class CheckupTests
         Assert.Equal(CheckState.Skipped, Of(checks, "repository").State);
     }
 
+    // A Claude Code newer than the one toobusy was written against runs, and may print otherwise: it is warned of,
+    // and what needs it goes on.
+    [Fact]
+    public async Task AClaudeCodeNewerThanTheOneToobusyWasWrittenAgainstIsWarnedOf()
+    {
+        machine.WrittenAgainst[Tool.ClaudeCode] = "2.1.303";
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult("Claude Code", CheckState.Warned, "toobusy was written against Claude Code 2.1.303; what it prints may have changed"), Of(checks, "Claude Code"));
+        Assert.Equal(new CheckResult("Claude Code login", CheckState.Passed), Of(checks, "Claude Code login"));
+        Assert.DoesNotContain(checks, check => check.State == CheckState.Failed);
+    }
+
     [Fact]
     public async Task WithoutSettingsTheToolsAreCheckedAndTheSettingsFailAsNotSetUp()
     {
@@ -372,6 +386,9 @@ public class CheckupTests
         // The tools that are there and could not be started, with why.
         public Dictionary<Tool, string> Unstarted { get; } = [];
 
+        // The tools that run and are newer than toobusy was written against, with the version it was.
+        public Dictionary<Tool, string> WrittenAgainst { get; } = [];
+
         public bool HasManager { get; set; } = true;
 
         public int ManagerAsked { get; private set; }
@@ -395,7 +412,7 @@ public class CheckupTests
         public IReadOnlyList<string>? Labels { get; set; } = ["manual", "feature", "needs-owner", "interrupted"];
 
         public Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken) =>
-            Task.FromResult(new ToolLook(!Missing.Contains(tool) && !Unstarted.ContainsKey(tool), Unstarted.GetValueOrDefault(tool)));
+            Task.FromResult(new ToolLook(!Missing.Contains(tool) && !Unstarted.ContainsKey(tool), Unstarted.GetValueOrDefault(tool)) { WrittenAgainst = WrittenAgainst.GetValueOrDefault(tool) });
 
         public Task<bool> HasManagerAsync(CancellationToken cancellationToken)
         {

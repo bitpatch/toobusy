@@ -19,7 +19,12 @@ public enum Tool
 
 // What is found of a tool: Runs when it is on the path and runs. Unstarted is why one that is on the path could not be
 // started; null for one that runs, and for one that is not there.
-public sealed record ToolLook(bool Runs, string? Unstarted = null);
+public sealed record ToolLook(bool Runs, string? Unstarted = null)
+{
+    // The version of the tool toobusy was written against, for one that runs and is newer than it: what the tool
+    // prints may have changed. Null for any other.
+    public string? WrittenAgainst { get; init; }
+}
 
 public enum BoardAccess
 {
@@ -77,12 +82,15 @@ public interface ICheckupView
 public enum CheckState
 {
     Passed,
+
+    // The check passed, and something is to be known all the same: a warning fails nothing.
+    Warned,
     Failed,
     Skipped,
 }
 
-// How a check ended. Text is what a passed check found, what is wrong for a failed one, and what a skipped one
-// waits for; Details are more lines of what is wrong, and Fix is the command, or the address, that puts it right.
+// How a check ended. Text is what a passed check found, what a warned one warns of, what is wrong for a failed one,
+// and what a skipped one waits for; Details are more lines of what is wrong, and Fix is the command, or the address, that puts it right.
 public sealed record CheckResult(string Name, CheckState State, string Text = "", string? Fix = null)
 {
     public IReadOnlyList<string> Details { get; init; } = [];

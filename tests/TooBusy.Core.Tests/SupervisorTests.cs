@@ -2682,6 +2682,24 @@ public sealed class SupervisorTests : IDisposable
         Assert.DoesNotContain(log.Lines, line => line.Contains("session fake-3:", StringComparison.Ordinal));
     }
 
+    // What the assistant cannot make of how a session stands, as a state it does not know, stands in the place of the
+    // step of the session, and goes into the log with how the session is seen.
+    [Fact]
+    public async Task WhatTheAssistantCannotMakeOfASessionIsShownAndTraced()
+    {
+        const string Odd = "its session is in a state toobusy does not know: paused";
+        tracker.Add(3);
+        assistant.Session(3).Works().Works(odd: Odd).Lost(odd: Odd);
+
+        await RunAsync();
+
+        Assert.Equal(
+            ["#3 session fake-3: working", $"#3 session fake-3: working → working ({Odd})", $"#3 session fake-3: working ({Odd}) → lost ({Odd})"],
+            log.Traces);
+        var steps = log.Statuses.Where(status => status.Phase == RunPhase.Working).Select(status => status.Step).ToList();
+        Assert.Equal(["Editing a file", Odd], steps.Distinct().Where(step => step is not null));
+    }
+
     [Fact]
     public async Task TheSessionOfAnEarlierRunIsTracedAtItsFirstLook()
     {

@@ -281,10 +281,11 @@ sealed class FakeSession(int task) : IAssistantSession
 
     public int Looks { get; private set; }
 
-    public FakeSession Works(int looks = 1, string step = "Editing a file", Action? and = null, PlanStep[]? plan = null)
+    // `odd` is what the assistant cannot make of how the session stands, as a state it does not know.
+    public FakeSession Works(int looks = 1, string step = "Editing a file", Action? and = null, PlanStep[]? plan = null, string? odd = null)
     {
         for (var index = 0; index < looks; index++)
-            Add(new SessionLook(SessionPhase.Working, Step: step, Steps: ++steps, Context: 1000 * steps, Plan: plan), and);
+            Add(new SessionLook(SessionPhase.Working, Step: step, Steps: ++steps, Context: 1000 * steps, Plan: plan, Odd: odd), and);
         return this;
     }
 
@@ -298,7 +299,7 @@ sealed class FakeSession(int task) : IAssistantSession
     public FakeSession Limit(string refusal = "You have hit your usage limit.", SessionPhase phase = SessionPhase.Ended, string? reply = null) =>
         Add(new SessionLook(phase, Steps: steps, Reply: reply, Limit: refusal, Reported: Outcome.Ends(reply)));
 
-    public FakeSession Lost(string? reply = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply));
+    public FakeSession Lost(string? reply = null, string? odd = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply, Odd: odd));
 
     public FakeSession Unseen(int looks = 1, Action? and = null)
     {

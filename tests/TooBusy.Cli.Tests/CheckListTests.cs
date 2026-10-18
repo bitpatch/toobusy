@@ -64,6 +64,19 @@ public sealed class CheckListTests : IDisposable
     }
 
     [Fact]
+    public void AWarningIsMarkedAndSaidInTheColourOfAWarning()
+    {
+        var palette = Palette.Dark;
+        using var list = new CheckList(output, palette);
+
+        list.Done(new CheckResult("Claude Code", CheckState.Warned, "toobusy was written against Claude Code 2.1.303; what it prints may have changed"));
+
+        Assert.Equal(
+            $"{palette.Warning("!")} Claude Code        {palette.Warning("toobusy was written against Claude Code 2.1.303; what it prints may have changed")}{Environment.NewLine}",
+            output.ToString());
+    }
+
+    [Fact]
     public void AListOfFailuresShowsWhatRunsWhereItIsWatchedAndTellsTheFailuresWhereErrorsGo()
     {
         using var errors = new StringWriter();

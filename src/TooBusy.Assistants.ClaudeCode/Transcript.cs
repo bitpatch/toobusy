@@ -13,13 +13,9 @@ namespace TooBusy.Assistants.ClaudeCode;
 // The conversation is opened anew for every read; a test gives it what it opens.
 public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string root)
 {
-    // Tools with which a session asks instead of doing: they are no steps of its own.
-    static readonly string[] Asking = ["AskUserQuestion", "ExitPlanMode"];
-
-    // The tools with which a session keeps the plan of its work, a list of tasks of its own: one adds a step to it,
-    // the other says how far a step is.
-    const string Adding = "TaskCreate";
-    const string Marking = "TaskUpdate";
+    // The tools that keep the plan of a session: one adds a step to it, the other says how far a step is.
+    const string Adding = ClaudeCodeProtocol.Adding;
+    const string Marking = ClaudeCodeProtocol.Marking;
 
     // A step is said in so many characters at most.
     const int Longest = 80;
@@ -139,13 +135,13 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
             if (Flag(entry, "isApiErrorMessage"))
             {
                 // Claude Code writes what the service refused with as a message of the assistant.
-                if (Text(entry, "error") is "rate_limit" or "billing_error")
+                if (ClaudeCodeProtocol.Limited(Text(entry, "error")))
                     Limit = string.Join('\n', blocks.Select(block => Text(block, "text")).OfType<string>()) is { Length: > 0 } refusal ? refusal : "the usage limit is reached";
                 return;
             }
 
             // What Claude Code puts into the conversation in the name of the assistant is not said by the session.
-            if (Text(message, "model") == "<synthetic>")
+            if (Text(message, "model") == ClaudeCodeProtocol.Synthetic)
                 return;
 
             Limit = null;
@@ -163,7 +159,7 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
                     // Keeping the plan is a step, but not what the session is doing: the bar of the plan tells of it.
                     if (tool is not (Adding or Marking))
                         Step = Told(tool, block.TryGetProperty("input", out var input) ? input : default);
-                    if (!Asking.Contains(tool))
+                    if (!ClaudeCodeProtocol.Asking.Contains(tool))
                         Steps++;
                     Reported = false;
                 }
@@ -194,18 +190,18 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
 
             if (tool == Adding)
             {
-                if (result.TryGetProperty("task", out var added) && Text(added, "id") is { } id && !steps.Exists(step => step.Id == id))
+                if (ClaudeCodeProtocol.Added(result) is { } id && !steps.Exists(step => step.Id == id))
                     steps.Add((id, PlanStep.Pending));
             }
-            else if (Text(result, "taskId") is { } marked && result.TryGetProperty("statusChange", out var change) && Text(change, "to") is { } status)
+            else if (ClaudeCodeProtocol.Marked(result) is ({ } marked, var state))
             {
                 var index = steps.FindIndex(step => step.Id == marked);
                 if (index < 0)
                     continue;
-                if (status == "deleted")
-                    steps.RemoveAt(index);
+                if (state is { } far)
+                    steps[index] = (marked, far);
                 else
-                    steps[index] = (marked, status switch { "completed" => PlanStep.Done, "in_progress" => PlanStep.Active, _ => PlanStep.Pending });
+                    steps.RemoveAt(index);
             }
 
             Plan = steps.Count == 0 ? null : [.. steps.Select(step => step.State)];

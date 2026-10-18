@@ -22,7 +22,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
     public async Task<IReadOnlyList<CheckResult>> RunAsync(ICheckupView view, CancellationToken cancellationToken)
     {
         var results = new List<CheckResult>(await MachineAsync(machine, view, cancellationToken));
-        bool Passed(string name) => results.Any(result => result.Name == name && result.State == CheckState.Passed);
+        bool Passed(string name) => results.Any(result => result.Name == name && result.State is CheckState.Passed or CheckState.Warned);
 
         var loaded = settings.Load();
         view.Start(Settings);
@@ -156,12 +156,14 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
         return results;
 
         // A tool that is there and could not be started is not to be installed anew: what stands in its way is told.
+        // One that is newer than the version toobusy was written against runs, and is warned of.
         async Task<bool> ToolAsync(string name, Tool tool, string called, string missing)
         {
             view.Start(name);
             var look = await machine.FindAsync(tool, cancellationToken);
             Tell(look switch
             {
+                { Runs: true, WrittenAgainst: { } known } => new CheckResult(name, CheckState.Warned, $"toobusy was written against {called} {known}; what it prints may have changed"),
                 { Runs: true } => new CheckResult(name, CheckState.Passed),
                 { Unstarted: { } why } => new CheckResult(name, CheckState.Failed, $"{called} could not be started: {why}."),
                 _ => new CheckResult(name, CheckState.Failed, missing, Fixes.Install(

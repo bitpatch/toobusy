@@ -55,6 +55,7 @@ public sealed class CheckList : ICheckupView, IDisposable
             var (mark, text) = result.State switch
             {
                 CheckState.Passed => (palette.Success("✔"), result.Text),
+                CheckState.Warned => (palette.Warning("!"), palette.Warning(result.Text)),
                 CheckState.Failed => (palette.Error("✘"), palette.Error(result.Text)),
                 _ => (palette.Muted("○"), palette.Muted(result.Text)),
             };

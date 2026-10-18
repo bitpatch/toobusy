@@ -190,7 +190,7 @@ public static class Assist
             ? $"the `origin` remote is the GitHub repository {repository}: its issues are the tasks. The rest is told by `toobusy doctor`."
             : "the `origin` remote is not a GitHub repository, or there is none. The tasks of a project are the issues of the GitHub repository of its `origin` remote, so nothing can be set up before it is one. The rest is told by `toobusy doctor`.");
         Part(text, "Decide", "nothing: this step makes the machine ready. A run needs `git`, the GitHub command-line tool `gh` and Claude Code, `gh` and Claude Code logged in, and an `origin` remote that is a GitHub repository.");
-        Part(text, "Look at", "what `toobusy doctor` prints: a line for each check, and under a failed one the command that fixes it. Run a fix that installs a tool yourself when the owner agrees.");
+        Part(text, "Look at", "what `toobusy doctor` prints: a line for each check, and under a failed one the command that fixes it. Run a fix that installs a tool yourself when the owner agrees. A check marked `!` passed with a warning, as one of a Claude Code newer than the one toobusy was written against: it fails nothing, and the owner is told of it.");
         Part(text, "Ask the owner", """
             for what only they can do:
 

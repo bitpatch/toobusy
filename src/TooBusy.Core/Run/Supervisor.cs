@@ -762,7 +762,7 @@ public sealed class Supervisor(
         {
             Task = task,
             Since = since,
-            Step = unseen ? "its session cannot be read" : look.Step,
+            Step = unseen ? "its session cannot be read" : look.Odd ?? look.Step,
             Context = look.Context,
             Plan = look.Plan ?? [],
             Queued = queued,
@@ -1475,10 +1475,11 @@ public sealed class Supervisor(
     string? seen;
 
     // Writes into the log on disk how the session of a task is seen, when that changed since its last look: what it
-    // is doing, and what it waits for or the limit it ran into. The screen does not show it.
+    // is doing, and what it waits for, the limit it ran into or what the assistant cannot make of it. The screen does
+    // not show it.
     void Seen(int number, IAssistantSession session, SessionLook look)
     {
-        var now = look.Phase.ToString().ToLowerInvariant() + ((look.Asks ?? look.Limit) is { } why ? $" ({string.Join(' ', Lines(why))})" : "");
+        var now = look.Phase.ToString().ToLowerInvariant() + ((look.Asks ?? look.Limit ?? look.Odd) is { } why ? $" ({string.Join(' ', Lines(why))})" : "");
         if (now == seen)
             return;
 

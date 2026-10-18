@@ -203,11 +203,14 @@ public sealed class ClaudeCodeTests : IDisposable
 
     [Theory]
     [InlineData("working", "busy", null, SessionPhase.Working, null)]
+    [InlineData("starting", "busy", null, SessionPhase.Working, null)]
+    [InlineData("resuming", "busy", null, SessionPhase.Working, null)]
     [InlineData("blocked", "waiting", "input needed", SessionPhase.Asking, "input needed")]
     [InlineData("blocked", "waiting", null, SessionPhase.Asking, null)]
     [InlineData("done", "idle", null, SessionPhase.Ended, null)]
     [InlineData("stopped", null, null, SessionPhase.Lost, null)]
     [InlineData("failed", null, null, SessionPhase.Lost, null)]
+    [InlineData("paused", null, null, SessionPhase.Working, null)]
     public async Task TheListOfTheSessionsTellsWhereASessionStands(string state, string? status, string? waitingFor, SessionPhase phase, string? asks)
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
@@ -216,6 +219,7 @@ public sealed class ClaudeCodeTests : IDisposable
         var look = await session.LookAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal((phase, asks), (look.Phase, look.Asks));
+        Assert.Equal(state == "paused" ? "its session is in a state toobusy does not know: paused" : null, look.Odd);
         Assert.Equal(Conversation, session.Trace.Conversation);
         Assert.Equal(["agents", "--json", "--all"], claude.Asked[^1]);
     }
@@ -232,11 +236,41 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(SessionPhase.Lost, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
     }
 
+    // A state that toobusy does not know, as a newer Claude Code may list, is no work for ever: it is said, borne for
+    // a minute as a list that cannot be read is, and the session is lost after it, with what it said read as ever.
+    [Fact]
+    public async Task ASessionInAStateThatIsNotKnownIsSaidAndLostAfterAMinute()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        Write(Said("All pass.\nTOOBUSY: done"));
+        claude.Sessions = Listing(Entry(Id, Conversation, "paused"));
+
+        var first = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((SessionPhase.Working, "its session is in a state toobusy does not know: paused"), (first.Phase, first.Odd));
+        clock.Pass(TimeSpan.FromSeconds(59));
+        Assert.Equal(SessionPhase.Working, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
+        clock.Pass(TimeSpan.FromSeconds(1));
+        var lost = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((SessionPhase.Lost, "its session is in a state toobusy does not know: paused", "All pass.\nTOOBUSY: done"), (lost.Phase, lost.Odd, lost.Reply));
+
+        // A state that is known again says nothing odd, and one that is not known after it is borne anew.
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        var known = await session.LookAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((SessionPhase.Working, null), (known.Phase, known.Odd));
+        claude.Sessions = Listing(Entry(Id, Conversation, "paused"));
+        Assert.Equal(SessionPhase.Working, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
+
+        // A list that gives no state at all is not known either.
+        claude.Sessions = "[{" + $"\"id\":\"{Id}\",\"sessionId\":\"{Conversation}\"" + "}]";
+        Assert.Equal("the list of the sessions gives no state for its session", (await session.LookAsync(TestContext.Current.CancellationToken)).Odd);
+    }
+
     [Fact]
     public async Task AListThatCannotBeReadIsBorneForAMinute()
     {
         var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
         claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        Write(Said("On it."));
         await session.LookAsync(TestContext.Current.CancellationToken);
 
         claude.List = new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
@@ -846,9 +880,50 @@ public sealed class ClaudeCodeTests : IDisposable
         var moved = ClaudeFolders.Of("/work/rocket", "/local", () => { }, "/Users/ann", name => name == "CLAUDE_CONFIG_DIR" ? "/etc/claude" : null);
 
         Assert.Equal(Path.Combine("/Users/ann", ".claude", "projects", "-Users-ann-My-Projects-rocket-2"), plain.Transcripts);
+        Assert.Equal(Path.Combine("/Users/ann", ".claude", "projects"), plain.Projects);
         Assert.Equal(Path.Combine("/etc/claude", "projects", "-work-rocket"), moved.Transcripts);
         Assert.Equal(Path.Combine(plain.Transcripts, "abc.jsonl"), plain.Transcript("abc"));
         Assert.Equal((Path.Combine("/local", "wrap-up.json"), Path.Combine("/local", "usage.json")), (plain.Request, plain.Usage));
+    }
+
+    // Claude Code names the folder of a long path otherwise than by its rule: a conversation that is not where the
+    // rule says is found in another folder of its projects, for a look and for a session of an earlier run alike.
+    [Fact]
+    public async Task AConversationInAFolderWithAnotherNameIsFound()
+    {
+        var elsewhere = folder.CreateSubdirectory("-work-rocket-1a2b3c").FullName;
+        File.WriteAllText(Path.Combine(elsewhere, Conversation + ".jsonl"), Said("All pass.\nTOOBUSY: done") + "\n");
+        claude.Sessions = Listing(Entry(Id, Conversation, "done", "idle"));
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+
+        var look = await session.LookAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal((SessionPhase.Ended, "All pass.\nTOOBUSY: done"), (look.Phase, look.Reply));
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        Assert.NotNull(await Assistant().FindAsync(new SessionTrace(Id, Conversation, clock.Now), TestContext.Current.CancellationToken));
+    }
+
+    // A session that Claude Code lists has its conversation on the machine. One that is in no folder of its projects
+    // is borne for a minute, as one that is not written yet, and then said: nothing the session does can be read.
+    [Fact]
+    public async Task AConversationThatIsNowhereIsSaidAfterAMinute()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "done", "idle"));
+
+        Assert.Equal(SessionPhase.Ended, (await session.LookAsync(TestContext.Current.CancellationToken)).Phase);
+        clock.Pass(TimeSpan.FromSeconds(59));
+        await session.LookAsync(TestContext.Current.CancellationToken);
+        clock.Pass(TimeSpan.FromSeconds(1));
+        var unfound = await Assert.ThrowsAsync<AssistantException>(() => session.LookAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            $"the conversation of the session 15555bc6 is not {folders.Transcript(Conversation)}, nor in any other folder of {folder.FullName}: toobusy cannot read what the session does",
+            unfound.Message);
+
+        // One that is written after all is read.
+        Write(Said("All pass.\nTOOBUSY: done"));
+        Assert.Equal("All pass.\nTOOBUSY: done", (await session.LookAsync(TestContext.Current.CancellationToken)).Reply);
     }
 
     // The local folder as a run makes it: with a `.gitignore` of its own that leaves everything in it out of git.

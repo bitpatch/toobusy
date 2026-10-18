@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Run;
 
@@ -15,7 +14,10 @@ namespace TooBusy.Assistants.ClaudeCode;
 // The list of the sessions is a command that starts Claude Code, so a look at a session takes it from a list read no
 // longer than `listAge` ago, twenty seconds unless a test says otherwise; whatever changes a session, and whatever
 // must know how a session is now, reads it anew.
-public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, TimeSpan? listAge = null) : IAssistant
+//
+// What Claude Code answers, lists and writes is read as `ClaudeCodeProtocol` says, and no further: a state of the
+// list that it does not know is not taken for work, and a conversation that is nowhere to be found is said.
+public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, TimeSpan? listAge = null) : IAssistant
 {
     readonly IClock clock = clock;
     readonly ClaudeFolders folders = folders;
@@ -30,7 +32,8 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     // How long a command of Claude Code is waited for.
     static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
 
-    // For how long the list of the sessions may be silent, or may lack a session, before that is told of.
+    // For how long the list of the sessions may be silent, may lack a session or have it in a state that is not
+    // known, and for how long the conversation of a session that it has may be nowhere, before that is told of.
     static readonly TimeSpan Tolerance = TimeSpan.FromMinutes(1);
 
     // How a session that is stopped is waited for: so many looks, so far apart.
@@ -61,23 +64,23 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         var said = result.Output + "\n" + result.Error;
         if (Unrun(result) is { } unrun)
             throw new AssistantException(unrun + ".");
-        if (said.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
+        if (ClaudeCodeProtocol.Untrusted(said))
             throw new AssistantException("Claude Code does not trust this folder yet: run `claude` in it once and accept what it asks.");
-        if (Started(said) is not { } id)
+        if (ClaudeCodeProtocol.Started(said) is not { } id)
             throw new AssistantException($"Claude Code did not start a session for {start.Name}: {(result.Status == ProcessStatus.TimedOut ? "it did not answer" : First(said))}");
 
         return new Session(this, id, null, since);
     }
 
     // A session of an earlier run is the one of the list that has its name or its conversation. Nothing is left
-    // of it when no process has it and its conversation is not known or is not on this machine any more. While
-    // the list cannot be read nothing is known, and the session says so when it is looked at.
+    // of it when no process has it and its conversation is not known or is in no folder of the projects of Claude
+    // Code any more. While the list cannot be read nothing is known, and the session says so when it is looked at.
     public async Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken)
     {
         var listed = await ListAsync(cancellationToken);
         var found = listed is null ? null : Session.Find(listed, trace.Id, trace.Conversation);
         var conversation = trace.Conversation ?? found?.Conversation;
-        if (listed is not null && found is not { Alive: true } && (conversation is null || !File.Exists(folders.Transcript(conversation))))
+        if (listed is not null && found is not { Alive: true } && (conversation is null || folders.Find(conversation) is null))
             return null;
 
         return new Session(this, found?.Id ?? trace.Id, conversation, trace.Since, earlier: true);
@@ -192,8 +195,6 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    static string? Started(string said) => Backgrounded().Match(said) is { Success: true } match ? match.Groups[1].Value : null;
-
     static string First(string said) =>
         said.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "it said nothing";
 
@@ -206,10 +207,6 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
         _ => null,
     };
 
-    // What Claude Code answers when a session went to the background: the name the session is known by from then on.
-    [GeneratedRegex(@"backgrounded · ([0-9a-f]+)")]
-    private static partial Regex Backgrounded();
-
     // A session of the list. Alive tells that a process still has it; Name is what its start called it, and Started
     // when it was started, in Unix milliseconds.
     sealed record Listed(string Id, string? Conversation, string? State, string? WaitingFor, bool Alive, string? Name, long? Started);
@@ -217,15 +214,19 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
     // A background session. It is known by the short name Claude Code gave it; its conversation, which later runs go
     // on with it by, is learnt from the list of the sessions.
     //
-    // A session of an earlier run has been listed for long: a list that is silent or lacks it is believed at once.
+    // A session of an earlier run has been listed for long: a list that is silent or lacks it is believed at once. A
+    // state that is not known may pass, and a conversation may not be written yet, for it as for any other.
     sealed class Session(ClaudeCode claude, string? id, string? conversation, DateTimeOffset since, bool earlier = false) : IAssistantSession
     {
         string? id = id;
         Transcript? transcript;
 
-        // Since when the list is silent, and since when it lacks the session; null when neither is so.
+        // Since when the list is silent, since when it lacks the session, since when it has the session in a state
+        // that is not known, and since when the conversation of the session it has is nowhere; null when none is so.
         DateTimeOffset? silent = earlier ? DateTimeOffset.MinValue : null;
         DateTimeOffset? missing = earlier ? DateTimeOffset.MinValue : null;
+        DateTimeOffset? unknown;
+        DateTimeOffset? unfound;
 
         public string Open => $"claude attach {id ?? Conversation}";
 
@@ -238,13 +239,16 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             var now = claude.clock.Now;
             var phase = SessionPhase.Working;
             string? asks = null;
-            if (await claude.RecentAsync(cancellationToken) is not { } listed)
+            string? odd = null;
+            var listed = await claude.RecentAsync(cancellationToken);
+            var found = listed is null ? null : Find(listed, id, Conversation);
+            if (listed is null)
             {
                 silent ??= now;
                 if (now - silent >= Tolerance)
                     phase = SessionPhase.Unseen;
             }
-            else if (Find(listed, id, Conversation) is not { } found)
+            else if (found is null)
             {
                 // A session that has just started is not always listed at once.
                 silent = null;
@@ -257,19 +261,37 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 silent = null;
                 missing = null;
                 Conversation ??= found.Conversation;
-                (phase, asks) = found.State switch
+                var standing = ClaudeCodeProtocol.StandingOf(found.State);
+                unknown = standing == Standing.Unknown ? unknown ?? now : null;
+                (phase, asks, odd) = standing switch
                 {
-                    "done" => (SessionPhase.Ended, null),
-                    "failed" or "stopped" => (SessionPhase.Lost, null),
-                    "blocked" => (SessionPhase.Asking, found.WaitingFor),
-                    _ => (SessionPhase.Working, (string?)null),
+                    Standing.Ended => (SessionPhase.Ended, null, null),
+                    Standing.Lost => (SessionPhase.Lost, null, null),
+                    Standing.Asks => (SessionPhase.Asking, found.WaitingFor, null),
+                    Standing.Works => (SessionPhase.Working, null, null),
+                    _ => (now - unknown >= Tolerance ? SessionPhase.Lost : SessionPhase.Working, (string?)null, Unknown(found.State)),
                 };
             }
 
-            if (Conversation is { } known)
-                (transcript ??= new Transcript(claude.folders.Transcript(known), since, claude.root)).Read();
-            return new SessionLook(phase, asks, transcript?.Step, transcript?.Steps ?? 0, transcript?.Context ?? 0, transcript?.Reply, transcript?.Limit, transcript?.Plan, transcript?.Reported ?? false);
+            if (transcript is null && Conversation is { } known && claude.folders.Find(known) is { } file)
+                transcript = new Transcript(file, since, claude.root);
+            transcript?.Read();
+
+            // A session that Claude Code lists has its conversation on the machine: one that is nowhere a while after
+            // is where toobusy does not know to look, and nothing the session does or says can be read.
+            if (found is not null)
+            {
+                unfound = transcript is null && Conversation is not null ? unfound ?? now : null;
+                if (now - unfound >= Tolerance)
+                    throw new AssistantException($"the conversation of the session {found.Id} is not {claude.folders.Transcript(Conversation!)}, nor in any other folder of {claude.folders.Projects}: toobusy cannot read what the session does");
+            }
+
+            return new SessionLook(phase, asks, transcript?.Step, transcript?.Steps ?? 0, transcript?.Context ?? 0, transcript?.Reply, transcript?.Limit, transcript?.Plan, transcript?.Reported ?? false, odd);
         }
+
+        // What is said of a session that the list has in a state that is not known.
+        static string Unknown(string? state) =>
+            state is null ? "the list of the sessions gives no state for its session" : $"its session is in a state toobusy does not know: {state}";
 
         // A session goes on only when nothing has it: it is stopped first, and waited for. Claude Code may start a
         // copy all the same, a new session with the whole conversation and the message, and says so. A copy of a
@@ -304,10 +326,10 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                     return new Telling($"Claude Code did not answer in {Spoken.Time(Patience)}");
                 if (Unrun(result) is { } unrun)
                     return new Telling(unrun);
-                if (Started(said) is not { } woken)
+                if (ClaudeCodeProtocol.Started(said) is not { } woken)
                     return new Telling(First(said));
 
-                if (said.Contains("already running", StringComparison.OrdinalIgnoreCase) || said.Contains("started a copy", StringComparison.OrdinalIgnoreCase))
+                if (ClaudeCodeProtocol.Copied(said))
                 {
                     // The list says whether something still has the session; one that cannot be read does not say
                     // that nothing has it.
@@ -341,6 +363,8 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             id = woken;
             silent = null;
             missing = null;
+            unknown = null;
+            unfound = null;
             since = told;
             transcript?.From(told);
         }
