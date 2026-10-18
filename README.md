@@ -12,7 +12,7 @@ There is no release yet, but it is coming soon, and then this is where it will s
 
 ### What you need on the machine
 
-- [`git`](https://git-scm.com/downloads).
+- [`git`](https://git-scm.com/downloads), which gets into the remote of the project without asking for a password: a run has nobody to answer it, and turns git's prompts off. Over HTTPS a credential helper keeps the login, as `gh auth setup-git` sets one up; over ssh the key is in an ssh agent or has no passphrase.
 - [`gh`](https://cli.github.com/), the GitHub CLI, logged in: `gh auth login`. For a project with a board the token needs the `project` scope: `gh auth refresh -s project`.
 - [Claude Code](https://claude.com/claude-code), logged in: run `claude`, then `/login`. Run `claude` once in the project folder too, so that it trusts the folder.
 

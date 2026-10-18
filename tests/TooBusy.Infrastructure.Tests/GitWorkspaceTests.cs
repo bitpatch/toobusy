@@ -87,6 +87,7 @@ public class GitWorkspaceTests
 
     [Theory]
     [InlineData(ProcessStatus.Exited, 128, "ssh: Could not resolve hostname github.com: nodename nor servname provided\nfatal: Could not read from remote repository.\n", "ssh: Could not resolve hostname github.com: nodename nor servname provided", true)]
+    [InlineData(ProcessStatus.Exited, 128, "warning: redirecting to https://github.com/acme/rocket.git/\nfatal: Cannot prompt because user interactivity has been disabled.\nfatal: could not read Username for 'https://github.com': terminal prompts disabled\n", "fatal: could not read Username for 'https://github.com': terminal prompts disabled", false)]
     [InlineData(ProcessStatus.Exited, 1, "", "git exited with 1", false)]
     [InlineData(ProcessStatus.TimedOut, 0, "", "git did not end in 2 min", true)]
     [InlineData(ProcessStatus.NotFound, 0, "", "git cannot be run", false)]
@@ -113,6 +114,9 @@ public class GitWorkspaceTests
     [InlineData("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", false)]
     [InlineData("remote: Repository not found.\nfatal: repository 'https://github.com/acme/rocket/' not found", false)]
     [InlineData("fatal: Authentication failed for 'https://github.com/acme/rocket/'", false)]
+    [InlineData("fatal: could not read Username for 'https://github.com': terminal prompts disabled", false)]
+    [InlineData("fatal: Cannot prompt because user interactivity has been disabled.\nfatal: could not read Username for 'https://github.com': terminal prompts disabled", false)]
+    [InlineData("fatal: Cannot prompt because terminal prompts have been disabled.\nerror: RPC failed; HTTP 503 curl 22 The requested URL returned error: 503", false)]
     [InlineData("error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false)]
     [InlineData("fatal: 'origin' does not appear to be a git repository", false)]
     public async Task AFetchThatFailedMayPassWhenTheRemoteDidNotAnswer(string error, bool mayPass)

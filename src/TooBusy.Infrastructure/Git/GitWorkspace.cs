@@ -69,24 +69,30 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
     static int Count(string field) =>
         int.TryParse(field.TrimStart('+', '-'), NumberStyles.None, CultureInfo.InvariantCulture, out var commits) ? commits : 0;
 
-    // What git said of a failure, in its first line.
-    static string Said(ProcessResult result, TimeSpan patience) => result.Status switch
+    // What git said of a failure, in a line: the one that says it could not ask for a login, the last of them, as git
+    // says its own after what its credential helper said; or else its first line.
+    static string Said(ProcessResult result, TimeSpan patience)
     {
-        ProcessStatus.NotFound => "git cannot be run",
-        ProcessStatus.TimedOut => $"git did not end in {Spoken.Time(patience)}",
-        _ => (result.Error + "\n" + result.Output).Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0)
-            ?? string.Create(CultureInfo.InvariantCulture, $"git exited with {result.ExitCode}"),
-    };
+        if (result.Status == ProcessStatus.NotFound)
+            return "git cannot be run";
+        if (result.Status == ProcessStatus.TimedOut)
+            return $"git did not end in {Spoken.Time(patience)}";
+
+        var lines = (result.Error + "\n" + result.Output).Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToList();
+        return lines.LastOrDefault(Unasked) ?? lines.FirstOrDefault() ?? string.Create(CultureInfo.InvariantCulture, $"git exited with {result.ExitCode}");
+    }
 
     // Whether a fetch failed in a way that may pass: it did not end in its time, git did not reach the remote, or the
     // remote answered with a status of the 500s or a 429. A remote that refuses, as over a login or a repository that
-    // is not there, stays, whatever git says after that.
+    // is not there, stays, whatever git says after that, and so does a login that git could not ask for.
     static bool Passing(ProcessResult result)
     {
         if (result.Status != ProcessStatus.Exited)
             return result.Status == ProcessStatus.TimedOut;
 
         var said = result.Error + "\n" + result.Output;
+        if (Unasked(said))
+            return false;
         if (HttpStatus().Match(said) is { Success: true } status)
             return int.Parse(status.Groups[1].ValueSpan, CultureInfo.InvariantCulture) is >= 500 or 429;
 
@@ -100,6 +106,11 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
         "could not resolve host", "failed to connect", "couldn't connect", "connection refused", "connection reset",
         "connection closed", "network is unreachable", "timed out", "timeout", "hung up unexpectedly", "early EOF",
     ];
+
+    // Whether git, or the Git Credential Manager it asked, says it would have asked for a login but its prompts are
+    // off: `could not read Username for '…': terminal prompts disabled`, `Cannot prompt because …`.
+    static bool Unasked(string said) =>
+        said.Contains("terminal prompts disabled", StringComparison.OrdinalIgnoreCase) || said.Contains("cannot prompt because", StringComparison.OrdinalIgnoreCase);
 
     // The status the remote answered with, as git says it: `The requested URL returned error: 502`, or `HTTP 502`.
     [GeneratedRegex(@"(?:returned error:|\bHTTP) ([1-5][0-9]{2})\b")]

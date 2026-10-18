@@ -45,6 +45,14 @@ public sealed class ShellCommandsTests : IDisposable
     }
 
     [Fact]
+    public async Task ACommandHasGitsPromptsOff()
+    {
+        var end = await shell.RunAsync("echo \"$GIT_TERMINAL_PROMPT $GCM_INTERACTIVE\"", Nothing, Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new CommandEnd(CommandStatus.Exited, 0, "0 never\n"), end);
+    }
+
+    [Fact]
     public async Task ACommandThatDoesNotEndInItsTimeIsStoppedAndWhatItPrintedIsKept()
     {
         var end = await shell.RunAsync("echo started; sleep 30", Nothing, TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);

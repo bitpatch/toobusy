@@ -5,7 +5,8 @@ using TooBusy.Core.Processes;
 namespace TooBusy.Infrastructure.Processes;
 
 // Commands are started directly, without a shell, in the folder the runner is of, or where the tool was started.
-// Their input is closed at once, so that none of them waits for an answer.
+// Their input is closed at once and git's prompts are off, as `Unattended` has them, so that none of them waits for
+// an answer.
 public sealed class ProcessRunner(string? folder = null) : IProcessRunner
 {
     public IProcessRunner Inside(string folder) => new ProcessRunner(folder);
@@ -24,6 +25,7 @@ public sealed class ProcessRunner(string? folder = null) : IProcessRunner
         };
         foreach (var argument in arguments)
             process.StartInfo.ArgumentList.Add(argument);
+        Unattended.Apply(process.StartInfo);
 
         try
         {

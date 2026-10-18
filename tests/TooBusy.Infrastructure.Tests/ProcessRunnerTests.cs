@@ -65,6 +65,27 @@ public class ProcessRunnerTests
     }
 
     [Fact]
+    public async Task ACommandHasGitsPromptsOff()
+    {
+        var result = await runner.RunAsync("sh", ["-c", "echo \"$GIT_TERMINAL_PROMPT $GCM_INTERACTIVE\""], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal("0 never\n", result.Output);
+    }
+
+    // git asks for a login on the terminal, which the closed input does not stop. The test leaves out every helper
+    // and program of the machine that could give one.
+    [Fact]
+    public async Task GitAsksACommandForNoLoginAndFailsAtOnce()
+    {
+        var fill = "printf 'protocol=https\\nhost=example.com\\n\\n' | env -u GIT_ASKPASS -u SSH_ASKPASS git -c credential.helper= -c core.askPass= credential fill";
+
+        var result = await runner.RunAsync("sh", ["-c", fill], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal((ProcessStatus.Exited, 128), (result.Status, result.ExitCode));
+        Assert.Contains("terminal prompts disabled", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ACommandThatIsNotInstalledIsNotFound()
     {
         var result = await runner.RunAsync("toobusy-no-such-command", [], Long, TestContext.Current.CancellationToken);
