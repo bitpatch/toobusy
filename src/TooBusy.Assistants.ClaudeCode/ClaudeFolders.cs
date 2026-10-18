@@ -4,18 +4,20 @@ namespace TooBusy.Assistants.ClaudeCode;
 
 // The two folders Claude Code is worked with through. Local is the folder of the project where a run keeps what it
 // leaves on this machine: the request that a hook passes to the session, and what the status line of a session
-// tells of the usage limits. Transcripts is where Claude Code writes the conversations of the project.
-public sealed record ClaudeFolders(string Local, string Transcripts)
+// tells of the usage limits. MakeLocal makes sure of that folder before anything is written into it, as the run
+// keeps it, out of git, however it was taken away. Transcripts is where Claude Code writes the conversations of the
+// project.
+public sealed record ClaudeFolders(string Local, Action MakeLocal, string Transcripts)
 {
     // Claude Code keeps the conversations of a project under its own folder, in one that is named after the path
     // of the project with everything but letters and digits turned into dashes.
-    public static ClaudeFolders Of(string root, string local, string home, Func<string, string?> variable)
+    public static ClaudeFolders Of(string root, string local, Action makeLocal, string home, Func<string, string?> variable)
     {
         var configuration = Configuration(home, variable);
         var name = new StringBuilder(root.Length);
         foreach (var character in root)
             name.Append(char.IsAsciiLetterOrDigit(character) ? character : '-');
-        return new ClaudeFolders(local, Path.Combine(configuration, "projects", name.ToString()));
+        return new ClaudeFolders(local, makeLocal, Path.Combine(configuration, "projects", name.ToString()));
     }
 
     // Claude Code's own folder of the user, where it keeps the conversations and the skills of the user.

@@ -40,7 +40,7 @@ public sealed class RunSignFileTests : IDisposable
 
         sign.Change(Working with { Phase = RunPhase.WaitingForOwner });
         Assert.Equal(RunPhase.WaitingForOwner, Sign(200).Read()?.Sign.Phase);
-        Assert.Equal(["run.json", "run.lock"], root.GetFiles().Select(file => file.Name).Order());
+        Assert.Equal([".gitignore", "run.json", "run.lock"], root.GetFiles().Select(file => file.Name).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -58,6 +58,31 @@ public sealed class RunSignFileTests : IDisposable
         Assert.Equal(
             """{"process":100,"processStarted":"2030-01-01T09:00:00.0000000Z","since":"2030-01-01T10:00:00.0000000Z","phase":"waiting-for-limit","until":"2030-01-01T11:00:00.0000000Z"}""",
             File.ReadAllText(Path.Combine(root.FullName, "run.json")));
+    }
+
+    // A session or a script of the project may take the local folder away while the run goes on, as `git clean -fdx`
+    // does: the sign puts it back out of git, or the next task would find the working tree not clean over it.
+    [Fact]
+    public void TheLocalFolderComesBackOutOfGitWhenItWasTakenAwayDuringARun()
+    {
+        var local = Path.Combine(root.FullName, "local");
+        var sign = Sign(100, folder: local);
+
+        sign.Raise(new RunSign(RunPhase.Preparing));
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(local, ".gitignore")));
+
+        Directory.Delete(local, recursive: true);
+        sign.Change(Working);
+
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(local, ".gitignore")));
+        Assert.Equal(Working, Sign(200, folder: local).Read()?.Sign);
+
+        // A run of the menu after another one of the same process puts its sign up anew.
+        Directory.Delete(local, recursive: true);
+        sign.Raise(new RunSign(RunPhase.Preparing));
+
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(local, ".gitignore")));
+        Assert.Equal(RunPhase.Preparing, Sign(200, folder: local).Read()?.Sign.Phase);
     }
 
     [Fact]
@@ -85,8 +110,8 @@ public sealed class RunSignFileTests : IDisposable
 
         Assert.Null(Sign(200).Read());
 
-        // The lock of the sign stays.
-        Assert.Equal(["run.lock"], root.GetFiles().Select(file => file.Name));
+        // The lock of the sign stays, and so does the folder, out of git.
+        Assert.Equal([".gitignore", "run.lock"], root.GetFiles().Select(file => file.Name).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -213,9 +238,10 @@ public sealed class RunSignFileTests : IDisposable
         Assert.Null(new RunSignFile(root.FullName).Read());
     }
 
-    // The sign as the process with that number has it; the time is an hour after the morning.
-    RunSignFile Sign(int process, Action<TimeSpan>? pause = null) =>
-        new(root.FullName, process, Start, () => Morning + TimeSpan.FromHours(1), pause ?? Thread.Sleep);
+    // The sign as the process with that number has it, in the folder of the test unless another is given; the time is
+    // an hour after the morning.
+    RunSignFile Sign(int process, Action<TimeSpan>? pause = null, string? folder = null) =>
+        new(folder ?? root.FullName, process, Start, () => Morning + TimeSpan.FromHours(1), pause ?? Thread.Sleep);
 
     ProcessStart? Start(int process) => living.TryGetValue(process, out var started) ? new ProcessStart(started) : null;
 }

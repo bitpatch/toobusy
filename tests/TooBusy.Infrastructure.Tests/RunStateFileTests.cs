@@ -59,6 +59,23 @@ public sealed class RunStateFileTests : IDisposable
         Assert.False(File.Exists(Path.Combine(folder, "session.json")));
     }
 
+    // A session or a script of the project may take the local folder away while the run goes on, as `git clean -fdx`
+    // does: the record puts it back out of git, or the next task would find the working tree not clean over it.
+    [Fact]
+    public void TheLocalFolderComesBackOutOfGitWhenItWasTakenAwayDuringARun()
+    {
+        var folder = LocalFolder.Ensure(root.FullName);
+        var state = new RunStateFile(folder);
+        var record = new TaskRecord(12, new SessionTrace("15555bc6", null, new DateTimeOffset(2030, 1, 1, 9, 0, 0, TimeSpan.Zero)));
+        state.Save(record);
+
+        Directory.Delete(folder, recursive: true);
+        state.Save(record with { State = RecordState.Paused });
+
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(folder, ".gitignore")));
+        Assert.Equal(record with { State = RecordState.Paused }, state.Load());
+    }
+
     [Fact]
     public void ARecordThatCannotBeWrittenOrTakenAwayIsAFailureOfTheLocalFiles()
     {

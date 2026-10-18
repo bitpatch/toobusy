@@ -121,7 +121,7 @@ public sealed record Workbench(
         return new LoggedRun(
             new Supervisor(
                 new GitHubTasks(processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
-                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, Home, System.Environment.GetEnvironmentVariable), Root, plan.PermissionMode),
+                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, () => LocalFolder.Make(local), Home, System.Environment.GetEnvironmentVariable), Root, plan.PermissionMode),
                 new GitWorkspace(processes, Root),
                 new RunStateFile(local),
                 new RunSignFile(local),

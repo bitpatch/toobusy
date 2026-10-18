@@ -31,6 +31,7 @@ public sealed class RunLogFile : IDisposable
         DisplayPath = $"{LocalFolder.DisplayPath}/{Folder}/{Path.GetFileName(FullPath)}";
         try
         {
+            LocalFolder.Make(local);
             Directory.CreateDirectory(folder);
             Prune(folder);
             writer = new StreamWriter(FullPath, append: true) { AutoFlush = true };

@@ -27,6 +27,18 @@ public sealed class RunLogFileTests : IDisposable
     }
 
     [Fact]
+    public void ALogMakesTheLocalFolderOutOfGitWhenItIsNotThere()
+    {
+        var local = Path.Combine(folder.FullName, "local");
+
+        using var log = new RunLogFile(local, clock);
+
+        Assert.Null(log.Unwritable);
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(local, ".gitignore")));
+        Assert.True(File.Exists(log.FullPath));
+    }
+
+    [Fact]
     public void ALineIsWrittenWithTheTimeOfDayAndTheRestOfATextStandsUnderIt()
     {
         var log = new RunLogFile(folder.FullName, clock);

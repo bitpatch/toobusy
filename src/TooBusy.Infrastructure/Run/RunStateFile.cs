@@ -43,7 +43,7 @@ public sealed class RunStateFile(string folder) : IRunState
     {
         try
         {
-            Directory.CreateDirectory(folder);
+            LocalFolder.Make(folder);
             var written = Path + ".tmp";
             using (var stream = File.Create(written))
             using (var writer = new Utf8JsonWriter(stream))

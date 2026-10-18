@@ -430,7 +430,7 @@ public sealed class CliAppTests : IDisposable
         // The clock is the real one here: with a clock that makes nobody wait, a session that never ends would be
         // looked at without end while the keys are waited for.
         var context = Context(processes) with { Home = personal.FullName, Clock = new TooBusy.Infrastructure.Machine.SystemClock() };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2099-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"tool_use","name":"Bash","input":{"command":"dotnet test"}}]}}""" + "\n");
         var keys = new Keys()
@@ -983,7 +983,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 
@@ -1018,7 +1018,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 
@@ -1140,7 +1140,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 

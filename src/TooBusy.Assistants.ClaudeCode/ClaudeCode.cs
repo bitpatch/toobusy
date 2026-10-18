@@ -350,7 +350,7 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             // The hook of the session prints the file after every step: it is put in place whole, never half written.
             try
             {
-                Directory.CreateDirectory(claude.folders.Local);
+                claude.folders.MakeLocal();
                 var written = claude.folders.Request + ".tmp";
                 File.WriteAllBytes(written, SessionSettings.Request(message));
                 File.Move(written, claude.folders.Request, overwrite: true);

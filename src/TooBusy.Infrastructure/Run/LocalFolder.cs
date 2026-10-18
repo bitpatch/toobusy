@@ -11,9 +11,14 @@ public static class LocalFolder
     public static string Of(string root) => Path.Combine(root, ".toobusy", "local");
 
     // The folder of the project at the root, made when it is not there.
-    public static string Ensure(string root)
+    public static string Ensure(string root) => Make(Of(root));
+
+    // The local folder at this path, made with its `.gitignore` when either is not there. Whatever writes into the
+    // folder makes sure of it first: one that was taken away while a run goes on, by a `git clean -fdx` of a session
+    // or a script of the project, comes back out of git, not as files of the working tree that keep the next task
+    // from starting.
+    public static string Make(string folder)
     {
-        var folder = Of(root);
         Directory.CreateDirectory(folder);
         var ignore = Path.Combine(folder, ".gitignore");
         if (!File.Exists(ignore))

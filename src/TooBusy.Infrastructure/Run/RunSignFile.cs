@@ -104,7 +104,7 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
         {
             try
             {
-                Directory.CreateDirectory(folder);
+                LocalFolder.Make(folder);
                 return new FileStream(Lock, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException) when (waited < Waits)
@@ -137,7 +137,7 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
     {
         try
         {
-            Directory.CreateDirectory(folder);
+            LocalFolder.Make(folder);
             var written = Path + ".tmp";
             using (var stream = File.Create(written))
             using (var writer = new Utf8JsonWriter(stream))

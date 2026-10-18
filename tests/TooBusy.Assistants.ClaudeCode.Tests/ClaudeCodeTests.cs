@@ -28,7 +28,8 @@ public sealed class ClaudeCodeTests : IDisposable
 
     public ClaudeCodeTests()
     {
-        folders = new ClaudeFolders(folder.CreateSubdirectory("local").FullName, folder.CreateSubdirectory("transcripts").FullName);
+        var local = folder.CreateSubdirectory("local").FullName;
+        folders = new ClaudeFolders(local, () => MakeLocal(local), folder.CreateSubdirectory("transcripts").FullName);
         claude.Answer = _ => Exited(Backgrounded);
     }
 
@@ -123,7 +124,7 @@ public sealed class ClaudeCodeTests : IDisposable
     [Fact]
     public async Task APathWithAQuoteIsStillOneWordOfTheShell()
     {
-        var odd = new ClaudeFolders("/work/it's here/local", folders.Transcripts);
+        var odd = folders with { Local = "/work/it's here/local" };
 
         await new ClaudeCode(claude, clock, odd, "/work/rocket", "auto").StartAsync(Start, TestContext.Current.CancellationToken);
 
@@ -637,6 +638,22 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(["stop", Id], claude.Asked[^1]);
     }
 
+    // A session or a script of the project may take the local folder away while the run goes on, as `git clean -fdx`
+    // does: the request puts it back as the run keeps it, out of git.
+    [Fact]
+    public async Task ARequestPutsTheLocalFolderBackAsTheRunKeepsItWhenItWasTakenAway()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        await session.AskAsync("Wrap up.", TestContext.Current.CancellationToken);
+
+        Directory.Delete(folders.Local, recursive: true);
+        await session.AskAsync("Wrap up now.", TestContext.Current.CancellationToken);
+
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(folders.Local, ".gitignore")));
+        using var request = JsonDocument.Parse(File.ReadAllText(folders.Request));
+        Assert.Equal("Wrap up now.", request.RootElement.GetProperty("hookSpecificOutput").GetProperty("additionalContext").GetString());
+    }
+
     [Fact]
     public async Task ARequestThatCannotBeWrittenIsAFailureOfTheLocalFiles()
     {
@@ -825,13 +842,21 @@ public sealed class ClaudeCodeTests : IDisposable
     [Fact]
     public void TheConversationsOfAProjectLieInAFolderNamedAfterItsPath()
     {
-        var plain = ClaudeFolders.Of("/Users/ann/My Projects/rocket_2", "/local", "/Users/ann", _ => null);
-        var moved = ClaudeFolders.Of("/work/rocket", "/local", "/Users/ann", name => name == "CLAUDE_CONFIG_DIR" ? "/etc/claude" : null);
+        var plain = ClaudeFolders.Of("/Users/ann/My Projects/rocket_2", "/local", () => { }, "/Users/ann", _ => null);
+        var moved = ClaudeFolders.Of("/work/rocket", "/local", () => { }, "/Users/ann", name => name == "CLAUDE_CONFIG_DIR" ? "/etc/claude" : null);
 
         Assert.Equal(Path.Combine("/Users/ann", ".claude", "projects", "-Users-ann-My-Projects-rocket-2"), plain.Transcripts);
         Assert.Equal(Path.Combine("/etc/claude", "projects", "-work-rocket"), moved.Transcripts);
         Assert.Equal(Path.Combine(plain.Transcripts, "abc.jsonl"), plain.Transcript("abc"));
         Assert.Equal((Path.Combine("/local", "wrap-up.json"), Path.Combine("/local", "usage.json")), (plain.Request, plain.Usage));
+    }
+
+    // The local folder as a run makes it: with a `.gitignore` of its own that leaves everything in it out of git.
+    static void MakeLocal(string local)
+    {
+        Directory.CreateDirectory(local);
+        if (!File.Exists(Path.Combine(local, ".gitignore")))
+            File.WriteAllText(Path.Combine(local, ".gitignore"), "*\n");
     }
 
     // An assistant that reads the list of the sessions anew at every look, unless a test gives it a time to keep it.
