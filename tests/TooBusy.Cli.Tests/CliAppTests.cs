@@ -193,6 +193,39 @@ public sealed class CliAppTests : IDisposable
             error);
     }
 
+    [Theory]
+    [InlineData("init", "--yes")]
+    [InlineData("init", "--assist")]
+    [InlineData("milestone")]
+    [InlineData("model")]
+    [InlineData("effort")]
+    [InlineData("run")]
+    [InlineData("queue")]
+    [InlineData("doctor")]
+    public async Task WithoutAHomeFolderACommandThatWorksInAProjectFails(params string[] args)
+    {
+        GitRepository();
+        WriteSettings(Settings);
+
+        var (exit, output, error) = await RunAsync(Context(null) with { PersonalFolder = null }, args);
+
+        Assert.Equal(2, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: there is no home folder to keep your choices in" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task ADemoNeedsNoHomeFolder()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync(Context(null) with { PersonalFolder = null }, ["effort", "--demo", "high"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("Effort: high" + Environment.NewLine, output);
+        Assert.Equal("", error);
+    }
+
     [Fact]
     public async Task TheProjectIsFoundFromAFolderInsideIt()
     {
@@ -1494,6 +1527,33 @@ public sealed class CliAppTests : IDisposable
 
         Assert.Equal(1, exit);
         Assert.Equal("toobusy: the `origin` remote is not a GitHub repository, so there are no milestones to choose from" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task MilestonesThatCannotBeReadRefuseATitle()
+    {
+        GitRepository();
+        var processes = new FakeProcesses(command => command == "git"
+            ? new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", "")
+            : new ProcessResult(ProcessStatus.Exited, 1, "", "HTTP 502"));
+
+        var (exit, output, error) = await RunAsync(Context(processes), ["milestone", "v1"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: the milestones of acme/rocket cannot be read" + Environment.NewLine, error);
+    }
+
+    [Fact]
+    public async Task ARepositoryWithoutOpenMilestonesRefusesATitleAndSaysSo()
+    {
+        GitRepository();
+
+        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "")), ["milestone", "v1"]);
+
+        Assert.Equal(1, exit);
+        Assert.Equal("", output);
+        Assert.Equal("toobusy: there is no open milestone “v1”." + Environment.NewLine + "The repository has no open milestones." + Environment.NewLine, error);
     }
 
     [Fact]

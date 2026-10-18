@@ -138,11 +138,11 @@ public static class CliApp
     // An error the tool did not foresee: its words, and where it happened only when `TOOBUSY_TRACE=1` asks for it.
     static int Unforeseen(CliContext context, Exception unforeseen)
     {
-        Fail(context, $"toobusy: {Words(unforeseen)}");
-        if (!context.Trace)
-            return Fail(context, $"This is an error toobusy did not foresee ({unforeseen.GetType().Name}): run the command again with TOOBUSY_TRACE=1 to see where it happened.");
-
-        context.Error.WriteLine(unforeseen.ToString());
+        Say(context, $"toobusy: {Words(unforeseen)}");
+        if (context.Trace)
+            context.Error.WriteLine(unforeseen.ToString());
+        else
+            Say(context, $"This is an error toobusy did not foresee ({unforeseen.GetType().Name}): run the command again with TOOBUSY_TRACE=1 to see where it happened.");
         return ExitCode.Failed;
     }
 
@@ -230,7 +230,7 @@ public static class CliApp
                 Option[] others = [board, noBoard, newBoard, boardOwner, todoStatus, inProgressStatus, doneStatus, blocking, noBlocking, take, noTake, manual, interrupt, skill, noSkill, before, noBefore, after, noAfter, branch, noBranch, permissionMode, yes];
                 if (others.Any(other => result.GetResult(other) is { Implicit: false }))
                 {
-                    Fail(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
+                    Say(context, "toobusy: `--assist` goes with no other option of `init`: it tells the steps and sets nothing");
                     return ExitCode.NotReady;
                 }
 
@@ -254,7 +254,7 @@ public static class CliApp
             ];
             if (clashes.FirstOrDefault(clash => clash.Wrong) is { Wrong: true } clash)
             {
-                Fail(context, clash.Message);
+                Say(context, clash.Message);
                 return ExitCode.NotReady;
             }
 
@@ -307,9 +307,10 @@ public static class CliApp
 
             if (context.Terminal is not { } terminal)
             {
-                Fail(context, "toobusy: `init` asks questions and needs a terminal.");
-                Fail(context, "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.");
-                return Fail(context, ForAnAssistant);
+                Say(context, "toobusy: `init` asks questions and needs a terminal.");
+                Say(context, "Run `toobusy init --yes` to ask nothing: it takes what the options say and what the setup proposes. `toobusy init --help` lists the options.");
+                Say(context, ForAnAssistant);
+                return ExitCode.Failed;
             }
 
             if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
@@ -349,7 +350,7 @@ public static class CliApp
         var step = 0;
         if (number is not null && (!int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out step) || step < 1))
         {
-            Fail(context, "toobusy: `--assist` takes the number of a step, which is 1 or more");
+            Say(context, "toobusy: `--assist` takes the number of a step, which is 1 or more");
             return ExitCode.NotReady;
         }
 
@@ -382,7 +383,7 @@ public static class CliApp
             var named = result.GetValue(title);
             if (named is not null && result.GetValue(none))
             {
-                Fail(context, "toobusy: give the title of a milestone or `--none`, not both");
+                Say(context, "toobusy: give the title of a milestone or `--none`, not both");
                 return ExitCode.NotReady;
             }
 
@@ -400,17 +401,19 @@ public static class CliApp
             {
                 if (await bench.ReadMilestonesAsync(cancellationToken) is not { } open)
                 {
-                    return Fail(context, bench.Repository is null
+                    Say(context, bench.Repository is null
                         ? "toobusy: the `origin` remote is not a GitHub repository, so there are no milestones to choose from"
                         : $"toobusy: the milestones of {bench.Repository} cannot be read");
+                    return ExitCode.Failed;
                 }
 
                 if (MilestoneStanding.Find(open, named) is not { } found)
                 {
-                    Fail(context, $"toobusy: there is no open milestone “{named}”.");
-                    return Fail(context, open.Count == 0
+                    Say(context, $"toobusy: there is no open milestone “{named}”.");
+                    Say(context, open.Count == 0
                         ? "The repository has no open milestones."
                         : "The open ones: " + string.Join(", ", MilestoneOrder.Sorted(open).Select(milestone => milestone.Title)));
+                    return ExitCode.Failed;
                 }
 
                 bench.Personal.SaveMilestone(new MilestoneChoice(found.Title));
@@ -445,7 +448,7 @@ public static class CliApp
             var named = result.GetValue(name);
             if (named is not null && result.GetValue(own))
             {
-                Fail(context, "toobusy: give the name of a model or `--default`, not both");
+                Say(context, "toobusy: give the name of a model or `--default`, not both");
                 return ExitCode.NotReady;
             }
 
@@ -462,7 +465,10 @@ public static class CliApp
             if (named is not null)
             {
                 if (named.Trim().Length == 0)
-                    return Fail(context, "toobusy: the name of the model is empty");
+                {
+                    Say(context, "toobusy: the name of the model is empty");
+                    return ExitCode.Failed;
+                }
 
                 bench.Personal.SaveModel(new ModelChoice(named.Trim()));
                 context.Output.WriteLine($"Model: {named.Trim()}");
@@ -499,8 +505,9 @@ public static class CliApp
             {
                 if (ClaudeCodeOptions.FindEffort(named) is not { } found)
                 {
-                    Fail(context, $"toobusy: there is no effort “{named}”.");
-                    return Fail(context, $"The levels: {levels}");
+                    Say(context, $"toobusy: there is no effort “{named}”.");
+                    Say(context, $"The levels: {levels}");
+                    return ExitCode.Failed;
                 }
 
                 bench.Personal.SaveEffort(found);
@@ -562,7 +569,7 @@ public static class CliApp
                 : most <= 0 ? "toobusy: `--max` takes a number of tasks, which is 1 or more"
                 : null) is { } wrong)
             {
-                Fail(context, wrong);
+                Say(context, wrong);
                 return ExitCode.NotReady;
             }
 
@@ -580,32 +587,41 @@ public static class CliApp
             // One run goes on in a working copy. A demo changes nothing there and is not held.
             if (bench.Going() is { } going)
             {
-                Fail(context, $"toobusy: a run is going on in this working copy already: {going.Sign.Told}");
-                Fail(context, "The run did not start. `toobusy status` says whether that one still goes on.");
+                Say(context, $"toobusy: a run is going on in this working copy already: {going.Sign.Told}");
+                Say(context, "The run did not start. `toobusy status` says whether that one still goes on.");
                 return ExitCode.Busy;
             }
 
             // Everything a run needs is checked before anything else; a demo has it all.
             if (!bench.Demo && !await ChecksPassAsync(context, bench, cancellationToken))
-                return Fail(context, "toobusy: the run did not start. `toobusy doctor` checks all of it again.");
+            {
+                Say(context, "toobusy: the run did not start. `toobusy doctor` checks all of it again.");
+                return ExitCode.Failed;
+            }
 
             if (await ChosenMilestoneAsync(context, bench, cancellationToken) is not { } milestone)
                 return ExitCode.Failed;
 
             if (bench.Personal.LoadModel() is null)
             {
-                Fail(context, "toobusy: the model is not chosen.");
-                return Fail(context, "Run `toobusy model` to choose it.");
+                Say(context, "toobusy: the model is not chosen.");
+                Say(context, "Run `toobusy model` to choose it.");
+                return ExitCode.Failed;
             }
 
             if (bench.Personal.LoadEffort() is null)
             {
-                Fail(context, "toobusy: the effort is not chosen.");
-                return Fail(context, "Run `toobusy effort` to choose it.");
+                Say(context, "toobusy: the effort is not chosen.");
+                Say(context, "Run `toobusy effort` to choose it.");
+                return ExitCode.Failed;
             }
 
             if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, only, most, Labels(result.GetValue(skip))) is not { } run)
-                return Fail(context, NoTasks);
+            {
+                Say(context, NoTasks);
+                return ExitCode.Failed;
+            }
+
             if (context.Terminal is { } terminal)
                 return await OnPageAsync(context, terminal, bench, session => session.RunAsync(run, cancellationToken), cancellationToken);
 
@@ -646,7 +662,10 @@ public static class CliApp
             try
             {
                 if (await bench.ReadQueueAsync(settings, milestone.Title, Labels(result.GetValue(skip)), cancellationToken) is not var (lineup, recorded))
-                    return Fail(context, NoTasks);
+                {
+                    Say(context, NoTasks);
+                    return ExitCode.Failed;
+                }
 
                 var rules = QueueRules.Of(settings);
                 if (result.GetValue(json))
@@ -663,7 +682,8 @@ public static class CliApp
             }
             catch (TrackerException refused)
             {
-                return Fail(context, $"toobusy: {refused.Message}");
+                Say(context, $"toobusy: {refused.Message}");
+                return ExitCode.Failed;
             }
         });
         return command;
@@ -720,7 +740,7 @@ public static class CliApp
         if (settings is not { Settings: null })
             return settings!.Settings;
 
-        Fail(context, "toobusy: the settings of this project are not valid.");
+        Say(context, "toobusy: the settings of this project are not valid.");
         foreach (var problem in settings.Errors)
             context.Error.WriteLine(context.ErrorPalette.Error(problem.Describe(SettingsFile.DisplayPath)));
         return null;
@@ -734,10 +754,10 @@ public static class CliApp
         if (standing.Ready)
             return standing.Choice;
 
-        Fail(context, standing.State == MilestoneState.Gone
+        Say(context, standing.State == MilestoneState.Gone
             ? $"toobusy: the milestone “{standing.Name}” is not open any more."
             : "toobusy: the milestone to work on is not chosen.");
-        Fail(context, "Run `toobusy milestone` to choose it.");
+        Say(context, "Run `toobusy milestone` to choose it.");
         return null;
     }
 
@@ -888,7 +908,7 @@ public static class CliApp
     {
         if (!demo && context.PersonalFolder is null)
         {
-            Fail(context, "toobusy: there is no home folder to keep your choices in");
+            Say(context, "toobusy: there is no home folder to keep your choices in");
             return null;
         }
 
@@ -900,7 +920,7 @@ public static class CliApp
     {
         var root = ProjectLocator.FindRoot(context.Folder);
         if (root is null)
-            Fail(context, "toobusy: not inside a git repository");
+            Say(context, "toobusy: not inside a git repository");
         return root;
     }
 
@@ -914,18 +934,17 @@ public static class CliApp
         if (file.Exists)
             return file;
 
-        Fail(context, "toobusy: this project is not set up yet.");
-        Fail(context, "Run `toobusy init` to set it up.");
+        Say(context, "toobusy: this project is not set up yet.");
+        Say(context, "Run `toobusy init` to set it up.");
 
         // Nobody is at a terminal to be asked: who reads this may be an assistant.
         if (context.Terminal is null)
-            Fail(context, ForAnAssistant);
+            Say(context, ForAnAssistant);
         return null;
     }
 
-    static int Fail(CliContext context, string message)
-    {
+    // A line where errors go. It gives no exit code: a command that fails returns its own, where it fails, so that
+    // the code of every failure is the one SPEC gives it and not the one a helper has.
+    static void Say(CliContext context, string message) =>
         context.Error.WriteLine(context.ErrorPalette.Message(message));
-        return ExitCode.Failed;
-    }
 }
