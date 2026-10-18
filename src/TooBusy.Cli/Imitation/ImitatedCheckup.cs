@@ -14,7 +14,7 @@ public sealed class ImitatedCheckup(IClock clock, ISettingsStore settings) : ICh
 
     public Platform Platform => Platform.MacOS;
 
-    public Task<bool> HasAsync(Tool tool, CancellationToken cancellationToken) => AfterAsync(true, cancellationToken);
+    public Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken) => AfterAsync(new ToolLook(true), cancellationToken);
 
     public Task<bool> HasManagerAsync(CancellationToken cancellationToken) => AfterAsync(true, cancellationToken);
 

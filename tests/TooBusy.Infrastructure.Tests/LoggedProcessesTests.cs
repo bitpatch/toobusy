@@ -63,15 +63,27 @@ public sealed class LoggedProcessesTests : IDisposable
     }
 
     [Fact]
-    public async Task ACommandThatIsNotFoundOrDidNotEndInItsTimeIsSaidSo()
+    public async Task ACommandThatIsNotFoundCouldNotBeStartedOrDidNotEndInItsTimeIsSaidSo()
     {
-        var processes = new LoggedProcesses(new FakeRunner((command, _) => command == "gh" ? new ProcessResult(ProcessStatus.NotFound, 0, "", "") : Took(120, new ProcessResult(ProcessStatus.TimedOut, 0, "", ""))), log);
+        var processes = new LoggedProcesses(new FakeRunner((command, _) => command switch
+        {
+            "gh" => new ProcessResult(ProcessStatus.NotFound, 0, "", ""),
+            "git" => new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"),
+            _ => Took(120, new ProcessResult(ProcessStatus.TimedOut, 0, "", "")),
+        }), log);
 
         await processes.RunAsync("gh", ["auth", "status"], Patience, TestContext.Current.CancellationToken);
+        await processes.RunAsync("git", ["status"], Patience, TestContext.Current.CancellationToken);
         await processes.RunAsync("claude", ["agents", "--json", "--all"], Patience, TestContext.Current.CancellationToken);
         log.Dispose();
 
-        Assert.Equal(["$ gh auth status", "→ gh is not found", "$ claude agents --json --all", "→ claude did not end in 2 min, and was stopped"], Logged.Lines(log));
+        Assert.Equal(
+            [
+                "$ gh auth status", "→ gh is not found",
+                "$ git status", "→ git could not be started: Permission denied",
+                "$ claude agents --json --all", "→ claude did not end in 2 min, and was stopped",
+            ],
+            Logged.Lines(log));
     }
 
     [Fact]

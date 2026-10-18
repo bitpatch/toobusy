@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using TooBusy.Core.Processes;
 
 namespace TooBusy.Infrastructure.Processes;
@@ -31,9 +32,9 @@ public sealed class ProcessRunner(string? folder = null) : IProcessRunner
         {
             process.Start();
         }
-        catch (Win32Exception)
+        catch (Win32Exception refused)
         {
-            return new ProcessResult(ProcessStatus.NotFound, 0, "", "");
+            return Unstarted(refused);
         }
 
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -53,4 +54,21 @@ public sealed class ProcessRunner(string? folder = null) : IProcessRunner
             return new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
         }
     }
+
+    // The system says alike that there is no such file of a command that is not on the path and of one whose folder
+    // is not there any more. Every other refusal, as of a file that is not executable or of arguments that are too
+    // long, is told in the system's words.
+    ProcessResult Unstarted(Win32Exception refused)
+    {
+        if (folder is { Length: > 0 } && !Directory.Exists(folder))
+            return new ProcessResult(ProcessStatus.NotStarted, 0, "", $"the folder {folder} is not there");
+        if (refused.NativeErrorCode == NoSuchFile)
+            return new ProcessResult(ProcessStatus.NotFound, 0, "", "");
+
+        var said = refused.NativeErrorCode == 0 ? refused.Message : Marshal.GetPInvokeErrorMessage(refused.NativeErrorCode);
+        return new ProcessResult(ProcessStatus.NotStarted, 0, "", said.TrimEnd('.'));
+    }
+
+    // ENOENT.
+    const int NoSuchFile = 2;
 }

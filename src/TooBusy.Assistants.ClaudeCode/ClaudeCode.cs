@@ -59,8 +59,8 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
             Patience,
             cancellationToken);
         var said = result.Output + "\n" + result.Error;
-        if (result.Status == ProcessStatus.NotFound)
-            throw new AssistantException("Claude Code is not installed: `claude` is not on the path.");
+        if (Unrun(result) is { } unrun)
+            throw new AssistantException(unrun + ".");
         if (said.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
             throw new AssistantException("Claude Code does not trust this folder yet: run `claude` in it once and accept what it asks.");
         if (Started(said) is not { } id)
@@ -196,6 +196,16 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
 
     static string First(string said) =>
         said.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "it said nothing";
+
+    // What is said of a command of Claude Code that did not run at all: `claude` is not on the path, or it is and
+    // could not be started; null for one that ran.
+    static string? Unrun(ProcessResult result) => result.Status switch
+    {
+        ProcessStatus.NotFound => "Claude Code is not installed: `claude` is not on the path",
+        ProcessStatus.NotStarted => $"Claude Code could not be started: {result.Error}",
+        _ => null,
+    };
+
     // What Claude Code answers when a session went to the background: the name the session is known by from then on.
     [GeneratedRegex(@"backgrounded · ([0-9a-f]+)")]
     private static partial Regex Backgrounded();
@@ -292,6 +302,8 @@ public sealed partial class ClaudeCode(IProcessRunner processes, IClock clock, C
                 var said = result.Output + "\n" + result.Error;
                 if (result.Status == ProcessStatus.TimedOut)
                     return new Telling($"Claude Code did not answer in {Spoken.Time(Patience)}");
+                if (Unrun(result) is { } unrun)
+                    return new Telling(unrun);
                 if (Started(said) is not { } woken)
                     return new Telling(First(said));
 

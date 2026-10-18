@@ -236,16 +236,19 @@ public class GitHubTasksTests
     }
 
     [Fact]
-    public async Task ACallThatDoesNotAnswerInItsTimeMayPassAndAToolThatIsMissingStays()
+    public async Task ACallThatDoesNotAnswerInItsTimeMayPassAndAToolThatIsMissingOrCannotStartStays()
     {
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"));
 
         var silent = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CloseAsync(12, TestContext.Current.CancellationToken));
         var missing = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CloseAsync(12, TestContext.Current.CancellationToken));
+        var unstarted = await Assert.ThrowsAsync<TrackerException>(() => Tasks().CloseAsync(12, TestContext.Current.CancellationToken));
 
         Assert.Equal(("#12 could not be closed. GitHub did not answer.", true), (silent.Message, silent.MayPass));
         Assert.Equal(("#12 could not be closed. The GitHub command-line tool `gh` is not installed.", false), (missing.Message, missing.MayPass));
+        Assert.Equal(("#12 could not be closed. The GitHub command-line tool `gh` could not be started: Permission denied.", false), (unstarted.Message, unstarted.MayPass));
     }
 
     [Fact]
@@ -426,6 +429,31 @@ public class GitHubTasksTests
                 ["issue", "close", "12", "--repo", "acme/rocket"],
             ],
             processes.Asked.Select(asked => asked.Arguments));
+    }
+
+    // Linux takes no argument over 128 KiB, and the report of a session may be longer.
+    [Fact]
+    public async Task ALongCommentGoesToTheToolInAFileThatIsGoneAfterIt()
+    {
+        var report = "Done.\n\n" + new string('a', 200 * 1024);
+        var written = new List<string>();
+        var modes = new List<UnixFileMode>();
+        processes.Running = arguments =>
+        {
+            written.Add(File.ReadAllText(arguments[^1]));
+            if (!OperatingSystem.IsWindows())
+                modes.Add(File.GetUnixFileMode(arguments[^1]));
+        };
+        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found (HTTP 404)"));
+
+        await Tasks().CommentAsync(12, report, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<TrackerException>(() => Tasks().CommentAsync(12, report, TestContext.Current.CancellationToken));
+
+        Assert.All(processes.Asked, asked => Assert.Equal(["issue", "comment", "12", "--repo", "acme/rocket", "--body-file"], asked.Arguments.SkipLast(1)));
+        Assert.Equal([report, report], written);
+        Assert.All(modes, mode => Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode));
+        Assert.All(processes.Asked, asked => Assert.False(File.Exists(asked.Arguments[^1])));
     }
 
     [Fact]

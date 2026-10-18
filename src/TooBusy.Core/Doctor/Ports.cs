@@ -17,6 +17,10 @@ public enum Tool
     ClaudeCode,
 }
 
+// What is found of a tool: Runs when it is on the path and runs. Unstarted is why one that is on the path could not be
+// started; null for one that runs, and for one that is not there.
+public sealed record ToolLook(bool Runs, string? Unstarted = null);
+
 public enum BoardAccess
 {
     Readable,
@@ -37,8 +41,8 @@ public interface ICheckupMachine
 {
     Platform Platform { get; }
 
-    // Whether the tool is on the path and runs.
-    Task<bool> HasAsync(Tool tool, CancellationToken cancellationToken);
+    // Whether the tool is on the path and runs, and when it is there and does not, why.
+    Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken);
 
     // Whether the package manager a fix would name on this platform is on the path; false where there is none.
     Task<bool> HasManagerAsync(CancellationToken cancellationToken);

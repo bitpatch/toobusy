@@ -52,6 +52,21 @@ public class CheckupTests
         Assert.Equal(new CheckResult(name, CheckState.Failed, text, fix), Of(checks, name));
     }
 
+    // Installing it again would not help a tool that is there.
+    [Theory]
+    [InlineData(Tool.Git, "git", "`git` could not be started: Permission denied.")]
+    [InlineData(Tool.GitHubCli, "GitHub CLI", "The GitHub command-line tool `gh` could not be started: Permission denied.")]
+    [InlineData(Tool.ClaudeCode, "Claude Code", "Claude Code could not be started: Permission denied.")]
+    public async Task AToolThatCouldNotBeStartedFailsItsCheckWithWhyAndNoFix(Tool tool, string name, string text)
+    {
+        machine.Unstarted[tool] = "Permission denied";
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult(name, CheckState.Failed, text), Of(checks, name));
+        Assert.Equal(0, machine.ManagerAsked);
+    }
+
     [Fact]
     public async Task WithoutAToolItsLoginIsSkippedAndSoIsWhatNeedsTheLogin()
     {
@@ -354,6 +369,9 @@ public class CheckupTests
 
         public HashSet<Tool> Missing { get; } = [];
 
+        // The tools that are there and could not be started, with why.
+        public Dictionary<Tool, string> Unstarted { get; } = [];
+
         public bool HasManager { get; set; } = true;
 
         public int ManagerAsked { get; private set; }
@@ -376,7 +394,8 @@ public class CheckupTests
 
         public IReadOnlyList<string>? Labels { get; set; } = ["manual", "feature", "needs-owner", "interrupted"];
 
-        public Task<bool> HasAsync(Tool tool, CancellationToken cancellationToken) => Task.FromResult(!Missing.Contains(tool));
+        public Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken) =>
+            Task.FromResult(new ToolLook(!Missing.Contains(tool) && !Unstarted.ContainsKey(tool), Unstarted.GetValueOrDefault(tool)));
 
         public Task<bool> HasManagerAsync(CancellationToken cancellationToken)
         {

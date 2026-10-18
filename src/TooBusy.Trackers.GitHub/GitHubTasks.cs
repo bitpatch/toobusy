@@ -25,6 +25,9 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
+    // The longest comment that is given to the tool as an argument, in characters.
+    const int LongestBody = 8 * 1024;
+
     public async Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken)
     {
         var (owner, name) = Parts();
@@ -182,8 +185,38 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
     public Task RemoveLabelAsync(int number, string label, CancellationToken cancellationToken) =>
         AskAsync(["issue", "edit", Text(number), "--repo", repository, "--remove-label", label], $"The label {label} could not be taken off #{number}.", cancellationToken);
 
-    public Task CommentAsync(int number, string text, CancellationToken cancellationToken) =>
-        AskAsync(["issue", "comment", Text(number), "--repo", repository, "--body", text], $"The comment could not be written to #{number}.", cancellationToken);
+    // A long comment, as the report of a session may be, goes to the tool in a file: the system limits an argument, as
+    // Linux does to 128 KiB. The file is made as the system makes its temporary files, for the user alone, and is
+    // deleted once the tool is done with it.
+    public async Task CommentAsync(int number, string text, CancellationToken cancellationToken)
+    {
+        var failed = $"The comment could not be written to #{number}.";
+        if (text.Length <= LongestBody)
+        {
+            await AskAsync(["issue", "comment", Text(number), "--repo", repository, "--body", text], failed, cancellationToken);
+            return;
+        }
+
+        var file = "";
+        try
+        {
+            try
+            {
+                file = Path.GetTempFileName();
+                File.WriteAllText(file, text);
+            }
+            catch (Exception unwritten) when (unwritten is IOException or UnauthorizedAccessException)
+            {
+                throw new TrackerException($"{failed} {unwritten.Message}");
+            }
+
+            await AskAsync(["issue", "comment", Text(number), "--repo", repository, "--body-file", file], failed, cancellationToken);
+        }
+        finally
+        {
+            Delete(file);
+        }
+    }
 
     public Task CloseAsync(int number, CancellationToken cancellationToken) =>
         AskAsync(["issue", "close", Text(number), "--repo", repository], $"#{number} could not be closed.", cancellationToken);
@@ -200,12 +233,7 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
 
         var said = result.Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
         throw new TrackerException(
-            result.Status switch
-            {
-                ProcessStatus.NotFound => $"{failed} The GitHub command-line tool `gh` is not installed.",
-                ProcessStatus.TimedOut => $"{failed} GitHub did not answer.",
-                _ => said is null ? failed : $"{failed} {said}",
-            },
+            result.Status != ProcessStatus.Exited ? $"{failed} {GitHubCli.Unanswered(result)}" : said is null ? failed : $"{failed} {said}",
             result.Status == ProcessStatus.TimedOut || (result.Status == ProcessStatus.Exited && Passing(result.Error)));
     }
 
@@ -260,6 +288,19 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
     }
 
     static string Text(int number) => number.ToString(CultureInfo.InvariantCulture);
+
+    // A temporary file that cannot be deleted is left where the system keeps them.
+    static void Delete(string file)
+    {
+        try
+        {
+            if (file.Length > 0)
+                File.Delete(file);
+        }
+        catch (Exception kept) when (kept is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 
     // `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>` in its parts.
     static (string Kind, string Login, int Number)? BoardParts(string board) =>

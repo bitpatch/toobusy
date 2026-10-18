@@ -139,7 +139,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
         if (result is { Status: ProcessStatus.Exited, ExitCode: 0 } || result.Error.Contains("already exists", StringComparison.OrdinalIgnoreCase))
             return;
 
-        throw new TrackerException($"The label “{name}” could not be made in {repository}." + (result.Status == ProcessStatus.Exited ? "" : " GitHub did not answer."));
+        throw new TrackerException($"The label “{name}” could not be made in {repository}." + (result.Status == ProcessStatus.Exited ? "" : " " + GitHubCli.Unanswered(result)));
     }
 
     // The one value a request is made for; without it the request failed, and the tracker says so.
@@ -149,7 +149,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
         if (result is { Status: ProcessStatus.Exited, ExitCode: 0 } && result.Output.Trim() is { Length: > 0 } value)
             return value;
 
-        throw new TrackerException(LacksScope(result) ? Scope : result.Status == ProcessStatus.Exited ? failed : failed + " GitHub did not answer.");
+        throw new TrackerException(LacksScope(result) ? Scope : result.Status == ProcessStatus.Exited ? failed : $"{failed} {GitHubCli.Unanswered(result)}");
     }
 
     Task<ProcessResult> AskAsync(string[] request, CancellationToken cancellationToken) =>

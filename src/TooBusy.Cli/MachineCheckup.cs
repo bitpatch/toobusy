@@ -21,7 +21,7 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform, 
 
     // A tool that is there tells its version: the `git` that macOS has before its developer tools are installed
     // is on the path and only says how to install them.
-    public async Task<bool> HasAsync(Tool tool, CancellationToken cancellationToken)
+    public async Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken)
     {
         var command = tool switch
         {
@@ -29,7 +29,8 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform, 
             Tool.GitHubCli => "gh",
             _ => "claude",
         };
-        return await processes.RunAsync(command, ["--version"], Patience, cancellationToken) is { Status: ProcessStatus.Exited, ExitCode: 0 };
+        var result = await processes.RunAsync(command, ["--version"], Patience, cancellationToken);
+        return new ToolLook(result is { Status: ProcessStatus.Exited, ExitCode: 0 }, result.Status == ProcessStatus.NotStarted ? result.Error : null);
     }
 
     public async Task<bool> HasManagerAsync(CancellationToken cancellationToken)

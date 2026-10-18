@@ -217,8 +217,8 @@ public sealed record Workbench(
         };
         if (reading == AssistReading.Nothing)
             return ground;
-        if (!await Machine.HasAsync(Tool.GitHubCli, cancellationToken))
-            return ground with { Unread = "the GitHub command-line tool `gh` is not installed." };
+        if (await Machine.FindAsync(Tool.GitHubCli, cancellationToken) is { Runs: false } gh)
+            return ground with { Unread = gh.Unstarted is { } why ? $"the GitHub command-line tool `gh` could not be started: {why}." : "the GitHub command-line tool `gh` is not installed." };
         if (!await Machine.TrackerLoggedInAsync(cancellationToken))
             return ground with { Unread = "`gh` is not logged in to github.com." };
 
@@ -254,8 +254,8 @@ public sealed record Workbench(
     {
         if (Repository is null)
             return (null, "The `origin` remote is not a GitHub repository, so there are no labels to choose from.");
-        if (!await Machine.HasAsync(Tool.GitHubCli, cancellationToken))
-            return (null, "The GitHub command-line tool `gh` is not installed, so the labels cannot be read.");
+        if (await Machine.FindAsync(Tool.GitHubCli, cancellationToken) is { Runs: false } gh)
+            return (null, $"The GitHub command-line tool `gh` {(gh.Unstarted is { } why ? $"could not be started: {why}" : "is not installed")}, so the labels cannot be read.");
         if (!await Machine.TrackerLoggedInAsync(cancellationToken))
             return (null, "`gh` is not logged in to github.com, so the labels cannot be read.");
 

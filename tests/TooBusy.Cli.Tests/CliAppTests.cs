@@ -1928,15 +1928,16 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Theory]
-    [InlineData("", "The `origin` remote is not a GitHub repository, so there are no labels to choose from.")]
-    [InlineData("https://github.com/acme/rocket.git\n", "The GitHub command-line tool `gh` is not installed, so the labels cannot be read.")]
-    public async Task SkipLabelsOfTheMenuSaysWhyTheLabelsCannotBeReadAndOffersBackAlone(string origin, string why)
+    [InlineData("", ProcessStatus.NotFound, "The `origin` remote is not a GitHub repository, so there are no labels to choose from.")]
+    [InlineData("https://github.com/acme/rocket.git\n", ProcessStatus.NotFound, "The GitHub command-line tool `gh` is not installed, so the labels cannot be read.")]
+    [InlineData("https://github.com/acme/rocket.git\n", ProcessStatus.NotStarted, "The GitHub command-line tool `gh` could not be started: Permission denied, so the labels cannot be read.")]
+    public async Task SkipLabelsOfTheMenuSaysWhyTheLabelsCannotBeReadAndOffersBackAlone(string origin, ProcessStatus gh, string why)
     {
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
         var processes = new FakeProcesses((command, _) => command == "gh"
-            ? new ProcessResult(ProcessStatus.NotFound, 0, "", "")
+            ? new ProcessResult(gh, 0, "", gh == ProcessStatus.NotStarted ? "Permission denied" : "")
             : new ProcessResult(ProcessStatus.Exited, 0, origin, ""));
 
         var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Up, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter), processes, []);

@@ -91,6 +91,7 @@ public class GitWorkspaceTests
     [InlineData(ProcessStatus.Exited, 1, "", "git exited with 1", false)]
     [InlineData(ProcessStatus.TimedOut, 0, "", "git did not end in 2 min", true)]
     [InlineData(ProcessStatus.NotFound, 0, "", "git cannot be run", false)]
+    [InlineData(ProcessStatus.NotStarted, 0, "Permission denied", "git could not be started: Permission denied", false)]
     public async Task AFetchThatFailsLeavesTheBranchAsItIsAndSaysWhatGitSaid(ProcessStatus status, int exitCode, string error, string said, bool mayPass)
     {
         var processes = new Answers(Exited(Behind), new ProcessResult(status, exitCode, "", error));

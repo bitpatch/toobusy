@@ -9,6 +9,9 @@ public enum GitHubCliState
     // `gh` is not on the path.
     Missing,
 
+    // `gh` is on the path, and it could not be started.
+    Unstarted,
+
     // `gh` is there, and it is not logged in to github.com.
     LoggedOut,
 }
@@ -24,8 +27,18 @@ public sealed class GitHubCli(IProcessRunner processes)
         return result switch
         {
             { Status: ProcessStatus.NotFound } => GitHubCliState.Missing,
+            { Status: ProcessStatus.NotStarted } => GitHubCliState.Unstarted,
             { Status: ProcessStatus.Exited, ExitCode: 0 } => GitHubCliState.Ready,
             _ => GitHubCliState.LoggedOut,
         };
     }
+
+    // What is said, after what failed, of a request that GitHub gave no answer to: `gh` is not on the path, it could
+    // not be started, or GitHub did not answer in time.
+    internal static string Unanswered(ProcessResult result) => result.Status switch
+    {
+        ProcessStatus.NotFound => "The GitHub command-line tool `gh` is not installed.",
+        ProcessStatus.NotStarted => $"The GitHub command-line tool `gh` could not be started: {result.Error}.",
+        _ => "GitHub did not answer.",
+    };
 }

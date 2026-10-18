@@ -57,13 +57,13 @@ public sealed class LoggedProcesses : IProcessRunner
 
         if (again)
             log.Write(line);
-        var ended = result.Status switch
+        log.Write(result.Status switch
         {
             ProcessStatus.NotFound => $"→ {command} is not found",
+            ProcessStatus.NotStarted => $"→ {command} could not be started: {result.Error}",
             ProcessStatus.TimedOut => $"→ {command} did not end in {Spoken.Time(timeout)}, and was stopped",
-            _ => $"→ {command} exited {result.ExitCode} in {Printed.Took(log.Now - started)}",
-        };
-        log.Write(ended + Printed.Of(result.Output, result.Error, failed));
+            _ => $"→ {command} exited {result.ExitCode} in {Printed.Took(log.Now - started)}" + Printed.Of(result.Output, result.Error, failed),
+        });
         if (failed)
             repeats.Forget();
         else

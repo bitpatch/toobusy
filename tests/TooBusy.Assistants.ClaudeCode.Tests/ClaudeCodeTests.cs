@@ -153,6 +153,16 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal("Claude Code is not installed: `claude` is not on the path.", refused.Message);
     }
 
+    [Fact]
+    public async Task AnAssistantThatCouldNotBeStartedSaysWhy()
+    {
+        claude.Answer = _ => new ProcessResult(ProcessStatus.NotStarted, 0, "", "Argument list too long");
+
+        var refused = await Assert.ThrowsAsync<AssistantException>(() => Assistant().StartAsync(Start, TestContext.Current.CancellationToken));
+
+        Assert.Equal("Claude Code could not be started: Argument list too long.", refused.Message);
+    }
+
     // Claude Code loads a skill by its command at the head of the message: the message is its last argument, whole.
     [Fact]
     public async Task AMessageThatBeginsWithTheCommandOfASkillIsPassedAsItIs()
@@ -584,6 +594,16 @@ public sealed class ClaudeCodeTests : IDisposable
         claude.Answer = _ => new ProcessResult(ProcessStatus.Exited, 1, "", "error: no conversation found\nmore of it");
 
         Assert.Equal(new Telling("error: no conversation found"), await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ASessionThatClaudeCodeCouldNotBeStartedForDoesNotGoOnAndSaysWhy()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        claude.Answer = _ => new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied");
+
+        Assert.Equal(new Telling("Claude Code could not be started: Permission denied"), await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken));
     }
 
     [Fact]

@@ -93,6 +93,46 @@ public class ProcessRunnerTests
         Assert.Equal(ProcessStatus.NotFound, result.Status);
     }
 
+    // A command that is there and cannot start is not one to install: the system says why.
+    [Fact]
+    public async Task ACommandThatIsNotExecutableIsNotStartedAndSaysWhy()
+    {
+        var folder = Directory.CreateTempSubdirectory("toobusy-runner-");
+        try
+        {
+            var tool = Path.Combine(folder.FullName, "tool");
+            File.WriteAllText(tool, "#!/bin/sh\necho hi\n");
+
+            var result = await runner.RunAsync(tool, [], Long, TestContext.Current.CancellationToken);
+
+            Assert.Equal(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"), result);
+        }
+        finally
+        {
+            folder.Delete(recursive: true);
+        }
+    }
+
+    // Linux takes no argument over 128 KiB, and macOS no more than a megabyte of them in all.
+    [Fact]
+    public async Task ACommandWhoseArgumentsAreTooLongIsNotStarted()
+    {
+        var result = await runner.RunAsync("true", [.. Enumerable.Repeat(new string('a', 200 * 1024), 40)], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Argument list too long"), result);
+    }
+
+    // The system says that there is no such file of both, as it does of a command that is not installed.
+    [Fact]
+    public async Task ACommandWhoseFolderIsNotThereIsNotStarted()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "toobusy-runner-" + Guid.NewGuid().ToString("N"));
+
+        var result = await runner.Inside(folder).RunAsync("ls", [], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ProcessResult(ProcessStatus.NotStarted, 0, "", $"the folder {folder} is not there"), result);
+    }
+
     [Fact]
     public async Task ACommandThatTakesTooLongIsStopped()
     {

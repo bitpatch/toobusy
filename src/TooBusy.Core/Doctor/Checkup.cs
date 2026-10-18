@@ -127,9 +127,9 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
     {
         var results = new List<CheckResult>();
 
-        await ToolAsync(Git, Tool.Git, "`git` is not installed.");
+        await ToolAsync(Git, Tool.Git, "`git`", "`git` is not installed.");
 
-        if (await ToolAsync(TrackerTool, Tool.GitHubCli, "The GitHub command-line tool `gh` is not installed."))
+        if (await ToolAsync(TrackerTool, Tool.GitHubCli, "The GitHub command-line tool `gh`", "The GitHub command-line tool `gh` is not installed."))
         {
             view.Start(TrackerLogin);
             Tell(await machine.TrackerLoggedInAsync(cancellationToken)
@@ -141,7 +141,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
             Tell(Waits(TrackerLogin, "the " + TrackerTool));
         }
 
-        if (await ToolAsync(Assistant, Tool.ClaudeCode, "Claude Code is not installed: `claude` is not on the path."))
+        if (await ToolAsync(Assistant, Tool.ClaudeCode, "Claude Code", "Claude Code is not installed: `claude` is not on the path."))
         {
             view.Start(AssistantLogin);
             Tell(await machine.AssistantLoggedInAsync(cancellationToken)
@@ -155,15 +155,19 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
 
         return results;
 
-        async Task<bool> ToolAsync(string name, Tool tool, string missing)
+        // A tool that is there and could not be started is not to be installed anew: what stands in its way is told.
+        async Task<bool> ToolAsync(string name, Tool tool, string called, string missing)
         {
             view.Start(name);
-            var has = await machine.HasAsync(tool, cancellationToken);
-            Tell(has
-                ? new CheckResult(name, CheckState.Passed)
-                : new CheckResult(name, CheckState.Failed, missing, Fixes.Install(
-                    tool, machine.Platform, Fixes.AsksManager(tool, machine.Platform) && await machine.HasManagerAsync(cancellationToken))));
-            return has;
+            var look = await machine.FindAsync(tool, cancellationToken);
+            Tell(look switch
+            {
+                { Runs: true } => new CheckResult(name, CheckState.Passed),
+                { Unstarted: { } why } => new CheckResult(name, CheckState.Failed, $"{called} could not be started: {why}."),
+                _ => new CheckResult(name, CheckState.Failed, missing, Fixes.Install(
+                    tool, machine.Platform, Fixes.AsksManager(tool, machine.Platform) && await machine.HasManagerAsync(cancellationToken))),
+            });
+            return look.Runs;
         }
 
         void Tell(CheckResult result)

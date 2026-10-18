@@ -272,12 +272,15 @@ public class GitHubSetupTests
     {
         processes.Answers.Enqueue(FakeProcesses.Failed("HTTP 403: Resource not accessible"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken));
         var silent = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken));
+        var unstarted = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken));
 
         Assert.Equal("The label “manual” could not be made in acme/rocket.", refused.Message);
         Assert.Equal("The label “manual” could not be made in acme/rocket. GitHub did not answer.", silent.Message);
+        Assert.Equal("The label “manual” could not be made in acme/rocket. The GitHub command-line tool `gh` could not be started: Permission denied.", unstarted.Message);
     }
 
     [Theory]
@@ -285,6 +288,7 @@ public class GitHubSetupTests
     [InlineData(ProcessStatus.Exited, 1, GitHubCliState.LoggedOut)]
     [InlineData(ProcessStatus.TimedOut, 0, GitHubCliState.LoggedOut)]
     [InlineData(ProcessStatus.NotFound, 0, GitHubCliState.Missing)]
+    [InlineData(ProcessStatus.NotStarted, 0, GitHubCliState.Unstarted)]
     public async Task TheToolIsReadyWhenItIsThereAndLoggedIn(ProcessStatus status, int exitCode, GitHubCliState expected)
     {
         processes.Answers.Enqueue(new ProcessResult(status, exitCode, "", ""));

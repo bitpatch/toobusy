@@ -75,6 +75,8 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
     {
         if (result.Status == ProcessStatus.NotFound)
             return "git cannot be run";
+        if (result.Status == ProcessStatus.NotStarted)
+            return $"git could not be started: {result.Error}";
         if (result.Status == ProcessStatus.TimedOut)
             return $"git did not end in {Spoken.Time(patience)}";
 
