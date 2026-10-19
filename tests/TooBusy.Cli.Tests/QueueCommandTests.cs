@@ -277,9 +277,9 @@ public sealed class QueueCommandTests : CliAppTests
     {
         GitRepository();
         WriteSettings(Settings);
-        await RunAsync(Context(GitHub(milestones: "v2\t\t3\nv3\t\t0\n")), ["milestone", "v2"]);
+        await RunAsync(Context(GitHub(milestones: "1\tv2\t\t3\n2\tv3\t\t0\n")), ["milestone", "v2"]);
 
-        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "v3\t\t0\n", Labels)), ["queue"]);
+        var (exit, output, error) = await RunAsync(Context(GitHub(milestones: "1\tv3\t\t0\n", Labels)), ["queue"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);

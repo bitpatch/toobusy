@@ -89,7 +89,7 @@ public sealed class AssistCommandTests : CliAppTests
     {
         GitRepository();
         WriteSettings(SettingsWithABoard);
-        var processes = GitHubForAssist(labels: "bug\nfeature\ndraft\nquestion\n", milestones: "v2\t\t1\nv1\t2030-03-01T00:00:00Z\t12\n");
+        var processes = GitHubForAssist(labels: "bug\nfeature\ndraft\nquestion\n", milestones: "1\tv2\t\t1\n2\tv1\t2030-03-01T00:00:00Z\t12\n");
         var before = Files();
         var settings = File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml"));
 
@@ -273,7 +273,7 @@ public sealed class AssistCommandTests : CliAppTests
             WriteSettings(settings);
         if (settings.Contains(SkillOfTheProject, StringComparison.Ordinal))
             WriteSkill("task-auto");
-        var processes = GitHubForAssist(labels: "bug\nfeature\n", milestones: "v1\t\t3\n");
+        var processes = GitHubForAssist(labels: "bug\nfeature\n", milestones: "1\tv1\t\t3\n");
         var root = CliApp.CreateRootCommand(Context(null));
 
         var texts = new List<string> { (await RunAsync(Context(processes), ["init", "--assist"])).Output };

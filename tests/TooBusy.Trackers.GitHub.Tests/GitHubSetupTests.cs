@@ -165,6 +165,18 @@ public class GitHubSetupTests
         Assert.Equal("That is not the address of a project.", await Setup().RefuseBoardAsync("https://github.com/acme/rocket", TestContext.Current.CancellationToken));
     }
 
+    // A board is what the settings take as one, so a number with a sign is not asked for as a board.
+    [Fact]
+    public async Task AnAddressTheSettingsRefuseIsNotAskedFor()
+    {
+        const string signed = "https://github.com/orgs/acme/projects/-3";
+
+        Assert.Equal("That is not the address of a project.", await Setup().RefuseBoardAsync(signed, TestContext.Current.CancellationToken));
+        Assert.Equal(BoardAccess.Unreadable, await Setup().CheckBoardAsync(signed, TestContext.Current.CancellationToken));
+        Assert.Null(await Setup().ReadStatusesAsync(signed, TestContext.Current.CancellationToken));
+        Assert.Empty(processes.Asked);
+    }
+
     [Fact]
     public async Task ABoardIsMadeForItsOwnerAndItsAddressIsGiven()
     {

@@ -59,9 +59,9 @@ public static class About
         // What is said of the permission mode a session of this project is started in.
         var mode = (rules, permissionMode) switch
         {
-            (null, _) => $"A session is started in the permission mode `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, {Checks(ClaudeCodeOptions.DefaultPermissionMode)}, unless the settings of a project name another as `{SettingsKeys.PermissionMode}`. No settings are read here, so it is not said whether this project names one.",
-            (_, { } chosen) => $"This project names the permission mode `{chosen}` of Claude Code in its settings, `{SettingsKeys.PermissionMode}`: a session is started in it, {Checks(chosen)}.",
-            _ => $"This project names no permission mode, so a session is started in `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, {Checks(ClaudeCodeOptions.DefaultPermissionMode)}. `toobusy init --permission-mode <mode>` names one: {string.Join(" or ", ClaudeCodeOptions.PermissionModes.Select(known => $"`{known}`"))}.",
+            (null, _) => $"A session is started in the permission mode `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, where {ClaudeCodeOptions.Checks(ClaudeCodeOptions.DefaultPermissionMode)}, unless the settings of a project name another as `{SettingsKeys.PermissionMode}`. No settings are read here, so it is not said whether this project names one.",
+            (_, { } chosen) => $"This project names the permission mode `{chosen}` of Claude Code in its settings, `{SettingsKeys.PermissionMode}`: a session is started in it, where {ClaudeCodeOptions.Checks(chosen)}.",
+            _ => $"This project names no permission mode, so a session is started in `{ClaudeCodeOptions.DefaultPermissionMode}` of Claude Code, where {ClaudeCodeOptions.Checks(ClaudeCodeOptions.DefaultPermissionMode)}. `toobusy init --permission-mode <mode>` names one: {string.Join(" or ", ClaudeCodeOptions.PermissionModes.Select(known => $"`{known}`"))}.",
         };
 
         // What the board calls the statuses a run knows: as the settings name them, and as GitHub does where none
@@ -284,11 +284,6 @@ public static class About
             """);
         return text.ToString();
     }
-
-    // What a permission mode of Claude Code checks of what a session does.
-    static string Checks(string mode) => mode == "dontAsk"
-        ? "where whatever the settings of Claude Code do not allow is refused"
-        : "where a model of Claude Code looks at every action before it is done";
 
     static string Labels(IReadOnlyList<string> labels, string one, string many) =>
         $"{(labels.Count == 1 ? one : many)} {string.Join(", ", labels.Select(label => $"`{label}`"))}";

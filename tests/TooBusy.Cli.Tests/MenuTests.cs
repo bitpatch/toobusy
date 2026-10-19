@@ -69,7 +69,7 @@ public sealed class MenuTests : CliAppTests
     public async Task WithoutACommandAProjectIsSetUpTheChoicesAreMadeAndTheMenuOpens()
     {
         GitRepository();
-        var processes = GitHub(milestones: "v0.2.0\t\t2\n", labels: "bug\n");
+        var processes = GitHub(milestones: "1\tv0.2.0\t\t2\n", labels: "bug\n");
 
         // No project, no blocking labels, any label; a new label for the owner and one for interrupted tasks, each
         // by the name that is proposed; the skill that is proposed; yes; the first milestone; the model after the

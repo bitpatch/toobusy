@@ -70,7 +70,7 @@ branch = "develop"                          # optional: the branch the tasks are
 |---|---|---|
 | `version` | version of the settings schema | must be `1`; a higher one fails with "made by a newer toobusy" |
 | `tracker.type` | the tracker adapter | `github` only |
-| `tracker.board` | the GitHub Projects board of the tasks | optional; `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>` |
+| `tracker.board` | the GitHub Projects board of the tasks | optional; `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>`, with `<n>` in digits alone; the setup and a run take a board by the same rule |
 | `tracker.statuses.todo` | what the board calls the status a task is taken from | optional, `Todo` when it is not there; a name that is not empty; only with `tracker.board` |
 | `tracker.statuses.in-progress` | what the board calls the status a run moves a task to before its session | optional, `In Progress` when it is not there; the same |
 | `tracker.statuses.done` | what the board calls the status a run moves a task to when it is done | optional, `Done` when it is not there; the same |
@@ -129,7 +129,7 @@ A choice is checked against the open milestones whenever it is used:
 | a milestone that is not open any more: closed, renamed or deleted | nothing can be run: toobusy says so, and the user is asked to choose again |
 | a milestone, while the milestones cannot be read | the choice stands, and the page says that it was not checked |
 
-A title is matched as it is written, or, when no open milestone is written so, with the only one that differs from it in the case of its letters: two that differ only in it match neither. The tasks of the milestone are read by the same rule, so a run takes those of the milestone the page shows as chosen.
+A title is matched as it is written, or, when no open milestone is written so, with the only one that differs from it in the case of its letters: two that differ only in it match neither. The tasks of the milestone are read by the same rule, so a run takes those of the milestone the page shows as chosen. A run finds the milestone once, when it reads its tasks for the first time, and then asks for it by the number GitHub knows it by, in the same request as the tasks: one that is closed, renamed or deleted while the run goes on stops the run with `The milestone “v0.3.0” is not open any more.`, as it would have kept the run from starting.
 
 Where milestones are listed, those with a version in the title come first, the lowest version first, and the rest follow by their titles. The version is the first run of dot-separated numbers in the title (`v.0.2.0`, `v1.4`, `Release 2.0`), compared number by number. Each is shown with its due date, when it has one, and the number of its open tasks. `No milestone` is the last of the list.
 
@@ -984,7 +984,7 @@ A command of a package manager is proposed only when that manager is on the path
 
 ### The queue
 
-The tasks are the open issues of the repository of the `origin` remote that belong to the milestone of the user, or all of them when the user works without a milestone. A run reads them anew before every task. More than a hundred open tasks are an error that says how many there are. So is an answer of the tracker that cannot be read whole, as when `gh` prints otherwise than it did: a count of the tasks that is not a number, ``The open tasks of acme/rocket cannot be read: the count is `null`.``, or a line that is not a task, ``… `gh` printed 2 lines that cannot be read as tasks.`` A run stops over it instead of taking from a queue that has lost a task without a word.
+The tasks are the open issues of the repository of the `origin` remote that belong to the milestone of the user, or all of them when the user works without a milestone. A run reads them anew before every task, and the milestone with them, as [The milestone to work on](#the-milestone-to-work-on) says. More than a hundred open tasks are an error that says how many there are. So is an answer of the tracker that cannot be read whole, as when `gh` prints otherwise than it did: a count of the tasks that is not a number, ``The open tasks of acme/rocket cannot be read: the count is `null`.``, or a line that is not a task, ``… `gh` printed 2 lines that cannot be read as tasks.`` A run stops over it instead of taking from a queue that has lost a task without a word.
 
 A task is **held**, and no run takes it as things are, when one of these is so, in this order:
 

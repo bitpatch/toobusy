@@ -20,7 +20,8 @@ public static class ClaudeCodeOptions
     // The mode a session is started in when the settings name none.
     public const string DefaultPermissionMode = "auto";
 
-    // What a mode a session can be started in checks, in a few words.
+    // What a mode a session can be started in checks, in a few words: for the question of the setup, and after a
+    // `where` in what `toobusy about` says, so that the two say it alike.
     public static string Checks(string mode) => mode == "dontAsk"
         ? "only what the settings of Claude Code in the project allow is done"
         : "a model of Claude Code looks at every action before it is done";

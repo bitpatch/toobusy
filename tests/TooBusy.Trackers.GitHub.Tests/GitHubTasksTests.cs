@@ -12,19 +12,20 @@ public class GitHubTasksTests
     [Fact]
     public async Task TheTasksOfAMilestoneAreAskedForByItsNumber()
     {
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\n4\tv0.2.0\n"));
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\t\t0\n4\tv0.2.0\t\t2\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t0\n"));
 
         Assert.Empty(await Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
 
-        Assert.Equal(["api", "repos/acme/rocket/milestones?state=open&per_page=100", "--jq", """.[] | "\(.number)\t\(.title)" """.Trim()], processes.Asked[0].Arguments);
+        Assert.Equal(["api", "repos/acme/rocket/milestones?state=open&per_page=100", "--jq", """.[] | [.number, .title, .due_on // "", .open_issues] | @tsv"""], processes.Asked[0].Arguments);
         var arguments = processes.Asked[1].Arguments;
-        Assert.Equal(["api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-f", "milestone=4", "-f"], arguments.Take(9));
-        Assert.StartsWith("query=query($owner: String!, $name: String!, $milestone: String) { repository(owner: $owner, name: $name) { issues(states: OPEN, first: 100,", arguments[9], StringComparison.Ordinal);
-        Assert.Contains("filterBy: {milestoneNumber: $milestone}", arguments[9], StringComparison.Ordinal);
-        Assert.Contains("nodes { number title url milestone { title } labels(first: 50)", arguments[9], StringComparison.Ordinal);
-        Assert.Contains("(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv", arguments[11], StringComparison.Ordinal);
-        Assert.Equal("--jq", arguments[10]);
+        Assert.Equal(["api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-f", "milestone=4", "-F", "number=4", "-f"], arguments.Take(11));
+        Assert.StartsWith("query=query($owner: String!, $name: String!, $milestone: String, $number: Int!) { repository(owner: $owner, name: $name) { milestone(number: $number) { state title } issues(states: OPEN, first: 100,", arguments[11], StringComparison.Ordinal);
+        Assert.Contains("filterBy: {milestoneNumber: $milestone}", arguments[11], StringComparison.Ordinal);
+        Assert.Contains("nodes { number title url milestone { title } labels(first: 50)", arguments[11], StringComparison.Ordinal);
+        Assert.Equal("--jq", arguments[12]);
+        Assert.StartsWith(".data.repository | ([\"milestone\", .milestone.state // \"\", .milestone.title // \"\"] | @tsv), (.issues | ", arguments[13], StringComparison.Ordinal);
+        Assert.Contains("(.milestone.title // \"\")] + [.labels.nodes[].name] | @tsv", arguments[13], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -34,13 +35,16 @@ public class GitHubTasksTests
 
         await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(["api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-f"], Assert.Single(processes.Asked).Arguments.Take(7));
+        var arguments = Assert.Single(processes.Asked).Arguments;
+        Assert.Equal(["api", "graphql", "-f", "owner=acme", "-f", "name=rocket", "-f"], arguments.Take(7));
+        Assert.DoesNotContain("milestone(number:", arguments[7], StringComparison.Ordinal);
+        Assert.StartsWith(".data.repository | (.issues | ", arguments[^1], StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task AMilestoneThatIsNotOpenAnyMoreIsSaid()
     {
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\t\t0\n"));
 
         var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
 
@@ -50,12 +54,12 @@ public class GitHubTasksTests
 
     // As the choice of the user is checked: the title as it is written first, then the only one that differs in case.
     [Theory]
-    [InlineData("1\tV0.2.0\n4\tv0.3.0\n", "1")]
-    [InlineData("1\tV0.2.0\n4\tv0.2.0\n", "4")]
-    public async Task AMilestoneIsFoundWhateverTheCaseOfItsTitle(string open, string number)
+    [InlineData("1\tV0.2.0\t\t0\n4\tv0.3.0\t\t0\n", "1", "V0.2.0")]
+    [InlineData("1\tV0.2.0\t\t0\n4\tv0.2.0\t\t0\n", "4", "v0.2.0")]
+    public async Task AMilestoneIsFoundWhateverTheCaseOfItsTitle(string open, string number, string title)
     {
         processes.Answers.Enqueue(ScriptedProcesses.Answered(open));
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"milestone\tOPEN\t{title}\ntotal\t0\n"));
 
         await Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
 
@@ -65,12 +69,67 @@ public class GitHubTasksTests
     [Fact]
     public async Task TwoMilestonesThatDifferOnlyInCaseAreNotGuessedBetween()
     {
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tNext\n4\tNEXT\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tNext\t\t0\n4\tNEXT\t\t0\n"));
 
         var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("next", TestContext.Current.CancellationToken));
 
         Assert.Equal("The milestone “next” is not open any more.", gone.Message);
         Assert.Single(processes.Asked);
+    }
+
+    // The tool writes a tab of a title as two characters, so the milestone of such a title is found and stays open.
+    [Fact]
+    public async Task AMilestoneWithATabInItsTitleIsFound()
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("4\tv0.2.0\\tnext\t\t1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\\tnext\ntotal\t0\n"));
+
+        Assert.Empty(await Tasks().ReadOpenAsync("v0.2.0\tnext", TestContext.Current.CancellationToken));
+
+        Assert.Contains("milestone=4", processes.Asked[1].Arguments);
+    }
+
+    // The milestones are read once, for the first queue of the milestone; every read after it asks for the milestone
+    // by its number in the same request as the tasks.
+    [Fact]
+    public async Task AMilestoneIsFoundOnceAndAskedForByItsNumberAfterThat()
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("4\tv0.2.0\t\t2\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t0\n"));
+        var tasks = Tasks();
+
+        await tasks.ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
+        await tasks.ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
+
+        Assert.Equal(["repos/acme/rocket/milestones?state=open&per_page=100", "graphql", "graphql"], processes.Asked.Select(asked => asked.Arguments[1]));
+        Assert.Contains("number=4", processes.Asked[2].Arguments);
+    }
+
+    // A milestone that was closed, renamed or deleted after it was found is not open any more, as for the choice of
+    // the user, and so is one the answer says nothing of; it is found anew when it is asked for again.
+    [Theory]
+    [InlineData("milestone\tCLOSED\tv0.2.0\n")]
+    [InlineData("milestone\tOPEN\tv0.2.1\n")]
+    [InlineData("milestone\t\t\n")]
+    [InlineData("")]
+    public async Task AMilestoneThatChangedSinceItWasFoundIsNotOpenAnyMore(string said)
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("4\tv0.2.0\t\t2\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"{said}total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("4\tv0.2.0\t\t2\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t0\n"));
+        var tasks = Tasks();
+
+        await tasks.ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
+        var gone = await Assert.ThrowsAsync<TrackerException>(() => tasks.ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
+        await tasks.ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
+
+        Assert.Equal(("The milestone “v0.2.0” is not open any more.", false), (gone.Message, gone.MayPass));
+        Assert.Equal(
+            ["repos/acme/rocket/milestones?state=open&per_page=100", "graphql", "graphql", "repos/acme/rocket/milestones?state=open&per_page=100", "graphql"],
+            processes.Asked.Select(asked => asked.Arguments[1]));
     }
 
     [Fact]
@@ -148,8 +207,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task MoreOpenTasksThanTheQueueReadsAreAnError()
     {
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.2.0\n"));
-        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t140\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.2.0\t\t140\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("milestone\tOPEN\tv0.2.0\ntotal\t140\n"));
         processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t101\n"));
 
         var milestone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));

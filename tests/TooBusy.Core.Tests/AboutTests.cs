@@ -1,3 +1,4 @@
+using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 
@@ -205,7 +206,7 @@ public class AboutTests
         const string kept = "What a session is allowed and refused in particular is said where Claude Code keeps it, in the settings of the project in `.claude/`, and toobusy does not say it again.";
 
         Assert.Contains(
-            $"{nobody} This project names the permission mode `dontAsk` of Claude Code in its settings, `assistant.permission-mode`: a session is started in it, where whatever the settings of Claude Code do not allow is refused. {kept}",
+            $"{nobody} This project names the permission mode `dontAsk` of Claude Code in its settings, `assistant.permission-mode`: a session is started in it, where only what the settings of Claude Code in the project allow is done. {kept}",
             About.Text(Rules, RunPolicy.Default, permissionMode: "dontAsk"),
             StringComparison.Ordinal);
         Assert.Contains(
@@ -220,6 +221,19 @@ public class AboutTests
             $"{nobody} A session is started in the permission mode `auto` of Claude Code, where a model of Claude Code looks at every action before it is done, unless the settings of a project name another as `assistant.permission-mode`. No settings are read here, so it is not said whether this project names one. {kept}",
             About.Text(null, RunPolicy.Default, permissionMode: "dontAsk"),
             StringComparison.Ordinal);
+    }
+
+    // The setup offers every mode with the words `about` says it in, so that the two cannot tell a mode apart.
+    [Fact]
+    public void EveryPermissionModeIsSaidInTheWordsOfTheSetup()
+    {
+        foreach (var mode in ClaudeCodeOptions.PermissionModes)
+        {
+            Assert.Contains(
+                $"a session is started in it, where {ClaudeCodeOptions.Checks(mode)}.",
+                About.Text(Rules, RunPolicy.Default, permissionMode: mode),
+                StringComparison.Ordinal);
+        }
     }
 
     [Fact]

@@ -17,7 +17,7 @@ public static partial class SettingsValidator
             : new SettingsValidation(null, [.. run.Errors.OrderBy(error => error.Line ?? int.MaxValue)]);
     }
 
-    public static bool IsBoard(string value) => BoardPattern().IsMatch(value);
+    public static bool IsBoard(string value) => BoardAddress.Parse(value) is not null;
 
     // Null when the text is the name of a skill, as a session is started with it; otherwise why it is not.
     public static string? RefuseSkill(string value) => SkillPattern().IsMatch(value)
@@ -28,9 +28,6 @@ public static partial class SettingsValidator
     public static string? RefuseBranch(string value) => BranchPattern().IsMatch(value)
         ? null
         : "must be the name of a branch as git takes it, as `develop`: no space, none of `~^:?*[\\`, no `..` and no `@{`, and neither `/` nor `.` at either end";
-
-    [GeneratedRegex(@"^https://github\.com/(orgs|users)/[A-Za-z0-9-]+/projects/[0-9]+$")]
-    private static partial Regex BoardPattern();
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
     private static partial Regex SkillPattern();

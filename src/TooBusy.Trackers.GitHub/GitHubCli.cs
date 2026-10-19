@@ -48,4 +48,7 @@ public sealed class GitHubCli(IProcessRunner processes)
         ProcessStatus.NotStarted => $"The GitHub command-line tool `gh` could not be started: {result.Error}.",
         _ => "GitHub did not answer.",
     };
+
+    // The field of a query of GitHub that the owner of a board is asked for by: an organisation, or a user.
+    internal static string Owner(bool organisation) => organisation ? "organization" : "user";
 }

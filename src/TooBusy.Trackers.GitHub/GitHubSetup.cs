@@ -1,6 +1,7 @@
 using TooBusy.Core.Doctor;
 using TooBusy.Core.Processes;
 using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 
 namespace TooBusy.Trackers.GitHub;
@@ -13,7 +14,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
     public async Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) =>
-        Parts(board) is null ? "That is not the address of a project."
+        BoardAddress.Parse(board) is null ? "That is not the address of a project."
         : await CheckBoardAsync(board, cancellationToken) switch
         {
             BoardAccess.Readable => null,
@@ -87,7 +88,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
 
     public async Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)
     {
-        var kind = owner.Organisation ? "organization" : "user";
+        var kind = GitHubCli.Owner(owner.Organisation);
         var id = await ValueAsync(
             [
                 "-f", $"login={owner.Login}",
@@ -159,11 +160,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
     static bool LacksScope(ProcessResult result) =>
         result.Error.Contains("scope", StringComparison.OrdinalIgnoreCase) || result.Output.Contains("INSUFFICIENT_SCOPES", StringComparison.Ordinal);
 
-    // `https://github.com/orgs/<org>/projects/<n>` or `https://github.com/users/<user>/projects/<n>` in its parts.
+    // A board in the parts a query of GitHub asks for it by: the field of its owner, the login and the number.
     static (string Kind, string Login, int Number)? Parts(string board) =>
-        Uri.TryCreate(board, UriKind.Absolute, out var address)
-        && address.AbsolutePath.Trim('/').Split('/') is [var kind and ("orgs" or "users"), var login, "projects", var number]
-        && int.TryParse(number, out var parsed)
-            ? (kind == "orgs" ? "organization" : "user", login, parsed)
-            : null;
+        BoardAddress.Parse(board) is { } address ? (GitHubCli.Owner(address.Organisation), address.Login, address.Number) : null;
 }

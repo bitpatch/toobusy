@@ -170,7 +170,7 @@ public sealed class ChoiceCommandTests : CliAppTests
     public async Task AMilestoneIsChosenByItsTitleFromAScript()
     {
         GitRepository();
-        var processes = GitHub(milestones: "v0.2.0\t2030-01-15T08:00:00Z\t12\nBacklog\t\t1\n");
+        var processes = GitHub(milestones: "1\tv0.2.0\t2030-01-15T08:00:00Z\t12\n2\tBacklog\t\t1\n");
 
         var (exit, output, error) = await RunAsync(Context(processes), ["milestone", "V0.2.0"]);
 
@@ -185,7 +185,7 @@ public sealed class ChoiceCommandTests : CliAppTests
     public async Task AMilestoneThatIsNotOpenIsRefusedWithTheOpenOnes()
     {
         GitRepository();
-        var processes = GitHub(milestones: "v0.3.0\t\t1\nv0.2.0\t\t2\n");
+        var processes = GitHub(milestones: "1\tv0.3.0\t\t1\n2\tv0.2.0\t\t2\n");
 
         var (exit, output, error) = await RunAsync(Context(processes), ["milestone", "v0.1.0"]);
 
@@ -261,7 +261,7 @@ public sealed class ChoiceCommandTests : CliAppTests
     public async Task InATerminalTheMilestoneIsChosenFromAList()
     {
         GitRepository();
-        var processes = GitHub(milestones: "v0.3.0\t\t1\nv0.2.0\t\t2\n");
+        var processes = GitHub(milestones: "1\tv0.3.0\t\t1\n2\tv0.2.0\t\t2\n");
 
         var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Down, Keys.Enter), processes, "milestone");
 
