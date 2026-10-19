@@ -9,19 +9,20 @@ public class GitWorkspaceTests
     [Fact]
     public async Task ACleanTreeThatIsPushedHasNothingToTellOfButItsBranch()
     {
-        var processes = new OneAnswer(Exited("# branch.oid 1a2b3c\n# branch.head develop\n# branch.upstream origin/develop\n# branch.ab +0 -0\n"));
+        var processes = new ScriptedProcesses(Exited("# branch.oid 1a2b3c\n# branch.head develop\n# branch.upstream origin/develop\n# branch.ab +0 -0\n"));
 
         var state = await new GitWorkspace(processes, "/work/rocket").ReadAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new WorkspaceState(0, 0) { Branch = "develop" }, state);
-        Assert.Equal("git", processes.Command);
-        Assert.Equal(["-C", "/work/rocket", "status", "--porcelain=v2", "--branch"], processes.Arguments);
+        var (command, arguments, _, _, _) = Assert.Single(processes.Asked);
+        Assert.Equal("git", command);
+        Assert.Equal(["-C", "/work/rocket", "status", "--porcelain=v2", "--branch"], arguments);
     }
 
     [Fact]
     public async Task ChangedAndUnknownFilesAreChangesAndCommitsAheadAreNotPushed()
     {
-        var processes = new OneAnswer(Exited(
+        var processes = new ScriptedProcesses(Exited(
             "# branch.oid 1a2b3c\r\n# branch.head develop\r\n# branch.upstream origin/develop\r\n# branch.ab +3 -1\r\n"
             + "1 .M N... 100644 100644 100644 1a2b 3c4d src/a.cs\r\n? notes.txt\r\n"));
 
@@ -31,7 +32,7 @@ public class GitWorkspaceTests
     [Fact]
     public async Task ABranchWithoutAnUpstreamHasNothingThatIsNotPushed()
     {
-        var processes = new OneAnswer(Exited("# branch.oid 1a2b3c\n# branch.head scratch\n"));
+        var processes = new ScriptedProcesses(Exited("# branch.oid 1a2b3c\n# branch.head scratch\n"));
 
         Assert.Equal(new WorkspaceState(0, 0) { Branch = "scratch" }, await new GitWorkspace(processes, "/work/rocket").ReadAsync(TestContext.Current.CancellationToken));
     }
@@ -39,7 +40,7 @@ public class GitWorkspaceTests
     [Fact]
     public async Task ADetachedHeadIsNoBranch()
     {
-        var processes = new OneAnswer(Exited("# branch.oid 1a2b3c\n# branch.head (detached)\n"));
+        var processes = new ScriptedProcesses(Exited("# branch.oid 1a2b3c\n# branch.head (detached)\n"));
 
         Assert.Equal(new WorkspaceState(0, 0), await new GitWorkspace(processes, "/work/rocket").ReadAsync(TestContext.Current.CancellationToken));
     }
@@ -50,7 +51,7 @@ public class GitWorkspaceTests
     [InlineData(ProcessStatus.TimedOut, 0)]
     public async Task ATreeThatGitCannotTellOfIsNotRead(ProcessStatus status, int exitCode)
     {
-        var processes = new OneAnswer(new ProcessResult(status, exitCode, "", "fatal: not a git repository"));
+        var processes = new ScriptedProcesses(new ProcessResult(status, exitCode, "", "fatal: not a git repository"));
 
         Assert.Null(await new GitWorkspace(processes, "/work/rocket").ReadAsync(TestContext.Current.CancellationToken));
     }
@@ -60,7 +61,7 @@ public class GitWorkspaceTests
     [Fact]
     public async Task ASyncFetchesTheRemoteOfTheBranchAndMovesItForwardOnlyAsAFastForward()
     {
-        var processes = new Answers(Exited(Behind.Replace("-2", "-0", StringComparison.Ordinal)), Exited(""), Exited(Behind), Exited(""));
+        var processes = new ScriptedProcesses(Exited(Behind.Replace("-2", "-0", StringComparison.Ordinal)), Exited(""), Exited(Behind), Exited(""));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
@@ -72,14 +73,14 @@ public class GitWorkspaceTests
                 "git -C /work/rocket status --porcelain=v2 --branch",
                 "git -C /work/rocket merge --ff-only --quiet @{upstream}",
             ],
-            processes.Asked);
-        Assert.Equal(TimeSpan.FromMinutes(2), processes.Timeouts[1]);
+            processes.Asked.Select(asked => string.Join(' ', [asked.Command, .. asked.Arguments])));
+        Assert.Equal(TimeSpan.FromMinutes(2), processes.Asked[1].Timeout);
     }
 
     [Fact]
     public async Task ABranchWithoutAnUpstreamIsNotFetched()
     {
-        var processes = new Answers(Exited("# branch.oid 1a2b3c\n# branch.head scratch\n"));
+        var processes = new ScriptedProcesses(Exited("# branch.oid 1a2b3c\n# branch.head scratch\n"));
 
         Assert.Equal(new BranchSync(SyncStatus.NoUpstream), await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken));
         Assert.Single(processes.Asked);
@@ -94,7 +95,7 @@ public class GitWorkspaceTests
     [InlineData(ProcessStatus.NotStarted, 0, "Permission denied", "git could not be started: Permission denied", false)]
     public async Task AFetchThatFailsLeavesTheBranchAsItIsAndSaysWhatGitSaid(ProcessStatus status, int exitCode, string error, string said, bool mayPass)
     {
-        var processes = new Answers(Exited(Behind), new ProcessResult(status, exitCode, "", error));
+        var processes = new ScriptedProcesses(Exited(Behind), new ProcessResult(status, exitCode, "", error));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
@@ -122,7 +123,7 @@ public class GitWorkspaceTests
     [InlineData("fatal: 'origin' does not appear to be a git repository", false)]
     public async Task AFetchThatFailedMayPassWhenTheRemoteDidNotAnswer(string error, bool mayPass)
     {
-        var processes = new Answers(Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", error));
+        var processes = new ScriptedProcesses(Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", error));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
@@ -132,7 +133,7 @@ public class GitWorkspaceTests
     [Fact]
     public async Task AnUpstreamThatTheRemoteDoesNotHaveAnyMoreIsSaid()
     {
-        var processes = new Answers(Exited(Behind), Exited(""), Exited("# branch.oid 1a2b3c\n# branch.head develop\n# branch.upstream origin/develop\n"));
+        var processes = new ScriptedProcesses(Exited(Behind), Exited(""), Exited("# branch.oid 1a2b3c\n# branch.head develop\n# branch.upstream origin/develop\n"));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
@@ -142,7 +143,7 @@ public class GitWorkspaceTests
     [Fact]
     public async Task AMoveThatGitRefusesIsSaid()
     {
-        var processes = new Answers(Exited(Behind), Exited(""), Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", "error: Your local changes to the following files would be overwritten by merge:\n\tsrc/a.cs\n"));
+        var processes = new ScriptedProcesses(Exited(Behind), Exited(""), Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", "error: Your local changes to the following files would be overwritten by merge:\n\tsrc/a.cs\n"));
 
         var sync = await new GitWorkspace(processes, "/work/rocket").SyncAsync(TestContext.Current.CancellationToken);
 
@@ -150,36 +151,4 @@ public class GitWorkspaceTests
     }
 
     static ProcessResult Exited(string output) => new(ProcessStatus.Exited, 0, output, "");
-
-    // Gives the results it is told to, one after another, and remembers what it was asked to run.
-    sealed class Answers(params ProcessResult[] results) : IProcessRunner
-    {
-        public List<string> Asked { get; } = [];
-
-        public List<TimeSpan> Timeouts { get; } = [];
-
-        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            Asked.Add(string.Join(' ', [command, .. arguments]));
-            Timeouts.Add(timeout);
-            return Task.FromResult(results[Asked.Count - 1]);
-        }
-
-        public IProcessRunner Inside(string folder) => this;
-    }
-
-    sealed class OneAnswer(ProcessResult result) : IProcessRunner
-    {
-        public string? Command { get; private set; }
-
-        public IReadOnlyList<string> Arguments { get; private set; } = [];
-
-        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            (Command, Arguments) = (command, arguments);
-            return Task.FromResult(result);
-        }
-
-        public IProcessRunner Inside(string folder) => this;
-    }
 }

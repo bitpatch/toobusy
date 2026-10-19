@@ -11,13 +11,13 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works(3).Asks("input needed", Done);
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Stopped, 1), result);
         Assert.Empty(session.Told);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
     }
 
     [Fact]
@@ -26,10 +26,10 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         assistant.Session(3).Works(4).Ends(Done);
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
-        clock.At(TimeSpan.FromSeconds(5), () => Run.Send(RunCommand.Stop));
-        clock.At(TimeSpan.FromSeconds(7), () => Run.Send(RunCommand.Continue));
-        clock.At(TimeSpan.FromSeconds(8), () => Run.Send(RunCommand.Continue));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Stop));
+        clock.At(AfterLook(2) + policy.Tick, () => Run.Send(RunCommand.Stop));
+        clock.At(AfterLook(3), () => Run.Send(RunCommand.Continue));
+        clock.At(AfterLook(3) + policy.Tick, () => Run.Send(RunCommand.Continue));
 
         var result = await RunAsync();
 
@@ -45,19 +45,19 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         var session = assistant.Session(3).Works(20).WhenAsked().Works().Ends("Undone: a.cs.\nLeft: the export.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
         Assert.Equal([Briefing.WrapUp(3)], session.Asked);
         Assert.Empty(session.Told);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +interrupted", "comment 3", "status 3 Todo");
         Assert.StartsWith("**Interrupted.** Nothing is committed; a run takes the task again.\n\nUndone: a.cs.\nLeft: the export.", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
         Assert.Equal([(3, RunMark.Interrupted)], Ended);
         Assert.Contains("■ Asked #3 to wrap up after its current step: nothing committed, a report in the task, the interrupted label", log.Lines);
-        Assert.Contains("■ #3 Task 3 — interrupted after 9 s: the report is in the task, and the next run takes it first", log.Lines);
+        Assert.Contains($"■ #3 Task 3 — interrupted after {Spoken.Time(3 * policy.Poll)}: the report is in the task, and the next run takes it first", log.Lines);
         Assert.Contains("  │ Undone: a.cs.", log.Lines);
         Assert.Equal("■ Stopped after /abort · 0 done", log.Lines[^2]);
 
@@ -70,14 +70,14 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Then().Works().Ends("Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
         Assert.Equal(RunEnd.Stopped, result.End);
         Assert.Single(session.Asked);
         Assert.Equal([Briefing.WrapUp(3)], session.Told);
-        Assert.Contains("■ #3 did not wrap up in 10 min: its turn is cut, and it is asked again", log.Lines);
+        Assert.Contains($"■ #3 did not wrap up in {Spoken.Time(policy.AbortGrace)}: its turn is cut, and it is asked again", log.Lines);
         Assert.Contains("label 3 +interrupted", tracker.Did);
     }
 
@@ -86,7 +86,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks().Then().Ends("Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
@@ -94,7 +94,7 @@ public sealed partial class SupervisorTests
         Assert.Empty(session.Asked);
         Assert.Equal([Briefing.WrapUp(3)], session.Told);
         Assert.Contains("■ #3 waits for the owner: its turn is cut, and it is told to wrap up", log.Lines);
-        Assert.True(clock.Now - FakeClock.Start < TimeSpan.FromSeconds(60), "The abort waited for the countdown.");
+        Assert.True(clock.Now - FakeClock.Start < policy.OwnerWait, "The abort waited for the countdown.");
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works(20).WhenAsked().Ends("I stopped.").Then().Works().Ends("Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
@@ -120,7 +120,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works(20).WhenAsked().Ends("I stopped.");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
@@ -166,8 +166,8 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         assistant.Session(3).Works(20).WhenAsked().Works().Ends("Undone.\nTOOBUSY: interrupted");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Abort));
-        clock.At(TimeSpan.FromSeconds(5), () =>
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2) + policy.Tick, () =>
         {
             Run.Send(RunCommand.Continue);
             Run.Send(RunCommand.Abort);
@@ -207,7 +207,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 stays In Progress, and the next run goes on with its session · fake attach 3"), result);
         Assert.Equal(1, session.Stopped);
-        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3");
         Assert.Contains("■ Killed the session of #3: the task stays In Progress, and the next run goes on with its session · fake attach 3", log.Lines);
 
         // The record of the task stays: it is what the next run goes on by.
@@ -225,7 +225,7 @@ public sealed partial class SupervisorTests
         await RunAsync();
 
         Assert.Equal([5, 3], assistant.Started.Select(start => start.Task));
-        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted"], tracker.Did.Take(3));
+        AssertDid(5, "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done");
         Assert.Contains("- This task was interrupted before.", assistant.Started[0].Message, StringComparison.Ordinal);
         Assert.DoesNotContain("interrupted before", assistant.Started[1].Message, StringComparison.Ordinal);
         Assert.Contains("→ #5 Task 5 — started · a new session; the task was interrupted before · fake attach 5", log.Lines);
@@ -264,7 +264,7 @@ public sealed partial class SupervisorTests
 
         // The session is looked for by the name the start gave it, since the start was made, after the command before.
         var (start, since) = Assert.Single(assistant.LookedFor);
-        Assert.Equal(("#3 Task 3", FakeClock.Start + TimeSpan.FromSeconds(2)), (start.Name, since));
+        Assert.Equal(("#3 Task 3", FakeClock.Start + shell.Takes), (start.Name, since));
         Assert.Equal(1, assistant.Session(3).Stopped);
 
         // No record names a session that does not work, and what the task started is stopped by the command after it.
@@ -355,7 +355,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks("input needed", $"{Done}\n\nShould I also update the docs?");
         session.Deaf = "it is deaf";
-        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         var result = await RunAsync();
 
@@ -388,7 +388,7 @@ public sealed partial class SupervisorTests
         Assert.Single(assistant.Started);
         Assert.Equal([Briefing.AfterStop(5)], session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session was stopped, and goes on · fake attach 5", log.Lines);
-        Assert.Equal(["status 5 InProgress", "assign 5", "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        AssertDid("status 5 InProgress", "assign 5", "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done");
         Assert.Null(state.Record);
     }
 
@@ -406,7 +406,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.Contains("■ Killed while #3 was being settled, and the tracker was told how it went all the same", log.Lines);
     }
 
@@ -418,7 +418,7 @@ public sealed partial class SupervisorTests
         tracker.Doing = what =>
         {
             if (what == "close 3")
-                clock.At(clock.Now - FakeClock.Start + TimeSpan.FromSeconds(5), kill.Cancel);
+                clock.At(clock.Now - FakeClock.Start + policy.RetryPauses[0] / 2, kill.Cancel);
         };
 
         var result = await RunAsync();
@@ -426,7 +426,7 @@ public sealed partial class SupervisorTests
         // The close is not made again, and the task is left to the owner as over any tracker that does not answer.
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: close 3 (1)."), result);
         Assert.Single(tracker.Asked, asked => asked == "close 3");
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.Contains("■ Killed while #3 was being settled, and the tracker was told how it went all the same", log.Lines);
     }
 
@@ -441,7 +441,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(new RunResult(RunEnd.Killed, 0, "#3 was being settled, and the next run settles it · fake attach 3"), result);
         Assert.Contains("■ Killed while #3 was being settled: nothing of how it went is told yet, and the next run settles it · fake attach 3", log.Lines);
-        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3");
         Assert.Equal(Record(3), state.Record);
         Assert.Equal(1, session.Stopped);
         Assert.Equal([(3, RunMark.Interrupted)], Ended);

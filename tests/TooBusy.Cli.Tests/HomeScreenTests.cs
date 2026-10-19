@@ -178,7 +178,7 @@ public sealed class HomeScreenTests : IDisposable
         terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
         var checks = new RunChecks();
         checks.Start(Checkup.Git);
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
+        terminal.Keys.Until("❯ Milestone", Keys.Down).Press(Keys.Enter);
 
         Assert.Equal(HomeAction.Milestone, await WaitAsync(new TaskCount(() => Task.FromResult<QueueOutlook?>(Outlook(5))), checks));
         Assert.False(checks.Over);

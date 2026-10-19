@@ -25,11 +25,11 @@ public sealed partial class SupervisorTests
             [("TOOBUSY_TASK", "3"), ("TOOBUSY_TASK_TITLE", "Task 3"), ("TOOBUSY_TASK_URL", "https://example.com/3")],
             shell.Told[0].OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => (pair.Key, pair.Value)));
         Assert.Equal(
-            ["  Running the command before #3: scripts/dev.sh ports free", "  the command before #3 passed in 2 s", "  Running the command after #3: scripts/dev.sh server stop", "  the command after #3 passed in 2 s"],
+            ["  Running the command before #3: scripts/dev.sh ports free", $"  the command before #3 passed in {Spoken.Time(shell.Takes)}", "  Running the command after #3: scripts/dev.sh server stop", $"  the command after #3 passed in {Spoken.Time(shell.Takes)}"],
             log.Lines.Where(line => line.Contains("the command", StringComparison.Ordinal)));
 
         // The time of the task counts from the command before it.
-        Assert.Equal([(3, RunMark.Done, 5)], log.Ends);
+        Assert.Equal([(3, RunMark.Done, Seconds(shell.Takes + policy.Poll))], log.Ends);
         Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Preparing, Task.Number: 3, Step: "the command before the task" });
         Assert.Contains(log.Statuses, status => status is { Phase: RunPhase.Preparing, Task.Number: 3, Step: "the command after the task" });
     }
@@ -87,10 +87,11 @@ public sealed partial class SupervisorTests
     }
 
     [Theory]
-    [InlineData(CommandStatus.TimedOut, "did not end in 10 min and was stopped")]
-    [InlineData(CommandStatus.NotStarted, "did not start: the shell of the machine cannot be run")]
-    public async Task ACommandThatIsGivenUpOrDoesNotStartFailsAsOneThatExitedWithAnError(CommandStatus status, string how)
+    [InlineData(CommandStatus.TimedOut)]
+    [InlineData(CommandStatus.NotStarted)]
+    public async Task ACommandThatIsGivenUpOrDoesNotStartFailsAsOneThatExitedWithAnError(CommandStatus status)
     {
+        var how = status == CommandStatus.TimedOut ? $"did not end in {Spoken.Time(policy.CommandTime)} and was stopped" : "did not start: the shell of the machine cannot be run";
         plan = plan with { Commands = Around };
         shell.Ends[Free] = new CommandEnd(status, 0, "");
         tracker.Add(3);
@@ -157,7 +158,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Problem, 1, "the command after #3 exited with 1 · #3 stays as it ended"), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
         Assert.Equal([(3, RunMark.Done)], Ended);
         Assert.Equal(

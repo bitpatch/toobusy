@@ -11,7 +11,7 @@ public sealed class StatusCommandTests : CliAppTests
     public async Task StatusSaysThatNoRunIsGoingOnAndNeedsNothingButAProject()
     {
         GitRepository();
-        var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+        var processes = new ScriptedProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
 
         var (exit, output, error) = await RunAsync(Context(processes) with { PersonalFolder = null }, ["status"]);
 

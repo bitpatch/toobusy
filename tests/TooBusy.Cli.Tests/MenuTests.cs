@@ -33,12 +33,15 @@ public sealed class MenuTests : CliAppTests
 
         // The assistant; the model: opus; the effort: one above; a look at the model that is left with Escape; `Back`
         // of the list, and out. On the first run there was nowhere to go back to, and here there is.
-        var keys = new Keys().Press(
-            Keys.Down, Keys.Enter,
-            Keys.Enter, Keys.Down, Keys.Down, Keys.Enter,
-            Keys.Down, Keys.Enter, Keys.Down, Keys.Enter,
-            Keys.Up, Keys.Enter, Keys.Escape,
-            Keys.Up, Keys.Enter, Keys.Up, Keys.Enter);
+        var keys = new Keys()
+            .Until("❯ Assistant", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Model", Keys.Down).Press(Keys.Enter)
+            .Until("❯ opus", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Effort", Keys.Down).Press(Keys.Enter)
+            .Until("❯ xhigh", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Model", Keys.Up).Press(Keys.Enter, Keys.Escape)
+            .Until("❯ Back", Keys.Up).Press(Keys.Enter)
+            .Until("❯ Exit", Keys.Up).Press(Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
@@ -74,7 +77,9 @@ public sealed class MenuTests : CliAppTests
         var keys = new Keys().Press(
             Keys.Tab, Keys.Tab, Keys.Enter, Keys.Enter, Keys.Enter,
             Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter,
-            Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter);
+            Keys.Enter, Keys.Enter)
+            .Until("❯ fable", Keys.Down).Press(Keys.Enter, Keys.Enter)
+            .Until("❯ Exit", Keys.Up).Press(Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, processes, []);
 
@@ -121,7 +126,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // Settings, back out of them, then leave with Escape twice.
-        var keys = new Keys().Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+        var keys = new Keys().Until("❯ Settings", Keys.Down).Press(Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
@@ -145,7 +150,7 @@ public sealed class MenuTests : CliAppTests
         using var terminal = new TestTerminal(width: 120, height: 30);
 
         // The last of the menu.
-        terminal.Keys.Press(Keys.Up, Keys.Enter);
+        terminal.Keys.Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync([], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
@@ -161,7 +166,7 @@ public sealed class MenuTests : CliAppTests
         terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting };
 
         // The last of the menu, once it is there.
-        terminal.Keys.Hold(() => terminal.Saw("What to do")).Press(Keys.Up, Keys.Enter);
+        terminal.Keys.Hold(() => terminal.Saw("What to do")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync(["--demo"], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
@@ -179,7 +184,7 @@ public sealed class MenuTests : CliAppTests
         // two after the version.
         var title = $"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}";
         using var terminal = new TestTerminal(width: title.Length + 2 + $"v{CliApp.Version}".Length + 2 - 1, height: 30);
-        terminal.Keys.Press(Keys.Up, Keys.Enter);
+        terminal.Keys.Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync([], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
@@ -195,7 +200,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // Three open tasks: one to take, one that opens after it, and one that a label holds.
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[1] == "graphql" => "total\t3\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n"
@@ -203,7 +208,7 @@ public sealed class MenuTests : CliAppTests
             _ => "",
         }, ""));
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), processes, []);
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
         Assert.Contains("❯ Run          2 tasks", output, StringComparison.Ordinal);
@@ -219,7 +224,7 @@ public sealed class MenuTests : CliAppTests
         // A record of the task that waits for another: a run goes on with it before any other, and it counts.
         var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local"));
         File.WriteAllText(Path.Combine(local.FullName, "session.json"), """{"task":13,"session":"abc12345","since":"2030-01-01T09:00:00.0000000Z","state":"working"}""");
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[1] == "graphql" => "total\t2\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n"
@@ -227,7 +232,7 @@ public sealed class MenuTests : CliAppTests
             _ => "",
         }, ""));
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), processes, []);
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
         Assert.Contains("❯ Run          interrupted: #13 Describe the export", output, StringComparison.Ordinal);
@@ -239,10 +244,10 @@ public sealed class MenuTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var processes = new FakeProcesses((command, _) => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "total\t0\n", ""));
+        var processes = new ScriptedProcesses((command, _) => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "total\t0\n", ""));
 
         // Enter on `Run`, which counts again and opens nothing; then the last of the menu.
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Enter, Keys.Up, Keys.Enter), processes, []);
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
         Assert.Contains("❯ Run          no tasks", output, StringComparison.Ordinal);
@@ -259,7 +264,7 @@ public sealed class MenuTests : CliAppTests
 
         // One task for the menu to count; when the run reads the tasks there is none left, so it is over at once.
         var counted = false;
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[0] == "label" => Labels,
@@ -269,7 +274,7 @@ public sealed class MenuTests : CliAppTests
         }, ""));
 
         // `Run`; the menu is back when the run is over, and the last of it leaves.
-        var keys = new Keys().Press(Keys.Enter).Hold(() => Shown("0 tasks in 0 s")).Press(Keys.Up, Keys.Enter);
+        var keys = new Keys().Press(Keys.Enter).Hold(() => Shown("0 tasks in 0 s")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var (exit, output, error) = await RunLiveAsync(keys, processes, []);
 
         Assert.Equal(0, exit);
@@ -292,7 +297,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // A task for the menu to count; the login of Claude Code takes until it is told to stop.
-        var processes = new FakeProcesses(
+        var processes = new ScriptedProcesses(
             (command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
             {
                 "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
@@ -329,7 +334,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // A task to take; Claude Code says that it is not logged in, and the repository lacks a label of the settings.
-        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        var processes = new ScriptedProcesses((command, arguments) => (command, arguments[0]) switch
         {
             ("claude", "auth") => new ProcessResult(ProcessStatus.Exited, 1, """{"loggedIn": false}""", ""),
             ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
@@ -340,7 +345,7 @@ public sealed class MenuTests : CliAppTests
         using var terminal = new TestTerminal(width: 120, height: 30);
 
         // `Run`, which opens nothing; then the last of the menu.
-        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        terminal.Keys.Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
@@ -370,7 +375,7 @@ public sealed class MenuTests : CliAppTests
 
         // A task to take; the login of Claude Code fails with an error nobody foresaw.
         Exception unforeseen = kind == nameof(IOException) ? new IOException(words) : new OperationCanceledException(words);
-        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        var processes = new ScriptedProcesses((command, arguments) => (command, arguments[0]) switch
         {
             ("claude", "auth") => throw unforeseen,
             ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
@@ -381,7 +386,7 @@ public sealed class MenuTests : CliAppTests
         using var terminal = new TestTerminal(width: 160, height: 30);
 
         // `Run`, which opens nothing; then the last of the menu.
-        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        terminal.Keys.Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
@@ -404,7 +409,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // A task to take, one that opens after it, one that a label of the settings holds and one with a label to skip.
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[0] == "label" => "feature\ndesign\nmanual\n",
@@ -415,10 +420,11 @@ public sealed class MenuTests : CliAppTests
         }, ""));
 
         // `Skip labels`, where `design` is chosen; the list again, left with Escape; then the last of the menu.
-        var keys = new Keys().Press(
-            Keys.Up, Keys.Up, Keys.Enter, Keys.Down, Keys.Space, Keys.Enter,
-            Keys.Up, Keys.Up, Keys.Enter, Keys.Escape,
-            Keys.Up, Keys.Enter);
+        var keys = new Keys()
+            .Until("❯ Skip labels", Keys.Up).Press(Keys.Enter)
+            .Until("❯ ◯ design", Keys.Down).Press(Keys.Space, Keys.Enter)
+            .Until("❯ Skip labels", Keys.Up).Press(Keys.Enter, Keys.Escape)
+            .Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, []);
 
         Assert.Equal(0, exit);
@@ -450,11 +456,11 @@ public sealed class MenuTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var processes = new FakeProcesses((command, _) => command == "gh"
+        var processes = new ScriptedProcesses((command, _) => command == "gh"
             ? new ProcessResult(gh, 0, "", gh == ProcessStatus.NotStarted ? "Permission denied" : "")
             : new ProcessResult(ProcessStatus.Exited, 0, origin, ""));
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Up, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter), processes, []);
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Skip labels", Keys.Up).Press(Keys.Enter).Until("❯ Back", Keys.Down).Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
         Assert.Contains($"{why}\u001b[K\r\n", output, StringComparison.Ordinal);
@@ -469,11 +475,11 @@ public sealed class MenuTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var processes = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
+        var processes = new ScriptedProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
             ? new ProcessResult(ProcessStatus.TimedOut, 0, "", "")
             : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
 
-        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Up, Keys.Enter, Keys.Enter, Keys.Up, Keys.Enter), processes, []);
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Skip labels", Keys.Up).Press(Keys.Enter).Until("❯ Back", Keys.Down).Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, []);
 
         Assert.Equal(0, exit);
         Assert.Contains("GitHub did not answer, so the labels cannot be read.\u001b[K\r\n", output, StringComparison.Ordinal);
@@ -488,10 +494,10 @@ public sealed class MenuTests : CliAppTests
         // `feature` and `docs` among the made-up labels; the run, which goes on with the task of the record and
         // takes none with them; the menu it comes back to counts the tasks made up anew without them; and out.
         var keys = new Keys()
-            .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Up, Keys.Up, Keys.Enter)
-            .Hold(() => Shown("◯ question")).Press(Keys.Down, Keys.Space, Keys.Down, Keys.Down, Keys.Space, Keys.Enter)
-            .Hold(() => Shown("Skip labels  feature, docs")).Press(Keys.Enter)
-            .Hold(() => Shown("❯ Run          2 tasks")).Press(Keys.Up, Keys.Enter);
+            .Hold(() => Shown("interrupted: #100 Rename the settings page")).Until("❯ Skip labels", Keys.Up).Press(Keys.Enter)
+            .Hold(() => Shown("◯ question")).Until("❯ ◯ feature", Keys.Down).Press(Keys.Space).Until("❯ ◯ docs", Keys.Down).Press(Keys.Space, Keys.Enter)
+            .Hold(() => Shown("Skip labels  feature, docs")).Until("❯ Run", Keys.Up).Press(Keys.Enter)
+            .Hold(() => Shown("❯ Run          2 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
 
         var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
 
@@ -510,7 +516,7 @@ public sealed class MenuTests : CliAppTests
         await ChooseAllAsync();
 
         // Once the menu is there, the login of `gh` takes until it is told to stop, as when GitHub does not answer.
-        var processes = new FakeProcesses(
+        var processes = new ScriptedProcesses(
             (command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
             {
                 "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
@@ -522,7 +528,7 @@ public sealed class MenuTests : CliAppTests
         // Settings; Escape while they are opened; the menu stays as it was, and Escape twice leaves it.
         var keys = new Keys()
             .Hold(() => Shown("What to do"))
-            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter)
+            .Until("❯ Settings", Keys.Down).Press(Keys.Enter)
             .Hold(() => Shown("esc stop"))
             .Press(Keys.Escape)
             .Hold(() => Shown("enter choose · ctrl+c exit", 2))
@@ -547,9 +553,10 @@ public sealed class MenuTests : CliAppTests
 
         // Settings; the skill, typed and left with Escape; saved; out of the settings and of the menu.
         var keys = new Keys()
-            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Down, Keys.Down, Keys.Down, Keys.Down, Keys.Enter)
+            .Until("❯ Settings", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Skill", Keys.Down).Press(Keys.Enter)
             .Type("night-shift")
-            .Press(Keys.Escape, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+            .Press(Keys.Escape).Until("❯ Save", Keys.Up).Press(Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
@@ -572,9 +579,10 @@ public sealed class MenuTests : CliAppTests
 
         // Settings; the branch, typed and confirmed; not saved; out.
         var keys = new Keys()
-            .Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter, Keys.Up, Keys.Up, Keys.Up, Keys.Enter)
+            .Until("❯ Settings", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Branch", Keys.Up).Press(Keys.Enter)
             .Type("develop")
-            .Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
+            .Press(Keys.Enter).Until("❯ Don't save", Keys.Down).Press(Keys.Enter, Keys.Escape, Keys.Escape, Keys.Escape);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
@@ -594,7 +602,7 @@ public sealed class MenuTests : CliAppTests
         // comes back to the menu by itself when it is over, and out.
         var keys = new Keys()
             .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Enter)
-            .Hold(() => Shown("What to do", times: 2)).Press(Keys.Up, Keys.Enter);
+            .Hold(() => Shown("What to do", times: 2)).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
 
         var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
 
@@ -637,11 +645,11 @@ public sealed class MenuTests : CliAppTests
             .Hold(() => Shown("Read src/Orders/Order.cs")).Type("/")
             .Hold(() => Shown("❯ stop")).Press(Keys.Down, Keys.Enter)
             .Hold(() => Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
-            .Hold(() => Shown("5 tasks")).Press(Keys.Up, Keys.Enter);
+            .Hold(() => Shown("5 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var context = Context(null) with
         {
             Clock = new PacedClock(),
-            Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting },
+            Terminal = new TerminalDevice(Watched(keys).Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting },
         };
 
         var (exit, output, error) = await RunAsync(context, ["--demo"]);
@@ -666,7 +674,7 @@ public sealed class MenuTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
 
-        var (_, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Up, Keys.Enter), ["--demo"]);
+        var (_, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Exit", Keys.Up).Press(Keys.Enter), ["--demo"]);
 
         Assert.Contains("✔ Project          none", output, StringComparison.Ordinal);
         Assert.Contains("✔ Blocking labels  manual", output, StringComparison.Ordinal);
@@ -679,7 +687,7 @@ public sealed class MenuTests : CliAppTests
         WriteSettings(Settings);
         await ChooseAllAsync();
         GoingRun(Working);
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" => "https://github.com/acme/rocket.git\n",
             "gh" when arguments is ["api", "graphql", ..] => "total\t1\n12\tExport the orders as a file\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
@@ -688,7 +696,7 @@ public sealed class MenuTests : CliAppTests
         using var terminal = new TestTerminal(width: 120, height: 30);
 
         // `Run`, which opens nothing; then the last of the menu.
-        terminal.Keys.Press(Keys.Enter, Keys.Up, Keys.Enter);
+        terminal.Keys.Press(Keys.Enter).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var exit = await CliApp.RunAsync([], Context(processes) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);

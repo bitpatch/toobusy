@@ -108,7 +108,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks();
         session.Deaf = "it is deaf";
-        clock.At(TimeSpan.FromSeconds(10), () => Run.Send(RunCommand.Abort));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
         await RunAsync();
 
@@ -128,7 +128,7 @@ public sealed partial class SupervisorTests
 
         await RunAsync();
 
-        Assert.Equal([(3, RunMark.Done, 3), (5, RunMark.Partial, 3), (7, RunMark.Owner, 99)], log.Ends);
+        Assert.Equal([(3, RunMark.Done, Seconds(policy.Poll)), (5, RunMark.Partial, Seconds(policy.Poll)), (7, RunMark.Owner, Seconds(OwnerWaited))], log.Ends);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         assistant.Session(3).Works(2).Asks().Then().Works().Ends(Done);
-        clock.At(TimeSpan.FromSeconds(20), () => Run.Send(RunCommand.Stop));
+        clock.At(AfterLook(3), () => Run.Send(RunCommand.Stop));
 
         await RunAsync();
 
@@ -167,7 +167,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(RunCommands.Stop | RunCommands.Abort, working.Available);
 
         var waiting = log.Statuses.First(status => status.Phase == RunPhase.WaitingForOwner);
-        Assert.Equal(FakeClock.Start + TimeSpan.FromSeconds(96), waiting.Until);
+        Assert.Equal(FakeClock.Start + 2 * policy.Poll + policy.OwnerWait, waiting.Until);
         Assert.Equal(RunCommands.Stop | RunCommands.Abort | RunCommands.Nudge | RunCommands.Hold, waiting.Available);
 
         var stopping = log.Statuses.First(status => status.Stopping);

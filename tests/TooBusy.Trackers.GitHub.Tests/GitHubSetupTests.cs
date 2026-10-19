@@ -10,17 +10,17 @@ public class GitHubSetupTests
     const string Rocket = "https://github.com/orgs/acme/projects/7";
     const string Scope = "Your GitHub login cannot work with projects. Run `gh auth refresh -s project` and try again.";
 
-    readonly FakeProcesses processes = new();
+    readonly ScriptedProcesses processes = new();
 
     [Fact]
     public async Task TheLabelsAreTheLinesOfTheAnswer()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("bug\ngood first issue\r\n\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("bug\ngood first issue\r\n\n"));
 
         var labels = await Setup().ReadLabelsAsync("acme/rocket", TestContext.Current.CancellationToken);
 
         Assert.Equal(["bug", "good first issue"], labels);
-        var (command, arguments) = Assert.Single(processes.Asked);
+        var (command, arguments, _) = Assert.Single(processes.Asked);
         Assert.Equal("gh", command);
         Assert.Equal(["label", "list", "--repo", "acme/rocket", "--limit", "1000", "--json", "name", "--jq", ".[].name"], arguments);
     }
@@ -28,7 +28,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task LabelsThatCannotBeReadAreNone()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Not Found"));
 
         Assert.Empty(await Setup().ReadLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
     }
@@ -36,8 +36,8 @@ public class GitHubSetupTests
     [Fact]
     public async Task LabelsThatCannotBeReadAreToldApartFromNoLabels()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Not Found"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
 
         Assert.Equal([], await Setup().FindLabelsAsync("acme/rocket", TestContext.Current.CancellationToken));
@@ -55,7 +55,7 @@ public class GitHubSetupTests
         processes.Answers.Enqueue(new ProcessResult(status, exitCode, "acme/rocket\n", ""));
 
         Assert.Equal(expected, await Setup().CanReadRepositoryAsync("acme/rocket", TestContext.Current.CancellationToken));
-        var (command, arguments) = Assert.Single(processes.Asked);
+        var (command, arguments, _) = Assert.Single(processes.Asked);
         Assert.Equal("gh", command);
         Assert.Equal(["api", "repos/acme/rocket", "--jq", ".full_name"], arguments);
     }
@@ -63,9 +63,9 @@ public class GitHubSetupTests
     [Fact]
     public async Task TheAccessToABoardIsWhatTheToolTells()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
 
         Assert.Equal(BoardAccess.Readable, await Setup().CheckBoardAsync(Rocket, TestContext.Current.CancellationToken));
@@ -79,12 +79,12 @@ public class GitHubSetupTests
     [Fact]
     public async Task TheStatusesOfABoardAreTheOptionsOfItsStatusField()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("board\nstatus\tBacklog\r\nstatus\tIn Progress\nstatus\tDone\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("board\nstatus\tBacklog\r\nstatus\tIn Progress\nstatus\tDone\n"));
 
         var statuses = await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken);
 
         Assert.Equal(["Backlog", "In Progress", "Done"], statuses);
-        var (command, arguments) = Assert.Single(processes.Asked);
+        var (command, arguments, _) = Assert.Single(processes.Asked);
         Assert.Equal("gh", command);
         Assert.Equal(["api", "graphql", "-f", "login=acme", "-F", "number=7", "-f"], arguments.Take(7));
         Assert.Equal(
@@ -98,7 +98,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task TheStatusesOfTheBoardOfAUserAreAskedOfTheUser()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("board\nstatus\tTodo\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("board\nstatus\tTodo\n"));
 
         Assert.Equal(["Todo"], await Setup().ReadStatusesAsync("https://github.com/users/ann/projects/2", TestContext.Current.CancellationToken));
 
@@ -112,11 +112,11 @@ public class GitHubSetupTests
     {
         // The board is there and has no such field; then a board that is not there, a login without the scope, a
         // slow answer and an answer that names no board.
-        processes.Answers.Enqueue(FakeProcesses.Answered("board\n"));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("board\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query."));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         Assert.Equal([], await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
         Assert.Null(await Setup().ReadStatusesAsync(Rocket, TestContext.Current.CancellationToken));
@@ -130,7 +130,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task ABoardThatCanBeReadIsNotRefused()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\n"));
 
         Assert.Null(await Setup().RefuseBoardAsync(Rocket, TestContext.Current.CancellationToken));
 
@@ -143,7 +143,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task TheBoardOfAUserIsAskedOfTheUser()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\n"));
 
         await Setup().RefuseBoardAsync("https://github.com/users/ann/projects/2", TestContext.Current.CancellationToken);
 
@@ -153,10 +153,10 @@ public class GitHubSetupTests
     [Fact]
     public async Task ABoardIsRefusedForTheReasonTheToolGives()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project']"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Could not resolve to a ProjectV2 with the number 7."));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project']"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
-        processes.Answers.Enqueue(FakeProcesses.Answered("\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("\n"));
 
         Assert.Equal("The project cannot be read: it does not exist, or you have no access to it.", await Setup().RefuseBoardAsync(Rocket, TestContext.Current.CancellationToken));
         Assert.Equal(Scope, await Setup().RefuseBoardAsync(Rocket, TestContext.Current.CancellationToken));
@@ -168,8 +168,8 @@ public class GitHubSetupTests
     [Fact]
     public async Task ABoardIsMadeForItsOwnerAndItsAddressIsGiven()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("O_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered(Rocket + "\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("O_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(Rocket + "\n"));
 
         var address = await Setup().CreateBoardAsync(new SetupOwner("acme", true), "Rocket \"one\"", TestContext.Current.CancellationToken);
 
@@ -189,8 +189,8 @@ public class GitHubSetupTests
     [Fact]
     public async Task ABoardThatCannotBeMadeSaysWhy()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("U_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Your token has not been granted the required scopes"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("U_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Your token has not been granted the required scopes"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateBoardAsync(new SetupOwner("ann", false), "Rocket", TestContext.Current.CancellationToken));
 
@@ -201,7 +201,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task AnOwnerThatCannotBeReadStopsTheMaking()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to an Organization"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Could not resolve to an Organization"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Setup().CreateBoardAsync(new SetupOwner("acme", true), "Rocket", TestContext.Current.CancellationToken));
 
@@ -212,8 +212,8 @@ public class GitHubSetupTests
     [Fact]
     public async Task ABoardIsLinkedToTheRepositoryByTheirIds()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\tR_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("R_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\tR_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("R_1\n"));
 
         await Setup().LinkBoardAsync(Rocket, "acme/rocket", TestContext.Current.CancellationToken);
 
@@ -234,13 +234,13 @@ public class GitHubSetupTests
     [Fact]
     public async Task ALinkThatCannotBeMadeSaysSo()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\tnull\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\tnull\n"));
 
         var missing = await Assert.ThrowsAsync<TrackerException>(() => Setup().LinkBoardAsync(Rocket, "acme/rocket", TestContext.Current.CancellationToken));
         Assert.Equal("The project could not be linked to acme/rocket.", missing.Message);
         Assert.Single(processes.Asked);
 
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVT_1\tR_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVT_1\tR_1\n"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
 
         var silent = await Assert.ThrowsAsync<TrackerException>(() => Setup().LinkBoardAsync(Rocket, "acme/rocket", TestContext.Current.CancellationToken));
@@ -250,11 +250,11 @@ public class GitHubSetupTests
     [Fact]
     public async Task ALabelIsMadeInTheRepository()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await Setup().CreateLabelAsync("acme/rocket", "needs owner", TestContext.Current.CancellationToken);
 
-        var (command, arguments) = Assert.Single(processes.Asked);
+        var (command, arguments, _) = Assert.Single(processes.Asked);
         Assert.Equal("gh", command);
         Assert.Equal(["label", "create", "needs owner", "--repo", "acme/rocket"], arguments);
     }
@@ -262,7 +262,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task ALabelThatIsThereAlreadyIsLeftAsItIs()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("label with name \"manual\" already exists; use `--force` to update its color and description"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("label with name \"manual\" already exists; use `--force` to update its color and description"));
 
         await Setup().CreateLabelAsync("acme/rocket", "manual", TestContext.Current.CancellationToken);
     }
@@ -270,7 +270,7 @@ public class GitHubSetupTests
     [Fact]
     public async Task ALabelThatCannotBeMadeSaysSo()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("HTTP 403: Resource not accessible"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("HTTP 403: Resource not accessible"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"));
 

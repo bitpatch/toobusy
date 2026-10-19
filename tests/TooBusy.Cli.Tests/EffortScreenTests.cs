@@ -37,7 +37,7 @@ public sealed class EffortScreenTests : IDisposable
     [Fact]
     public void WhereThereIsSomewhereToGoBackToTheListEndsWithBack()
     {
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter);
+        terminal.Keys.Until("❯ Back", Keys.Down).Press(Keys.Enter);
 
         using var page = terminal.Open();
         Assert.Null(EffortScreen.Ask(page, "high"));

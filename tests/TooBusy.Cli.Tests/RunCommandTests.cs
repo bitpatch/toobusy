@@ -144,7 +144,7 @@ public sealed class RunCommandTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
         {
             ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
@@ -216,28 +216,16 @@ public sealed class RunCommandTests : CliAppTests
         // One open task, and a session of Claude Code that works on it for as long as it is let. One more Ctrl+C
         // while the session is stopped is the terminal's own, and stops the tool from outside.
         using var outside = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        var processes = new FakeProcesses((command, arguments) =>
+        var processes = SessionMachine("working", (command, arguments) =>
         {
             if (stoppedMeanwhile && command == "claude" && arguments.Contains("stop"))
                 outside.Cancel();
-            return new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
-            {
-                ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-                ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-                ("gh", "api") => "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-                ("gh", "label") => Labels,
-                ("gh", "issue") => "Write it as CSV.\n",
-                ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-                ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"working","status":"busy","pid":1}]""",
-                _ => "",
-            }, "");
         });
+
         // The clock is the real one here: with a clock that makes nobody wait, a session that never ends would be
         // looked at without end while the keys are waited for.
         var context = Context(processes) with { Home = personal.FullName, Clock = new TooBusy.Infrastructure.Machine.SystemClock() };
-        var transcript = Transcript(context, "abc12345-0000");
-        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
-        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2099-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"tool_use","name":"Bash","input":{"command":"dotnet test"}}]}}""" + "\n");
+        Converse(context, RunsTheTests);
         var keys = new Keys()
             .Hold(() => Shown("Bash: dotnet test")).Press(Keys.ControlC)
             .Hold(() => Shown("press ctrl+c again to stop the session and exit")).Press(Keys.ControlC);
@@ -284,7 +272,7 @@ public sealed class RunCommandTests : CliAppTests
         await ChooseAllAsync();
 
         // Claude Code is there and says that it is not logged in; the repository lacks a label of the settings.
-        var processes = new FakeProcesses((command, arguments) => (command, arguments[0]) switch
+        var processes = new ScriptedProcesses((command, arguments) => (command, arguments[0]) switch
         {
             ("claude", "auth") => new ProcessResult(ProcessStatus.Exited, 1, """{"loggedIn": false}""", ""),
             ("git", _) => new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", ""),
@@ -331,22 +319,9 @@ public sealed class RunCommandTests : CliAppTests
         WriteSettings(Settings + "\npermission-mode = \"dontAsk\"\n");
         await ChooseAllAsync();
 
-        var closed = false;
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
-        {
-            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-            ("gh", "label") => Labels,
-            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
-            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
-            _ => "",
-        }, ""));
+        var processes = SessionMachine("done");
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = Transcript(context, "abc12345-0000");
-        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
-        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+        Converse(context, SaysDone);
 
         var (exit, output, error) = await RunAsync(context, ["run"]);
 
@@ -366,22 +341,9 @@ public sealed class RunCommandTests : CliAppTests
         await ChooseAllAsync();
 
         // The files of the skill are not committed in this test; `git` says that the working tree is clean.
-        var closed = false;
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
-        {
-            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-            ("gh", "label") => Labels,
-            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
-            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
-            _ => "",
-        }, ""));
+        var processes = SessionMachine("done");
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = Transcript(context, "abc12345-0000");
-        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
-        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+        Converse(context, SaysDone);
 
         var (exit, output, error) = await RunAsync(context, ["run"]);
 
@@ -404,22 +366,9 @@ public sealed class RunCommandTests : CliAppTests
 
         // One open task; Claude Code starts a session for it, which has ended its turn when it is looked at, and
         // its conversation says that the task is done.
-        var closed = false;
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
-        {
-            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-            ("gh", "label") => Labels,
-            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
-            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
-            _ => "",
-        }, ""));
+        var processes = SessionMachine("done");
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = Transcript(context, "abc12345-0000");
-        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
-        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+        Converse(context, SaysDone);
 
         var (exit, output, error) = await RunAsync(context, ["run"]);
 
@@ -467,27 +416,14 @@ public sealed class RunCommandTests : CliAppTests
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        var closed = false;
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
-        {
-            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
-            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
-            ("gh", "label") => Labels,
-            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
-            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
-            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
-            _ => "",
-        }, ""));
+        var processes = SessionMachine("done");
 
         // Claude Code keeps its folder where `CLAUDE_CONFIG_DIR` says, not under the home folder, and writes the
         // conversation of the session there.
         var elsewhere = personal.CreateSubdirectory("elsewhere").FullName;
         var context = Context(processes) with { Home = personal.FullName, Variables = name => name == "CLAUDE_CONFIG_DIR" ? elsewhere : null };
-        var transcript = Transcript(context, "abc12345-0000");
-        Assert.StartsWith(Path.Combine(elsewhere, "projects") + Path.DirectorySeparatorChar, transcript, StringComparison.Ordinal);
-        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
-        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+        Assert.StartsWith(Path.Combine(elsewhere, "projects") + Path.DirectorySeparatorChar, Transcript(context, "abc12345-0000"), StringComparison.Ordinal);
+        Converse(context, SaysDone);
 
         var (exit, output, error) = await RunAsync(context, ["run"]);
 
@@ -502,7 +438,7 @@ public sealed class RunCommandTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await ChooseAllAsync();
-        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[0] == "label" => Labels,
@@ -625,7 +561,7 @@ public sealed class RunCommandTests : CliAppTests
         WriteSettings(Settings);
         await ChooseAllAsync();
         GoingRun(Working);
-        var processes = new FakeProcesses((command, _) => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
+        var processes = new ScriptedProcesses((command, _) => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
 
         var (exit, output, error) = await RunAsync(Context(processes), ["run"]);
 
@@ -650,8 +586,8 @@ public sealed class RunCommandTests : CliAppTests
 
         // What `status` says while the run reads its tasks.
         (int Exit, string Output, string Error)? meanwhile = null;
-        FakeProcesses? processes = null;
-        processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        ScriptedProcesses? processes = null;
+        processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
         {
             "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
             "gh" when arguments[0] == "label" => Labels,
@@ -700,4 +636,42 @@ public sealed class RunCommandTests : CliAppTests
     // where its `CLAUDE_CONFIG_DIR` says.
     string Transcript(CliContext context, string conversation) =>
         TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, context.Home, context.Variables).Transcript(conversation);
+
+    // A reply that ends the turn of a session with the task done, and a step of a session that works.
+    const string SaysDone = """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""";
+    const string RunsTheTests = """{"type":"assistant","timestamp":"2099-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"tool_use","name":"Bash","input":{"command":"dotnet test"}}]}}""";
+
+    // The machine of a run of one task, #12 Export the data, in a project cloned from acme/rocket whose working tree
+    // is clean. `gh` lists the task and the labels of the settings, and takes the task out of the queue once it is
+    // closed; Claude Code starts one session for it, abc12345, and lists that session in the state it is given.
+    // `running` sees every command as it is asked. What the session says is written by `Converse`.
+    static ScriptedProcesses SessionMachine(string state, Action<string, IReadOnlyList<string>>? running = null)
+    {
+        var closed = false;
+        var status = state == "done" ? "idle" : "busy";
+        return new ScriptedProcesses((command, arguments) =>
+        {
+            running?.Invoke(command, arguments);
+            return new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+            {
+                ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+                ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+                ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+                ("gh", "label") => Labels,
+                ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
+                ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+                ("claude", "agents") => $$"""[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"{{state}}","status":"{{status}}","pid":1}]""",
+                _ => "",
+            }, "");
+        });
+    }
+
+    // Writes the line as the last of the conversation of the session of `SessionMachine`, where Claude Code of the
+    // context keeps it.
+    void Converse(CliContext context, string line)
+    {
+        var transcript = Transcript(context, "abc12345-0000");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, line + "\n");
+    }
 }

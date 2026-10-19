@@ -9,8 +9,8 @@ public sealed class DoctorCommandTests : CliAppTests
     public async Task DoctorTellsEveryCheckOfAProjectThatIsReady()
     {
         GitRepository();
-        WriteSettings(Settings.Replace("type = \"github\"", "type = \"github\"\nboard = \"https://github.com/orgs/acme/projects/1\"", StringComparison.Ordinal));
-        var processes = GitHub(milestones: "", Labels);
+        WriteSettings(SettingsWithABoard);
+        var processes = GitHub(milestones: "", "feature\nbug\ndraft\nneeds-owner\ninterrupted\n");
 
         var (exit, output, error) = await RunAsync(Context(processes), ["doctor"]);
 

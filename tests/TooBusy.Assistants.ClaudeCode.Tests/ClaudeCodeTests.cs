@@ -986,7 +986,8 @@ sealed class FakeClaude : IProcessRunner
     // What `claude agents` answers instead, when it is to fail.
     public ProcessResult? List { get; set; }
 
-    public Func<IReadOnlyList<string>, ProcessResult> Answer { get; set; } = _ => new ProcessResult(ProcessStatus.Exited, 0, "", "");
+    // What any other command answers; one the test gives no answer for fails it, with the command named.
+    public Func<IReadOnlyList<string>, ProcessResult> Answer { get; set; } = arguments => throw new InvalidOperationException($"The test has no answer for claude {string.Join(' ', arguments)}");
 
     public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {

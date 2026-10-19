@@ -33,7 +33,7 @@ public sealed partial class SupervisorTests
         Assert.Equal([Record(5).Session], assistant.Found);
         Assert.Empty(session.Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(5));
+        AssertDid(5, "status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done");
         Assert.Equal(
             [
                 "✻ v0.2.0 · 2 tasks in the queue · the assistant's own model · high effort · auto mode",
@@ -57,7 +57,7 @@ public sealed partial class SupervisorTests
         Assert.Empty(session.Told);
         Assert.Contains("→ #5 Task 5 — taken again · its session ended while nobody watched · fake attach 5", log.Lines);
         Assert.Contains("◐ #5 Task 5 — done in part in 0 s", log.Lines);
-        Assert.Equal(["status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        AssertDid("status 5 InProgress", "assign 5", "comment 5", "close 5", "status 5 Done");
         Assert.Null(state.Record);
     }
 
@@ -89,7 +89,7 @@ public sealed partial class SupervisorTests
         Assert.Equal([Briefing.AfterStop(5)], session.Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
         Assert.Contains("→ #5 Task 5 — taken again · its session was stopped, and goes on · fake attach 5", log.Lines);
-        Assert.Contains("✔ #5 Task 5 — done in 3 s", log.Lines);
+        Assert.Contains($"✔ #5 Task 5 — done in {Spoken.Time(policy.Poll)}", log.Lines);
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
         Assert.Equal([Briefing.AfterLimit(5)], assistant.Session(5).Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did.Take(6));
+        AssertDid(5, "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done");
         Assert.Null(state.Record);
         Assert.Contains("→ #5 Task 5 — taken again · its session goes on after the usage limit · fake attach 5", log.Lines);
     }
@@ -166,7 +166,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
         Assert.Equal([Briefing.AfterAbort(5)], session.Told);
         Assert.Equal([3], assistant.Started.Select(started => started.Task));
-        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted"], tracker.Did.Take(3));
+        AssertDid(5, "status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done");
         Assert.Contains("→ #5 Task 5 — taken again · its session goes on after /abort · fake attach 5", log.Lines);
     }
 
@@ -231,9 +231,9 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did.Take(5));
+        AssertDid(3, "status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal((3, "**Done.**\n\nDid it.\n\n_Session: `fake attach 3`_"), tracker.Comments[0]);
-        Assert.Contains("✔ #3 Task 3 — done in 3 s", log.Lines);
+        Assert.Contains($"✔ #3 Task 3 — done in {Spoken.Time(policy.Poll)}", log.Lines);
         Assert.Equal([(3, RunMark.Done), (5, RunMark.Done)], Ended);
 
         // A task that is done is not asked for: it is closed, whoever closed it.

@@ -8,11 +8,12 @@ public class GitOriginTests
     [Fact]
     public async Task TheOriginOnGitHubNamesTheRepository()
     {
-        var processes = new FakeProcesses(new ProcessResult(ProcessStatus.Exited, 0, "git@github.com:bitpatch/toobusy.git\n", ""));
+        var processes = new ScriptedProcesses(new ProcessResult(ProcessStatus.Exited, 0, "git@github.com:bitpatch/toobusy.git\n", ""));
 
         Assert.Equal("bitpatch/toobusy", await new GitOrigin(processes).ReadAsync("/work/toobusy", TestContext.Current.CancellationToken));
-        Assert.Equal("git", processes.Command);
-        Assert.Equal(["-C", "/work/toobusy", "remote", "get-url", "origin"], processes.Arguments);
+        var (command, arguments, _, _, _) = Assert.Single(processes.Asked);
+        Assert.Equal("git", command);
+        Assert.Equal(["-C", "/work/toobusy", "remote", "get-url", "origin"], arguments);
     }
 
     [Theory]
@@ -22,25 +23,8 @@ public class GitOriginTests
     [InlineData(ProcessStatus.TimedOut, 0, "")]
     public async Task WithoutAnOriginOnGitHubThereIsNoRepository(ProcessStatus status, int exitCode, string output)
     {
-        var processes = new FakeProcesses(new ProcessResult(status, exitCode, output, "error: No such remote 'origin'"));
+        var processes = new ScriptedProcesses(new ProcessResult(status, exitCode, output, "error: No such remote 'origin'"));
 
         Assert.Null(await new GitOrigin(processes).ReadAsync("/work/toobusy", TestContext.Current.CancellationToken));
-    }
-
-    // Gives the result it is told to and remembers what it was asked to run.
-    sealed class FakeProcesses(ProcessResult result) : IProcessRunner
-    {
-        public string? Command { get; private set; }
-
-        public IReadOnlyList<string> Arguments { get; private set; } = [];
-
-        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            Command = command;
-            Arguments = arguments;
-            return Task.FromResult(result);
-        }
-
-        public IProcessRunner Inside(string folder) => this;
     }
 }

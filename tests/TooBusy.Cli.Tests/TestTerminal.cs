@@ -12,6 +12,7 @@ public sealed partial class TestTerminal : IDisposable
     {
         Tape = new Scroll(width, height);
         Output = new Recorded(Tape);
+        Keys.Shown = () => Text;
         Device = new TerminalDevice(Keys.Read, () => (width, height))
         {
             TakeControlC = taken => ControlCTaken = taken,
@@ -52,8 +53,25 @@ public sealed partial class TestTerminal : IDisposable
 
     public string[] Frame => Lines(Output.ToString().Split("\u001b[H")[^1]);
 
+    // The row of the first line of the last frame that has the text, counted from one as the terminal counts it. A
+    // test finds a line by what it says and not by its place, which moves whenever a line is added above it or to
+    // the foot.
+    public int RowOf(string text)
+    {
+        var row = Array.FindIndex(Frame, line => line.Contains(text, StringComparison.Ordinal)) + 1;
+        Assert.True(row > 0, $"No line of the last frame has \"{text}\". The frame is:\n{Text}");
+        return row;
+    }
+
+    // What puts the cursor at a column of the line of the last frame that has the text, as the screen writes it to
+    // draw there.
+    public string At(string text, int column) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"\u001b[{RowOf(text)};{column}H");
+
     // The frame without its empty lines and its rules, as one text.
-    public string Text => Told(Frame);
+    public string Text => TextOf(Output.ToString());
+
+    // The last frame of what was written, read as `Text` reads it.
+    public static string TextOf(string written) => Told(Lines(written.Split("\u001b[H")[^1]));
 
     // Fails unless some frame, the last one or one before it, had the text; a frame is read without its empty lines
     // and its rules.

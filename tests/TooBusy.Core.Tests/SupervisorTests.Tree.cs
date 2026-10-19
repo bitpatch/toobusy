@@ -26,7 +26,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
         Assert.Null(state.Record);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.Equal(
             (3, Briefing.Stopped("its session left changes in the working tree", "Did it.", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
@@ -44,7 +44,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal("#3 left 2 commits that are not pushed · fake attach 3", result.Why);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.StartsWith("**Failed.** The run stopped over this task: its session left 2 commits that are not pushed.", tracker.Comments[0].Text, StringComparison.Ordinal);
     }
 
@@ -72,9 +72,9 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 0) { Partial = 1 }, result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal((3, $"**Done in part.** What is left is a task that the session made: the report names it.\n\n{report}\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
-        Assert.Contains("◐ #3 Task 3 — done in part in 3 s", log.Lines);
+        Assert.Contains($"◐ #3 Task 3 — done in part in {Spoken.Time(policy.Poll)}", log.Lines);
         Assert.Contains("  #3 is closed, with the report of the session as its comment; what is left is a task that the session made", log.Lines);
     }
 

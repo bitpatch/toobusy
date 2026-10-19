@@ -598,7 +598,7 @@ public sealed class InitCommandTests : CliAppTests
     public async Task ADemoOfTheSetupReadsTheOriginAndTheBoardsOfTheUser()
     {
         GitRepository();
-        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
+        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
 
@@ -622,7 +622,7 @@ public sealed class InitCommandTests : CliAppTests
     public async Task ADemoOfTheSetupHasMadeUpBoardsThatCallTheirStatusesOtherwise()
     {
         GitRepository();
-        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/bitpatch/toobusy.git\n" : "owner\tuser\tdenis\n", ""));
+        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/bitpatch/toobusy.git\n" : "owner\tuser\tdenis\n", ""));
 
         // The board of the option, the second of its statuses for a task to do and what is proposed after it, then
         // Enter on every question, the last one included.
@@ -639,7 +639,7 @@ public sealed class InitCommandTests : CliAppTests
     public async Task ADemoOfTheSetupGoesWithMadeUpBoardsWhenTheRealOnesCannotBeRead()
     {
         GitRepository();
-        var processes = new FakeProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+        var processes = new ScriptedProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
 
         // Nothing is verified without a repository, so the statuses of the board are typed: three questions more,
         // each with the name GitHub gives.
@@ -658,10 +658,10 @@ public sealed class InitCommandTests : CliAppTests
     public async Task ADemoOfTheSetupOffersEnoughOwnersToScroll()
     {
         GitRepository();
-        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
+        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
             ? "https://github.com/bitpatch/toobusy.git\n"
             : "owner\torg\tbitpatch\nowner\tuser\tdenis\n", ""));
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Press(Keys.Down, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
+        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Until("❯ example", Keys.Down).Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
@@ -700,7 +700,7 @@ public sealed class InitCommandTests : CliAppTests
 
     // The same machine, whose `gh` answers what is asked about projects too: a board can be read, made for the
     // user and linked to the repository.
-    static FakeProcesses GitHubWithProjects(string labels, string statuses = NewBoard) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    static ScriptedProcesses GitHubWithProjects(string labels, string statuses = NewBoard) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
     {
         "git" => "https://github.com/acme/rocket.git\n",
         "gh" when arguments[0] == "label" => labels,
@@ -716,7 +716,7 @@ public sealed class InitCommandTests : CliAppTests
 
     // A machine whose `gh` is logged in and can make a board for the user, in a project whose `origin` remote is
     // not a GitHub repository.
-    static FakeProcesses ElsewhereWithProjects() => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    static ScriptedProcesses ElsewhereWithProjects() => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
     {
         "git" => "https://gitlab.com/acme/rocket.git\n",
         "gh" when arguments.Any(argument => argument.Contains("createProjectV2", StringComparison.Ordinal)) => "https://github.com/users/ann/projects/9\n",

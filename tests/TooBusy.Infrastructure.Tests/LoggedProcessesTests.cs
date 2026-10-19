@@ -23,7 +23,7 @@ public sealed class LoggedProcessesTests : IDisposable
     [Fact]
     public async Task ACommandThatPassedWithAShortAnswerIsWrittenWithIt()
     {
-        var processes = new LoggedProcesses(new FakeRunner((_, _) => Took(2, Exited(0, "note: started a copy as 953872ed.\nbackgrounded · 953872ed\n"))), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) => Took(2, Exited(0, "note: started a copy as 953872ed.\nbackgrounded · 953872ed\n"))), log);
 
         var result = await processes.RunAsync("claude", ["--bg", "--resume", "1a2b"], Patience, TestContext.Current.CancellationToken);
         log.Dispose();
@@ -37,7 +37,7 @@ public sealed class LoggedProcessesTests : IDisposable
     public async Task ACommandThatPassedWithALongAnswerOrAnAnswerInJsonIsWrittenWithoutIt()
     {
         var nine = string.Concat(Enumerable.Range(1, 9).Select(line => $"line {line}\n"));
-        var processes = new LoggedProcesses(new FakeRunner((command, _) => Exited(0, command == "gh" ? nine : """[{"id":"1a2b3c4d","state":"done"}]""")), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((command, _) => Exited(0, command == "gh" ? nine : """[{"id":"1a2b3c4d","state":"done"}]""")), log);
 
         await processes.RunAsync("gh", ["issue", "list"], Patience, TestContext.Current.CancellationToken);
         await processes.RunAsync("claude", ["agents", "--json", "--all"], Patience, TestContext.Current.CancellationToken);
@@ -51,7 +51,7 @@ public sealed class LoggedProcessesTests : IDisposable
     public async Task ACommandThatFailedHasItsWholeAnswerInTheLog()
     {
         var long_ = string.Concat(Enumerable.Range(1, 20).Select(line => $"line {line}\n"));
-        var processes = new LoggedProcesses(new FakeRunner((_, _) => new ProcessResult(ProcessStatus.Exited, 1, long_, "error: it broke\n")), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) => new ProcessResult(ProcessStatus.Exited, 1, long_, "error: it broke\n")), log);
 
         await processes.RunAsync("claude", ["--bg", "--resume", "1a2b"], Patience, TestContext.Current.CancellationToken);
         log.Dispose();
@@ -65,7 +65,7 @@ public sealed class LoggedProcessesTests : IDisposable
     [Fact]
     public async Task ACommandThatIsNotFoundCouldNotBeStartedOrDidNotEndInItsTimeIsSaidSo()
     {
-        var processes = new LoggedProcesses(new FakeRunner((command, _) => command switch
+        var processes = new LoggedProcesses(new ScriptedProcesses((command, _) => command switch
         {
             "gh" => new ProcessResult(ProcessStatus.NotFound, 0, "", ""),
             "git" => new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"),
@@ -89,7 +89,7 @@ public sealed class LoggedProcessesTests : IDisposable
     [Fact]
     public async Task ACommandThatIsCutIsWrittenSoAndTheCutIsThrownOn()
     {
-        var processes = new LoggedProcesses(new FakeRunner((_, _) =>
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) =>
         {
             clock.Now += TimeSpan.FromMinutes(72);
             throw new OperationCanceledException();
@@ -105,7 +105,7 @@ public sealed class LoggedProcessesTests : IDisposable
     public async Task ALongArgumentIsCutToItsFirstLineAndOneWithASpaceIsQuoted()
     {
         var message = "toobusy runs again: go on with task #12. " + new string('x', 200) + "\nThe rules of this session hold as before.";
-        var processes = new LoggedProcesses(new FakeRunner((_, _) => Exited(0, "")), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) => Exited(0, "")), log);
 
         await processes.RunAsync("claude", ["--bg", "-n", "#12 Export the data", message], Patience, TestContext.Current.CancellationToken);
         log.Dispose();
@@ -118,13 +118,13 @@ public sealed class LoggedProcessesTests : IDisposable
     [Fact]
     public async Task ARunnerInsideAFolderIsLoggedToo()
     {
-        var inner = new FakeRunner((_, _) => Exited(0, "ok\n"));
+        var inner = new ScriptedProcesses((_, _) => Exited(0, "ok\n"));
         var processes = new LoggedProcesses(inner, log).Inside("/work/rocket");
 
         await processes.RunAsync("git", ["status"], Patience, TestContext.Current.CancellationToken);
         log.Dispose();
 
-        Assert.Equal([("/work/rocket", "git")], inner.Asked);
+        Assert.Equal([("/work/rocket", "git")], inner.Asked.Select(asked => (asked.Folder, asked.Command)));
         Assert.Equal(["$ git status", "→ git exited 0 in 0 ms", "ok"], Logged.Lines(log));
     }
 
@@ -133,7 +133,7 @@ public sealed class LoggedProcessesTests : IDisposable
     [Fact]
     public async Task TheSameCommandThatPassesAgainAndAgainIsCountedInOneLine()
     {
-        var processes = new LoggedProcesses(new FakeRunner((_, _) => Took(1, Exited(0, ""))), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) => Took(1, Exited(0, ""))), log);
 
         for (var look = 0; look < 4; look++)
         {
@@ -162,7 +162,7 @@ public sealed class LoggedProcessesTests : IDisposable
     public async Task AFailureAmongTheRepeatsIsWrittenInFullAndStartsTheCountAnew()
     {
         var answers = new Queue<ProcessResult>([Exited(0, ""), Exited(0, ""), new(ProcessStatus.Exited, 1, "", "error: list\n"), Exited(0, ""), Exited(0, "")]);
-        var processes = new LoggedProcesses(new FakeRunner((_, _) => answers.Dequeue()), log);
+        var processes = new LoggedProcesses(new ScriptedProcesses((_, _) => answers.Dequeue()), log);
         var inside = processes.Inside("/work/rocket");
 
         await processes.RunAsync("claude", ["agents"], Patience, TestContext.Current.CancellationToken);

@@ -10,7 +10,7 @@ public sealed class AssistCommandTests : CliAppTests
     // A machine with git and a logged-in `gh`, in a project cloned from acme/rocket: the repository has these
     // labels and these open milestones, the user reaches the two boards, and the second of them has statuses of
     // its own.
-    static FakeProcesses GitHubForAssist(string labels = "", string milestones = "") => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    static ScriptedProcesses GitHubForAssist(string labels = "", string milestones = "") => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
     {
         "git" => "https://github.com/acme/rocket.git\n",
         "gh" when arguments[0] == "label" => labels,
@@ -144,13 +144,13 @@ public sealed class AssistCommandTests : CliAppTests
         Assert.Contains("The labels of the repository cannot be read: the GitHub command-line tool `gh` is not installed. Step 1 puts it right: `toobusy init --assist 1`. The step is told without them.", output, StringComparison.Ordinal);
         Assert.Contains("    toobusy init --yes --no-board --no-skill --take-label", output, StringComparison.Ordinal);
 
-        var loggedOut = new FakeProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
+        var loggedOut = new ScriptedProcesses((command, arguments) => command == "gh" && arguments[0] == "auth"
             ? new ProcessResult(ProcessStatus.Exited, 1, "", "")
             : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
         var (_, boards, _) = await RunAsync(Context(loggedOut), ["init", "--assist", "3"]);
         Assert.Contains("The boards cannot be read: `gh` is not logged in to github.com. Step 1 puts it right", boards, StringComparison.Ordinal);
 
-        var elsewhere = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://gitlab.com/acme/rocket.git\n" : "", ""));
+        var elsewhere = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://gitlab.com/acme/rocket.git\n" : "", ""));
         var (_, milestones, _) = await RunAsync(Context(elsewhere), ["init", "--assist", "4"]);
         Assert.Contains("The open milestones cannot be read: the `origin` remote is not a GitHub repository. Step 1 puts it right", milestones, StringComparison.Ordinal);
     }
@@ -160,7 +160,7 @@ public sealed class AssistCommandTests : CliAppTests
     public async Task AStepOfAssistSaysThatGitHubDidNotAnswer()
     {
         GitRepository();
-        FakeProcesses Silent(Func<IReadOnlyList<string>, bool> unanswered) => new((command, arguments) => command == "gh" && unanswered(arguments)
+        ScriptedProcesses Silent(Func<IReadOnlyList<string>, bool> unanswered) => new((command, arguments) => command == "gh" && unanswered(arguments)
             ? new ProcessResult(ProcessStatus.TimedOut, 0, "", "")
             : new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/acme/rocket.git\n" : "", ""));
 

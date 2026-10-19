@@ -31,7 +31,7 @@ public sealed class ModelScreenTests : IDisposable
     [Fact]
     public void AKnownModelIsChosenByItsRow()
     {
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Enter);
+        terminal.Keys.Until("❯ opus", Keys.Down).Press(Keys.Enter);
 
         Assert.Equal(new ModelChoice("opus"), Ask(null));
     }
@@ -66,7 +66,7 @@ public sealed class ModelScreenTests : IDisposable
     [Fact]
     public void EscapeFromTheNameGoesBackToTheList()
     {
-        terminal.Keys.Press(Keys.Up, Keys.Enter, Keys.Escape, Keys.Up, Keys.Enter);
+        terminal.Keys.Until("❯ Other…", Keys.Up).Press(Keys.Enter, Keys.Escape).Until("❯ haiku", Keys.Up).Press(Keys.Enter);
 
         Assert.Equal(new ModelChoice("haiku"), Ask(null));
     }

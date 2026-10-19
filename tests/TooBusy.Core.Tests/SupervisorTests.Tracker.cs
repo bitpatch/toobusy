@@ -20,7 +20,7 @@ public sealed partial class SupervisorTests
 
         // What follows the assignment is done as it is with one: the label is taken off, and the tasks are done.
         Assert.Equal(new RunResult(RunEnd.Emptied, 2), result);
-        Assert.Equal(["status 3 InProgress", "label 3 -interrupted", "comment 3", "close 3", "status 3 Done"], tracker.Did.Take(5));
+        AssertDid(3, "status 3 InProgress", "label 3 -interrupted", "comment 3", "close 3", "status 3 Done");
         Assert.Empty(assistant.Session(3).Told);
         Assert.Contains("▲ The tracker refused: assign 3. · the run goes on", log.Lines);
         Assert.Contains("▲ The tracker refused: assign 5. · the run goes on", log.Lines);
@@ -45,7 +45,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
         Assert.Contains(said, log.Lines);
         Assert.Contains(log.Lines, line => line.StartsWith("✖ Stopped: #3 failed · fake attach 3 · ", StringComparison.Ordinal));
-        Assert.Equal(did.Split('|'), tracker.Did);
+        AssertDid(did.Split('|'));
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         state.Unwritable = new LocalStateException("the record of #3 cannot be written: No space left on device");
-        var session = assistant.Session(3).Works();
+        var session = assistant.Session(3);
 
         var result = await RunAsync();
 
@@ -98,13 +98,13 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Emptied, 0), result);
         Assert.Equal(
             [
-                "▲ GitHub did not answer: the label interrupted is taken off #3 again in 10 s",
-                "▲ GitHub did not answer: #3 is read again in 10 s",
-                "▲ GitHub did not answer: the label needs-owner is put on #3 again in 10 s",
-                "▲ GitHub did not answer: #3 is moved to Todo again in 10 s",
+                $"▲ GitHub did not answer: the label interrupted is taken off #3 again in {Spoken.Time(policy.RetryPauses[0])}",
+                $"▲ GitHub did not answer: #3 is read again in {Spoken.Time(policy.RetryPauses[0])}",
+                $"▲ GitHub did not answer: the label needs-owner is put on #3 again in {Spoken.Time(policy.RetryPauses[0])}",
+                $"▲ GitHub did not answer: #3 is moved to Todo again in {Spoken.Time(policy.RetryPauses[0])}",
             ],
             log.Lines.Where(line => line.StartsWith('▲')));
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 -interrupted", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 -interrupted", "label 3 +needs-owner", "comment 3", "status 3 Todo");
     }
 
     [Fact]
@@ -123,15 +123,15 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: close 3 (3)."), result);
-        Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)], tried.Zip(tried.Skip(1), (before, after) => after - before));
+        Assert.Equal(policy.RetryPauses, tried.Zip(tried.Skip(1), (before, after) => after - before));
         Assert.Equal(
-            ["▲ GitHub did not answer: #3 is closed again in 10 s", "▲ GitHub did not answer: #3 is closed again in 30 s"],
+            policy.RetryPauses.Select(pause => $"▲ GitHub did not answer: #3 is closed again in {Spoken.Time(pause)}"),
             log.Lines.Where(line => line.StartsWith('▲')));
         Assert.Contains(log.Lines, line => line.StartsWith("✖ Stopped: The tracker did not answer: close 3 (3). · ", StringComparison.Ordinal));
         Assert.Single(assistant.Started);
 
         // The task is left to the owner as over any tracker that refuses.
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed partial class SupervisorTests
         // leaves the task to the owner.
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker did not answer: comment 3 (1)."), result);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith('▲'));
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.StartsWith("**Failed.**", Assert.Single(tracker.Comments).Text, StringComparison.Ordinal);
     }
 
@@ -156,7 +156,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Unanswered["read"] = 1;
         var paused = new List<RunStatus>();
-        clock.At(TimeSpan.FromSeconds(5), () =>
+        clock.At(policy.RetryPauses[0] / 2, () =>
         {
             paused.Add(log.Statuses[^1]);
             kill.Cancel();
@@ -167,7 +167,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(RunEnd.Killed, result.End);
         Assert.Single(tracker.Read);
         Assert.Empty(assistant.Started);
-        Assert.Contains("▲ GitHub did not answer: the open tasks are read again in 10 s", log.Lines);
+        Assert.Contains($"▲ GitHub did not answer: the open tasks are read again in {Spoken.Time(policy.RetryPauses[0])}", log.Lines);
 
         // Between tasks the page says what the run does, as it did before the pause.
         Assert.Equal((RunPhase.Preparing, "Reading the queue…", null), (paused[0].Phase, paused[0].Text, paused[0].Task));
@@ -179,7 +179,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         tracker.Unanswered["assign"] = 1;
-        clock.At(TimeSpan.FromSeconds(5), kill.Cancel);
+        clock.At(policy.RetryPauses[0] / 2, kill.Cancel);
 
         var result = await RunAsync();
 
@@ -196,7 +196,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Unanswered["label"] = 1;
         assistant.Session(3).Works().Limit();
-        clock.At(TimeSpan.FromMinutes(10), kill.Cancel);
+        clock.At(policy.UnknownLimitWait / 2, kill.Cancel);
 
         var result = await RunAsync();
 
@@ -260,11 +260,11 @@ public sealed partial class SupervisorTests
         Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
         Assert.Equal(
             [
-                "‖ #3 waits for the owner: input needed · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3",
+                $"‖ #3 waits for the owner: input needed · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never · fake attach 3",
                 "  │ CSV or JSON?",
                 "▶ #3 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · fake attach 3",
                 $"  “{Briefing.Alone(3, "needs-owner")}”",
-                "✔ #3 Task 3 — done in 99 s",
+                $"✔ #3 Task 3 — done in {Spoken.Time(OwnerWaited)}",
             ],
             log.Lines.Skip(3).Take(5));
         Assert.Contains("#3 waits for an answer", machine.Notified);
@@ -305,7 +305,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Empty(assistant.Started);
         Assert.Equal([first, Briefing.AfterStop(5)], session.Told);
-        Assert.Equal(["status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done"], tracker.Did);
+        AssertDid("status 5 InProgress", "assign 5", "label 5 -interrupted", "comment 5", "close 5", "status 5 Done");
         Assert.Null(state.Record);
     }
 
@@ -326,7 +326,7 @@ public sealed partial class SupervisorTests
         // The record is forgotten before the tracker is told, so the task is closed and moved all the same.
         const string Left = "#3 was being settled, and the tracker was told how it went all the same";
         Assert.Equal(new RunResult(RunEnd.Killed, 1, Left), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Null(state.Record);
         Assert.Equal([(3, RunMark.Done)], Ended);
         Assert.Equal(["  #3 is closed, with the report of the session as its comment", $"■ Killed while {Left}"], log.Lines.SkipWhile(line => !line.StartsWith("  #3 is closed", StringComparison.Ordinal)).Take(2));

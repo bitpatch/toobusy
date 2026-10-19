@@ -19,7 +19,7 @@ public sealed partial class SupervisorTests
 
         // Neither a label nor a status: the task is closed, and the run does not open it again.
         Assert.Equal(end, result.End);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3");
         Assert.Equal((3, comment), Assert.Single(tracker.Comments));
         Assert.Contains(log.Lines, line => line.Contains("#3 was closed before its session ended, and is left closed", StringComparison.Ordinal));
         Assert.Null(state.Record);
@@ -37,7 +37,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal("#3 left changes in the working tree · fake attach 3", result.Why);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3");
         Assert.StartsWith("**Failed.** The run stopped over this task: its session left changes in the working tree. The task was closed before its session ended, and it is left closed:", tracker.Comments[0].Text, StringComparison.Ordinal);
         Assert.Contains("  #3 was closed before its session ended, and is left closed, with a comment that says what went wrong; no run takes it until it is opened again", log.Lines);
     }
@@ -52,7 +52,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 0), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(1, session.Stopped);
 
         // The task is not taken again: it is not moved, nobody is assigned, and it is not closed once more.
-        Assert.Equal(["comment 5", "status 5 Done"], tracker.Did.Take(2));
+        AssertDid(5, "comment 5", "status 5 Done");
         Assert.Equal((5, "**Done.**\n\nAll of it.\n\n_Session: `fake attach 5`_"), tracker.Comments[0]);
         Assert.Equal([3], assistant.Started.Select(start => start.Task));
         Assert.Equal([(5, RunMark.Done), (3, RunMark.Done)], Ended);
@@ -121,7 +121,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(end, result.End);
-        Assert.Equal(did, tracker.Did);
+        AssertDid(did);
         Assert.Null(state.Record);
     }
 
@@ -131,17 +131,16 @@ public sealed partial class SupervisorTests
     [InlineData(RecordState.WrappedUp, false, "it is closed")]
     public async Task AClosedTaskOfTheRecordWhoseSessionDidNotComeToALineIsForgotten(RecordState left, bool gone, string why)
     {
-        // A session that wrapped up did say `interrupted`, and its task was settled then: it is not settled again.
+        // A session that wrapped up did say `interrupted`, and its task was settled then: it is not settled again, and
+        // its session is not looked at. Nor is a session that is gone; one that is there works when it is looked at.
         state.Record = Record(5, left);
         tracker.Add(3);
         tracker.Add(5, status: BoardStatus.InProgress);
         tracker.Shut(5);
         assistant.Gone = gone;
         var session = assistant.Session(5);
-        if (left == RecordState.WrappedUp)
-            session.Ends("Nothing is left.\nTOOBUSY: interrupted");
-        else
-            session.Works(3).Ends(Done);
+        if (left == RecordState.Working && !gone)
+            session.Works();
 
         var result = await RunAsync();
 

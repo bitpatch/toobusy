@@ -210,7 +210,7 @@ public sealed class ChoiceCommandTests : CliAppTests
     public async Task MilestonesThatCannotBeReadRefuseATitle()
     {
         GitRepository();
-        var processes = new FakeProcesses(command => command == "git"
+        var processes = new ScriptedProcesses(command => command == "git"
             ? new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", "")
             : new ProcessResult(ProcessStatus.Exited, 1, "", "HTTP 502"));
 

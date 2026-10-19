@@ -1,4 +1,3 @@
-using TooBusy.Core.Processes;
 using TooBusy.Core.Run;
 using TooBusy.Infrastructure.Run;
 
@@ -15,22 +14,6 @@ sealed class FixedClock(DateTimeOffset start) : IClock
     {
         Now += time;
         return Task.CompletedTask;
-    }
-}
-
-// A runner that answers as the test says, and remembers the folder it was asked in.
-sealed class FakeRunner(Func<string, IReadOnlyList<string>, ProcessResult> answer, string? folder = null) : IProcessRunner
-{
-    public List<(string? Folder, string Command)> Asked { get; } = [];
-
-    public IProcessRunner Inside(string folder) => new FakeRunner(answer, folder) { Shared = Shared ?? Asked };
-
-    List<(string? Folder, string Command)>? Shared { get; init; }
-
-    public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        (Shared ?? Asked).Add((folder, command));
-        return Task.FromResult(answer(command, arguments));
     }
 }
 

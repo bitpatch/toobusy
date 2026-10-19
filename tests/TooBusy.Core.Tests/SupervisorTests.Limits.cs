@@ -70,8 +70,9 @@ public sealed partial class SupervisorTests
     public async Task ALimitInsideATaskIsWaitedOutAndTheSameSessionGoesOn()
     {
         tracker.Add(3);
+        var reset = FakeClock.Start + TimeSpan.FromHours(1);
         var session = assistant.Session(3)
-            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, reset), null))
             .Limit("You have hit your limit · resets 10am\nmore")
             .Then().Works().Ends(Done);
 
@@ -82,12 +83,12 @@ public sealed partial class SupervisorTests
         Assert.Equal(
             [
                 "‖ #3 ran into a usage limit: You have hit your limit · resets 10am",
-                "‖ #3 waits 1 h 00 min for the 5-hour limit to reset, then goes on · /stop pauses it for the next run",
+                $"‖ #3 waits {Spoken.Time(reset + policy.ResetMargin - (FakeClock.Start + policy.Poll))} for the 5-hour limit to reset, then goes on · /stop pauses it for the next run",
                 "▶ #3 goes on after the reset of the limit · fake attach 3",
             ],
             log.Lines.Skip(3).Take(3));
         Assert.Null(state.Record);
-        Assert.Contains(log.Statuses, status => status.Phase == RunPhase.WaitingForLimit && status.Task?.Number == 3 && status.Until == FakeClock.Start + TimeSpan.FromMinutes(61));
+        Assert.Contains(log.Statuses, status => status.Phase == RunPhase.WaitingForLimit && status.Task?.Number == 3 && status.Until == reset + policy.ResetMargin);
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(new RunResult(RunEnd.Limited, 0, "#3 is paused: the limit did not reset after 2 waits. Its changes stay in the working tree, and the next run goes on with its session"), result);
         Assert.Equal(2, session.Told.Count);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3");
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Equal([(3, RunMark.Paused)], Ended);
         Assert.StartsWith("**Stopped by a usage limit** (the limit did not reset after 2 waits).", tracker.Comments[0].Text, StringComparison.Ordinal);
@@ -122,7 +123,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Equal([Briefing.AfterLimit(3)], session.Told);
-        Assert.Contains("‖ #3 waits 30 min for the limit to reset, then goes on · /stop pauses it for the next run", log.Lines);
+        Assert.Contains($"‖ #3 waits {Spoken.Time(policy.UnknownLimitWait)} for the limit to reset, then goes on · /stop pauses it for the next run", log.Lines);
     }
 
     [Fact]
@@ -130,7 +131,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Limit();
-        clock.At(TimeSpan.FromMinutes(10), () => Run.Send(RunCommand.Stop));
+        clock.At(policy.UnknownLimitWait / 2, () => Run.Send(RunCommand.Stop));
 
         var result = await RunAsync();
 
@@ -145,8 +146,9 @@ public sealed partial class SupervisorTests
     public async Task KillDuringTheWaitForALimitPausesTheTaskToo()
     {
         tracker.Add(3);
+        var reset = FakeClock.Start + TimeSpan.FromHours(1);
         assistant.Session(3)
-            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, reset), null))
             .Limit();
         clock.At(TimeSpan.FromMinutes(10), kill.Cancel);
 
@@ -159,7 +161,7 @@ public sealed partial class SupervisorTests
 
         // The sign said what the run waited for, and the kill took it down.
         Assert.Contains(
-            new RunSign(RunPhase.WaitingForLimit) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3", Until = FakeClock.Start + TimeSpan.FromMinutes(61) },
+            new RunSign(RunPhase.WaitingForLimit) { Task = 3, Title = "Task 3", Url = "https://example.com/3", Open = "fake attach 3", Until = reset + policy.ResetMargin },
             sign.Written);
         Assert.Null(sign.Written[^1]);
     }
@@ -175,7 +177,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(RunEnd.Killed, result.End);
         Assert.StartsWith("#3 is paused: toobusy was stopped while it waited for the limit.", result.Why, StringComparison.Ordinal);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3");
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Equal([(3, RunMark.Paused)], Ended);
 
@@ -202,7 +204,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(RunEnd.Killed, result.End);
         Assert.StartsWith("#3 is paused: the weekly limit is spent", result.Why, StringComparison.Ordinal);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3");
         Assert.Equal(Record(3, RecordState.Paused), state.Record);
         Assert.Single(assistant.Started);
     }
@@ -214,7 +216,7 @@ public sealed partial class SupervisorTests
         tracker.Refused.Add("comment");
         var session = assistant.Session(3).Works().Limit();
         session.Conversation = null;
-        clock.At(TimeSpan.FromMinutes(10), () => Run.Send(RunCommand.Stop));
+        clock.At(policy.UnknownLimitWait / 2, () => Run.Send(RunCommand.Stop));
 
         await RunAsync();
 

@@ -20,10 +20,10 @@ public sealed partial class SupervisorTests
                 "▲ #3 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · fake attach 3",
                 "  │ Half of it; the rest is #9.",
                 $"  “{Briefing.NoAnswer(3, "needs-owner")}”",
-                "◐ #3 Task 3 — done in part in 6 s",
+                $"◐ #3 Task 3 — done in part in {Spoken.Time(2 * policy.Poll)}",
             ],
             log.Lines.Skip(3).Take(4));
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal([(3, RunMark.Partial)], Ended);
 
         // Nothing is asked of the owner: no countdown, no commands for a session that waits, and no notification.
@@ -41,7 +41,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Equal([Briefing.Alone(3, "needs-owner")], session.Told);
-        Assert.Contains("✔ #3 Task 3 — done in 99 s", log.Lines);
+        Assert.Contains($"✔ #3 Task 3 — done in {Spoken.Time(OwnerWaited)}", log.Lines);
         Assert.DoesNotContain(log.Lines, line => line.StartsWith("▲ #3 ended its turn with a line for toobusy", StringComparison.Ordinal));
     }
 
@@ -84,7 +84,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(1, result.Done);
         Assert.Single(session.Told);
-        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+        Assert.Contains($"‖ #3 ended its turn without saying how the task went · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(1, result.Done);
         Assert.Equal([Briefing.Alone(3, Rules.Manual)], session.Told);
-        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is told to go on alone in 90 s: /nudge does it now, /hold never · fake attach 3", log.Lines);
+        Assert.Contains($"‖ #3 ended its turn without saying how the task went · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -105,12 +105,12 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
-        clock.At(TimeSpan.FromSeconds(5), () => Run.Send(RunCommand.Nudge));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Nudge));
 
         await RunAsync();
 
         Assert.Single(session.Told);
-        Assert.True(clock.Now - FakeClock.Start < TimeSpan.FromSeconds(20), "The session was told only after the countdown.");
+        Assert.True(clock.Now - FakeClock.Start < policy.OwnerWait, "The session was told only after the countdown.");
     }
 
     [Fact]
@@ -118,13 +118,14 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
-        clock.At(TimeSpan.FromSeconds(5), () => Run.Send(RunCommand.Hold));
-        clock.At(TimeSpan.FromMinutes(20), () => Run.Send(RunCommand.Nudge));
+        var later = 10 * policy.OwnerWait;
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Hold));
+        clock.At(later, () => Run.Send(RunCommand.Nudge));
 
         await RunAsync();
 
         Assert.Single(session.Told);
-        Assert.True(clock.Now - FakeClock.Start >= TimeSpan.FromMinutes(20), "The session was told while it was held.");
+        Assert.True(clock.Now - FakeClock.Start >= later, "The session was told while it was held.");
         Assert.Contains("‖ #3 gets no message and waits for the owner · /nudge tells it to go on alone · fake attach 3", log.Lines);
     }
 
@@ -146,7 +147,7 @@ public sealed partial class SupervisorTests
         policy = policy with { Messages = 2 };
         tracker.Add(3);
         var session = assistant.Session(3).Works().Asks().Then().Works().Asks().Then().Works().Asks(what: null);
-        clock.At(TimeSpan.FromHours(1), kill.Cancel);
+        clock.At(10 * policy.OwnerWait, kill.Cancel);
 
         var result = await RunAsync();
 
@@ -163,9 +164,9 @@ public sealed partial class SupervisorTests
 
         var result = await RunAsync();
 
-        Assert.Equal(2, session.Told.Count);
+        Assert.Equal(policy.IdleMessages, session.Told.Count);
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
-        Assert.Contains("‖ #3 ended its turn without saying how the task went · it is left to the owner: 2 messages in a row brought no step of its own · fake attach 3", log.Lines);
+        Assert.Contains($"‖ #3 ended its turn without saying how the task went · it is left to the owner: {policy.IdleMessages} messages in a row brought no step of its own · fake attach 3", log.Lines);
     }
 
     [Fact]
@@ -188,7 +189,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         assistant.Session(3).Works(4).Ends(Done);
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Stop));
 
         var result = await RunAsync();
 

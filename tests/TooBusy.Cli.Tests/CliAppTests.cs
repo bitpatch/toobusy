@@ -96,17 +96,24 @@ public abstract class CliAppTests : IDisposable
     protected Task<(int Exit, string Output, string Error)> RunWithKeysAsync(Keys keys, params string[] args) => RunWithKeysAsync(keys, null, args);
 
     // Runs in a terminal of a hundred and twenty columns and thirty lines.
-    protected Task<(int Exit, string Output, string Error)> RunWithKeysAsync(Keys keys, FakeProcesses? processes, params string[] args) =>
-        RunAsync(Context(processes) with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) }, args);
+    protected Task<(int Exit, string Output, string Error)> RunWithKeysAsync(Keys keys, ScriptedProcesses? processes, params string[] args) =>
+        RunAsync(Context(processes) with { Terminal = new TerminalDevice(Watched(keys).Read, () => (120, 30)) }, args);
 
     // Runs in a terminal that says whether a key is pressed, as the page of a run asks it: the run goes on by
     // itself there, and the keys are held back until it has got where the test waits for it.
-    protected Task<(int Exit, string Output, string Error)> RunLiveAsync(Keys keys, FakeProcesses? processes, params string[] args) =>
-        RunAsync(Context(processes) with { Terminal = new TerminalDevice(keys.Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting } }, args);
+    protected Task<(int Exit, string Output, string Error)> RunLiveAsync(Keys keys, ScriptedProcesses? processes, params string[] args) =>
+        RunAsync(Context(processes) with { Terminal = new TerminalDevice(Watched(keys).Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting } }, args);
+
+    // The keys, told what the page of the command that runs shows now.
+    protected Keys Watched(Keys keys)
+    {
+        keys.Shown = () => TestTerminal.TextOf(shown?.ToString() ?? "");
+        return keys;
+    }
 
     // The project lies right under the home folder, and the choices of the user are kept in a folder of the test.
     // A run does not make the test wait: its clock goes on by itself.
-    protected CliContext Context(FakeProcesses? processes) => new(folder.FullName, TextWriter.Null, TextWriter.Null)
+    protected CliContext Context(ScriptedProcesses? processes) => new(folder.FullName, TextWriter.Null, TextWriter.Null)
     {
         Home = folder.Parent!.FullName,
         Processes = processes,
@@ -123,7 +130,7 @@ public abstract class CliAppTests : IDisposable
     }
 
     // What `toobusy milestone` prints without a terminal, and its exit code.
-    protected async Task<(string Output, int Exit)> ShownAsync(FakeProcesses? processes)
+    protected async Task<(string Output, int Exit)> ShownAsync(ScriptedProcesses? processes)
     {
         var (exit, output, _) = await RunAsync(Context(processes), ["milestone"]);
         return (output, exit);
@@ -137,7 +144,7 @@ public abstract class CliAppTests : IDisposable
 
     // A machine with git and a logged-in `gh`: the project is cloned from acme/rocket, the user can make boards for
     // themselves, the repository has the given milestones and labels, and every board the given statuses.
-    protected static FakeProcesses GitHub(string milestones, string labels = "", string statuses = NewBoard) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    protected static ScriptedProcesses GitHub(string milestones, string labels = "", string statuses = NewBoard) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
     {
         "git" => "https://github.com/acme/rocket.git\n",
         "gh" when arguments[0] == "label" => labels,
@@ -148,7 +155,7 @@ public abstract class CliAppTests : IDisposable
     }, ""));
 
     // A machine whose `gh` answers the request for the open tasks with these, in a project cloned from acme/rocket.
-    protected static FakeProcesses Tracker(string tasks) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+    protected static ScriptedProcesses Tracker(string tasks) => new((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
     {
         "git" => "https://github.com/acme/rocket.git\n",
         "gh" when arguments is ["api", "graphql", ..] => tasks,
@@ -177,41 +184,4 @@ public abstract class CliAppTests : IDisposable
 
     // Whether the page has shown the text by now, so many times: what keys that are held back wait for.
     protected bool Shown(string text, int times = 1) => shown is not null && shown.ToString().Split(text).Length > times;
-
-    // Answers every command as it is told to and remembers what it was asked.
-    // `hangs` tells the commands that go on until they are told to stop, as one that GitHub does not answer.
-    protected sealed class FakeProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer, Func<string, IReadOnlyList<string>, bool>? hangs = null) : IProcessRunner
-    {
-        readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public FakeProcesses(Func<string, ProcessResult> answer)
-            : this((command, _) => answer(command))
-        {
-        }
-
-        public List<(string Command, IReadOnlyList<string> Arguments)> Asked { get; } = [];
-
-        // Done once a command that hangs was told to stop.
-        public Task Stopped => stopped.Task;
-
-        public async Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            Asked.Add((command, arguments));
-            if (hangs?.Invoke(command, arguments) == true)
-            {
-                try
-                {
-                    await Task.Delay(Timeout.Infinite, cancellationToken);
-                }
-                finally
-                {
-                    stopped.TrySetResult();
-                }
-            }
-
-            return answer(command, arguments);
-        }
-
-        public IProcessRunner Inside(string folder) => this;
-    }
 }

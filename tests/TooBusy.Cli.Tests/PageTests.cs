@@ -97,18 +97,20 @@ public sealed class PageTests : IDisposable
 
         page.Draw([Line.Of("Title")], [Line.Of("hint"), Line.Of("Rocket")], "", new Caret(1, 6));
 
-        // After the text the block is an empty cell; the cursor of the terminal stays hidden.
-        // Without a foot the choice ends three lines above the bottom; its columns start after one of the edge.
+        // After the text the block is an empty cell; the cursor of the terminal stays hidden. This is the one place
+        // the rows of a page are counted: without a foot the choice ends three lines above the bottom, and its
+        // columns start after one of the edge. Elsewhere a line is found by what it says.
         Assert.EndsWith("\u001b[10;8H" + palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(10, terminal.RowOf("Rocket"));
         Assert.DoesNotContain("\u001b[?25h", terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(TimeSpan.FromMilliseconds(80), terminal.Beat);
 
         Tick(5);
-        Assert.EndsWith("\u001b[10;8H" + palette.Cursor(" ", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("Rocket", 8) + palette.Cursor(" ", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
         Tick(5);
-        Assert.EndsWith("\u001b[10;8H ", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("Rocket", 8) + " ", terminal.Output.ToString(), StringComparison.Ordinal);
         Tick(10);
-        Assert.EndsWith("\u001b[10;8H" + palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("Rocket", 8) + palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
     }
 
@@ -120,7 +122,7 @@ public sealed class PageTests : IDisposable
 
         page.Draw([], [Line.Of("v.12")], "", new Caret(0, 1));
 
-        Assert.EndsWith("\u001b[10;3H" + palette.Cursor(".", 1), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("v.12", 3) + palette.Cursor(".", 1), terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -133,10 +135,10 @@ public sealed class PageTests : IDisposable
 
         // The blink is at its faintest, and drawing the page with another line chosen leaves it there.
         page.Draw([], [Line.Of("Filter  moon"), Line.Of("  Moon base"), Line.Of("❯ Rocket")], "", new Caret(0, 12), chosen: 2);
-        Assert.EndsWith("\u001b[10;2H❯ Rocket\u001b[8;14H ", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Rocket", 2) + "❯ Rocket" + terminal.At("Filter", 14) + " ", terminal.Output.ToString(), StringComparison.Ordinal);
 
         Tick(10);
-        Assert.EndsWith("\u001b[10;2H" + palette.Glow("❯ Rocket", 1) + "\u001b[8;14H" + palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Rocket", 2) + palette.Glow("❯ Rocket", 1) + terminal.At("Filter", 14) + palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,7 +150,7 @@ public sealed class PageTests : IDisposable
         page.Draw([], [new Line(new Part("❯ ", Tone.Accent), new Part("◉ ", Tone.Success, Steady: true), new Part("manual", Tone.Accent), new Part("  kept", Tone.Muted)) { Blinking = 3 }], "", chosen: 0);
 
         Tick(5);
-        Assert.Equal(palette.Glow("❯ ", 0.5) + palette.Paint(Tone.Success, "◉ ") + palette.Glow("manual", 0.5), terminal.Output.ToString().Split("\u001b[10;2H")[^1]);
+        Assert.Equal(palette.Glow("❯ ", 0.5) + palette.Paint(Tone.Success, "◉ ") + palette.Glow("manual", 0.5), terminal.Output.ToString().Split(terminal.At("manual", 2))[^1]);
     }
 
     [Fact]
@@ -160,12 +162,12 @@ public sealed class PageTests : IDisposable
         page.Draw([], [Line.Of("  Keep"), new Line(new Part("❯ Change", Tone.Accent), new Part("  to another", Tone.Muted))], "", chosen: 1);
 
         Assert.Contains(palette.Muted("  to another"), terminal.Output.ToString(), StringComparison.Ordinal);
-        Assert.EndsWith("\u001b[10;2H" + palette.Accent("❯ Change"), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Change", 2) + palette.Accent("❯ Change"), terminal.Output.ToString(), StringComparison.Ordinal);
 
         Tick(5);
-        Assert.EndsWith("\u001b[10;2H" + palette.Glow("❯ Change", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Change", 2) + palette.Glow("❯ Change", 0.5), terminal.Output.ToString(), StringComparison.Ordinal);
         Tick(5);
-        Assert.EndsWith("\u001b[10;2H❯ Change", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Change", 2) + "❯ Change", terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
     }
 
@@ -219,18 +221,18 @@ public sealed class PageTests : IDisposable
 
         page.Draw([], [Line.Of("Reading the milestones"), Line.Of("•••••••••••", Tone.Muted)], "", waiting: 1);
 
-        Assert.Equal([" Reading the milestones", " •••••••••••"], terminal.Frame[8..10]);
-        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(terminal.RowOf("Reading the milestones") + 1, terminal.RowOf("•••"));
+        Assert.EndsWith(terminal.At("•••", 2) + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
 
         // The light is on the first dot, in the accent, and the last one is in the colour of the rest.
         Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 0), StringComparison.Ordinal);
         Assert.EndsWith(palette.Muted("•"), Dots(palette, 0), StringComparison.Ordinal);
 
         Tick(20);
-        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 20), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("•••", 2) + Dots(palette, 20), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.EndsWith(palette.Spark("•", 1), Dots(palette, 20), StringComparison.Ordinal);
         Tick(20);
-        Assert.EndsWith("\u001b[10;2H" + Dots(palette, 40), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("•••", 2) + Dots(palette, 40), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.StartsWith(palette.Spark("•", 1), Dots(palette, 40), StringComparison.Ordinal);
         Assert.Equal(1, terminal.Frames);
     }
@@ -244,7 +246,7 @@ public sealed class PageTests : IDisposable
         page.Draw([], [new Line(new Part("❯ Run", Tone.Muted), new Part("  •••••••••••", Tone.Muted)), Line.Of("  Exit")], "", waiting: 0);
 
         // The light runs along the dots only: they start seven columns into the line.
-        Assert.EndsWith("\u001b[9;9H" + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Run", 9) + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -256,9 +258,8 @@ public sealed class PageTests : IDisposable
         page.Draw([Line.Of("#3 Export the data · 1:24"), Line.Of("•••••••••••", Tone.Muted)], [Line.Of("/")], "", new Caret(0, 1), running: 1);
 
         // The light runs along the second line of the question, and the cursor of the line that is typed in stays.
-        var dots = Array.IndexOf(terminal.Frame, " •••••••••••");
-        Assert.Equal(" #3 Export the data · 1:24", terminal.Frame[dots - 1]);
-        Assert.EndsWith(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"\u001b[{dots + 1};2H") + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(terminal.RowOf("#3 Export the data · 1:24") + 1, terminal.RowOf("•••"));
+        Assert.EndsWith(terminal.At("•••", 2) + Dots(palette, 0), terminal.Output.ToString(), StringComparison.Ordinal);
         Assert.Contains(palette.Cursor(" ", 1), terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
@@ -408,12 +409,12 @@ public sealed class PageTests : IDisposable
         page.Draw([], [Line.Of("❯ Keep")], "", chosen: 0);
         var chosen = terminal.Output.ToString();
         terminal.Tick!();
-        Assert.EndsWith("\u001b[10;2H\u001b[?25h", chosen, StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("❯ Keep", 2) + "\u001b[?25h", chosen, StringComparison.Ordinal);
         Assert.Equal(chosen, terminal.Output.ToString());
 
         // Where a text is typed too, it stands in the text.
         page.Draw([], [Line.Of("Filter  moon"), Line.Of("❯ Moon base")], "", new Caret(0, 12), chosen: 1);
-        Assert.EndsWith("\u001b[9;14H\u001b[?25h", terminal.Output.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(terminal.At("Filter", 14) + "\u001b[?25h", terminal.Output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

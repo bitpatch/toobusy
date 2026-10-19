@@ -27,7 +27,7 @@ public sealed class SettingsScreenTests : IDisposable
     [Fact]
     public void EverySettingStandsWithItsValueAndNoneScrolls()
     {
-        terminal.Keys.Press(Keys.Down, Keys.Down, Keys.Down, Keys.Enter);
+        terminal.Keys.Until("❯ Labels to take", Keys.Down).Press(Keys.Enter);
 
         Assert.Equal(SetupSetting.Take, Ask());
         terminal.AssertSaw("""

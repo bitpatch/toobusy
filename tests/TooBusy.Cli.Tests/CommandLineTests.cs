@@ -141,7 +141,7 @@ public sealed class CommandLineTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await RunAsync("milestone", "--none");
-        var processes = new FakeProcesses(command => command == "git"
+        var processes = new ScriptedProcesses(command => command == "git"
             ? new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", "")
             : throw new InvalidOperationException("The answer of gh\nis not what it was."));
 

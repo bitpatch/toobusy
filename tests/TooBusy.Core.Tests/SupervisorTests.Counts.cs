@@ -12,7 +12,7 @@ public sealed partial class SupervisorTests
         tracker.Add(3);
         tracker.Add(5);
         assistant.Session(3).Works(4).Ends("Half of it; the rest is #9.\nTOOBUSY: partial");
-        clock.At(TimeSpan.FromSeconds(4), () => Run.Send(RunCommand.Stop));
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Stop));
 
         var result = await RunAsync();
 

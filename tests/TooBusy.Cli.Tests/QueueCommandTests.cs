@@ -246,7 +246,7 @@ public sealed class QueueCommandTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await RunAsync("milestone", "--none");
-        var processes = new FakeProcesses(command => command == "git"
+        var processes = new ScriptedProcesses(command => command == "git"
             ? new ProcessResult(ProcessStatus.Exited, 0, "https://github.com/acme/rocket.git\n", "")
             : new ProcessResult(ProcessStatus.Exited, 1, "", "HTTP 401: Bad credentials\n"));
 
@@ -310,7 +310,7 @@ public sealed class QueueCommandTests : CliAppTests
         GitRepository();
         WriteSettings(Settings);
         await RunAsync("milestone", "--none");
-        var processes = new FakeProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "git@example.com:acme/rocket.git\n" : "", ""));
+        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "git@example.com:acme/rocket.git\n" : "", ""));
 
         var (exit, output, error) = await RunAsync(Context(processes), ["queue"]);
 

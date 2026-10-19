@@ -8,12 +8,12 @@ public class GitHubBoardsTests
     const string Toobusy = "https://github.com/orgs/bitpatch/projects/4";
     const string Fatgard = "https://github.com/users/denis/projects/3";
 
-    readonly FakeProcesses processes = new();
+    readonly ScriptedProcesses processes = new();
 
     [Fact]
     public async Task TheLinesOfTheAnswerAreTheOwnersAndTheBoardsWithTheLinkedOnesFirst()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nowner\torg\tbitpatch\nboard\t{Fatgard}\tFatgard\nboard\t{Toobusy}\tToobusy\r\nlinked\t{Toobusy}\tToobusy\n\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"owner\tuser\tdenis\nowner\torg\tbitpatch\nboard\t{Fatgard}\tFatgard\nboard\t{Toobusy}\tToobusy\r\nlinked\t{Toobusy}\tToobusy\n\n"));
 
         var read = await ReadAsync("bitpatch/toobusy");
 
@@ -24,11 +24,11 @@ public class GitHubBoardsTests
     [Fact]
     public async Task TheToolIsAskedOnceForItAll()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await ReadAsync("bitpatch/toobusy");
 
-        var (command, arguments) = Assert.Single(processes.Asked);
+        var (command, arguments, _) = Assert.Single(processes.Asked);
         Assert.Equal("gh", command);
         Assert.Equal(["api", "graphql", "-f", "owner=bitpatch", "-f", "name=toobusy", "-f"], arguments.Take(7));
         Assert.StartsWith("query=query($owner: String!, $name: String!) { viewer { login projectsV2(", arguments[7], StringComparison.Ordinal);
@@ -41,7 +41,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task WithoutARepositoryOnlyTheBoardsOfTheUserAreAskedFor()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
 
         var read = await ReadAsync(null);
 
@@ -53,7 +53,7 @@ public class GitHubBoardsTests
     public async Task ARepositoryThatCannotBeReadDoesNotHideTheBoardsOfTheUser()
     {
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.Exited, 1, "{\"data\":{\"repository\":null}}", "gh: Could not resolve to a Repository"));
-        processes.Answers.Enqueue(FakeProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"owner\tuser\tdenis\nboard\t{Fatgard}\tFatgard\n"));
 
         var read = await ReadAsync("example/project");
 
@@ -64,7 +64,7 @@ public class GitHubBoardsTests
     [Fact]
     public async Task ATitleMayHaveTabsAndALineThatIsNoneOfTheKindsIsLeftOut()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered($"A new release of gh is available\nboard\tnot-an-address\tBroken\nowner\trobot\thal\nboard\t{Fatgard}\tFat\tgard\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"A new release of gh is available\nboard\tnot-an-address\tBroken\nowner\trobot\thal\nboard\t{Fatgard}\tFat\tgard\n"));
 
         var read = await ReadAsync(null);
 
@@ -92,11 +92,11 @@ public class GitHubBoardsTests
     [Fact]
     public async Task TheBoardsAreWaitedForAsLongAsTheOtherRequestsOfTheSetup()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await ReadAsync(null);
 
-        Assert.Equal(TimeSpan.FromSeconds(15), Assert.Single(processes.Timeouts));
+        Assert.Equal(TimeSpan.FromSeconds(15), Assert.Single(processes.Asked).Timeout);
     }
 
     // A GitHub that did not answer in time is not taken for one that has no boards, and is not asked once more.

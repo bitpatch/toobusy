@@ -7,13 +7,13 @@ public class GitHubTasksTests
 {
     const string Board = "https://github.com/orgs/Acme/projects/7";
 
-    readonly FakeProcesses processes = new();
+    readonly ScriptedProcesses processes = new();
 
     [Fact]
     public async Task TheTasksOfAMilestoneAreAskedForByItsNumber()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("1\tv0.1.0\n4\tv0.2.0\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\n4\tv0.2.0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
 
         Assert.Empty(await Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
 
@@ -30,7 +30,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task WithoutAMilestoneEveryOpenTaskIsAskedFor()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
 
         await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
 
@@ -40,7 +40,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task AMilestoneThatIsNotOpenAnyMoreIsSaid()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("1\tv0.1.0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.1.0\n"));
 
         var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
 
@@ -54,8 +54,8 @@ public class GitHubTasksTests
     [InlineData("1\tV0.2.0\n4\tv0.2.0\n", "4")]
     public async Task AMilestoneIsFoundWhateverTheCaseOfItsTitle(string open, string number)
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(open));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(open));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
 
         await Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken);
 
@@ -65,7 +65,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task TwoMilestonesThatDifferOnlyInCaseAreNotGuessedBetween()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("1\tNext\n4\tNEXT\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tNext\n4\tNEXT\n"));
 
         var gone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("next", TestContext.Current.CancellationToken));
 
@@ -76,7 +76,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ATaskIsALineOfTheAnswer()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(
             "total\t3\n"
             + "12\tAdd\\tthe \\\\ thing\thttps://github.com/acme/rocket/issues/12\tIn progress\t4,9\t13\tv0.2.0 \\\\ next\tfeature\tgood first issue\n"
             + "13\tA part\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\t\r\n"
@@ -105,7 +105,7 @@ public class GitHubTasksTests
     [InlineData("Review", BoardStatus.Other)]
     public async Task AStatusIsKnownByWhatTheBoardCallsIt(string name, BoardStatus status)
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t1\n1\tOne\thttps://github.com/acme/rocket/issues/1\t{name}\t\t\t\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"total\t1\n1\tOne\thttps://github.com/acme/rocket/issues/1\t{name}\t\t\t\n"));
 
         Assert.Equal(status, Assert.Single(await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken)).Status);
     }
@@ -113,8 +113,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task TheStatusIsThatOfTheBoardOfTheProject()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
 
         await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
         await Tasks(board: null).ReadOpenAsync(null, TestContext.Current.CancellationToken);
@@ -126,8 +126,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task TheBoardsOfATaskAreAskedForOnlyInAProjectWithABoard()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
 
         await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
         await Tasks(board: null).ReadOpenAsync(null, TestContext.Current.CancellationToken);
@@ -148,9 +148,9 @@ public class GitHubTasksTests
     [Fact]
     public async Task MoreOpenTasksThanTheQueueReadsAreAnError()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("1\tv0.2.0\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t140\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t101\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("1\tv0.2.0\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t140\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t101\n"));
 
         var milestone = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync("v0.2.0", TestContext.Current.CancellationToken));
         var whole = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
@@ -163,7 +163,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ACountThatIsNotANumberIsAnErrorThatStays()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\tnull\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\tnull\n"));
 
         var unread = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
 
@@ -175,8 +175,8 @@ public class GitHubTasksTests
     public async Task LinesThatCannotBeReadAsTasksAreAnErrorThatStays()
     {
         const string Readable = "12\tAdd\thttps://github.com/acme/rocket/issues/12\tTodo\t\t\t\n";
-        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t2\n{Readable}13\tShort\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered($"total\t3\n{Readable}13\tA\thttps://github.com/acme/rocket/issues/13\tTodo\t4,x\t\t\n14\tB\thttps://github.com/acme/rocket/issues/14\tTodo\t\tnull\t\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"total\t2\n{Readable}13\tShort\thttps://github.com/acme/rocket/issues/13\tTodo\t\t\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered($"total\t3\n{Readable}13\tA\thttps://github.com/acme/rocket/issues/13\tTodo\t4,x\t\t\n14\tB\thttps://github.com/acme/rocket/issues/14\tTodo\t\tnull\t\n"));
 
         var one = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
         var two = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken));
@@ -188,7 +188,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task TasksThatCannotBeReadSayWhy()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found (HTTP 404)\nmore"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Not Found (HTTP 404)\nmore"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
 
@@ -227,7 +227,7 @@ public class GitHubTasksTests
     [InlineData("To get started with GitHub CLI, please run:  gh auth login", false)]
     public async Task AFailureThatMayPassIsToldApartFromOneThatStays(string error, bool mayPass)
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed(error));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed(error));
 
         var failed = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AssignAsync(12, TestContext.Current.CancellationToken));
 
@@ -254,7 +254,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task AClosedTaskIsAskedForByItsNumber()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("12\tAdd\\tthe thing\thttps://github.com/acme/rocket/issues/12\tDone\tv0.2.0\tfeature\tgood first issue\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("12\tAdd\\tthe thing\thttps://github.com/acme/rocket/issues/12\tDone\tv0.2.0\tfeature\tgood first issue\n"));
 
         var task = await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken);
 
@@ -275,7 +275,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task WithoutABoardNoBoardOfAClosedTaskIsAskedFor()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("12\tAdd the thing\thttps://github.com/acme/rocket/issues/12\t\t\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("12\tAdd the thing\thttps://github.com/acme/rocket/issues/12\t\t\n"));
 
         var task = await Tasks(board: null).ReadClosedAsync(12, TestContext.Current.CancellationToken);
 
@@ -288,8 +288,8 @@ public class GitHubTasksTests
     public async Task ATaskThatIsOpenOrIsNoTaskIsNotAClosedOne()
     {
         // The filter gives no line for an issue that is open, and GitHub refuses a number that is not of an issue.
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Could not resolve to an Issue with the number of 12."));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Could not resolve to an Issue with the number of 12."));
 
         Assert.Null(await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
         Assert.Null(await Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
@@ -298,7 +298,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task AClosedTaskThatCannotBeReadSaysWhy()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Bad credentials (HTTP 401)"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Bad credentials (HTTP 401)"));
         processes.Answers.Enqueue(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().ReadClosedAsync(12, TestContext.Current.CancellationToken));
@@ -311,8 +311,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task ATaskIsMovedOnTheBoardByTheNameOfTheStatus()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn progress\nitem\tPVTI_9\tPVT_other\nitem\tPVTI_1\tPVT_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn progress\nitem\tPVTI_9\tPVT_other\nitem\tPVTI_1\tPVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVTI_1\n"));
 
         await Tasks().SetStatusAsync(12, BoardStatus.InProgress, TestContext.Current.CancellationToken);
 
@@ -328,8 +328,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task ATaskIsMovedToTheStatusTheSettingsName()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tReady\noption\tO_2\tDone\noption\tO_3\tSHIPPED\nitem\tPVTI_1\tPVT_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tReady\noption\tO_2\tDone\noption\tO_3\tSHIPPED\nitem\tPVTI_1\tPVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVTI_1\n"));
 
         await Named().SetStatusAsync(12, BoardStatus.Done, TestContext.Current.CancellationToken);
 
@@ -339,7 +339,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ABoardWithoutTheStatusOfTheSettingsSaysSoByItsName()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn Progress\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\noption\tO_2\tIn Progress\n"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Named().SetStatusAsync(12, BoardStatus.InProgress, TestContext.Current.CancellationToken));
 
@@ -350,7 +350,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task TheQueueKnowsAStatusByTheNameOfTheSettings()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("total\t3\n1\tOne\thttps://x/1\tready\t\t\t\n2\tTwo\thttps://x/2\tTodo\t\t\t\n3\tThree\thttps://x/3\tDoing\t\t\t\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t3\n1\tOne\thttps://x/1\tready\t\t\t\n2\tTwo\thttps://x/2\tTodo\t\t\t\n3\tThree\thttps://x/3\tDoing\t\t\t\n"));
 
         var tasks = await Named().ReadOpenAsync(null, TestContext.Current.CancellationToken);
 
@@ -360,9 +360,9 @@ public class GitHubTasksTests
     [Fact]
     public async Task ATaskThatIsNotOnTheBoardIsPutThereFirst()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_5\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_5\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVTI_5\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVTI_5\n"));
 
         await Tasks().SetStatusAsync(12, BoardStatus.Todo, TestContext.Current.CancellationToken);
 
@@ -374,7 +374,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ABoardWithoutTheStatusSaysSo()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tBacklog\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tBacklog\n"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().SetStatusAsync(12, BoardStatus.Done, TestContext.Current.CancellationToken));
 
@@ -384,7 +384,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ABoardThatCannotBeReadSaysSo()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tnull\nfield\tnull\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tnull\nfield\tnull\n"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().SetStatusAsync(12, BoardStatus.Done, TestContext.Current.CancellationToken));
 
@@ -402,8 +402,8 @@ public class GitHubTasksTests
     [Fact]
     public async Task TheBoardOfAUserIsAskedOfTheUser()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\nitem\tPVTI_1\tPVT_1\n"));
-        processes.Answers.Enqueue(FakeProcesses.Answered("PVTI_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\nitem\tPVTI_1\tPVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("PVTI_1\n"));
 
         await Tasks("https://github.com/users/ann/projects/2").SetStatusAsync(12, BoardStatus.Todo, TestContext.Current.CancellationToken);
 
@@ -414,7 +414,7 @@ public class GitHubTasksTests
     public async Task LabelsCommentsAndClosingAreCommandsOfTheTool()
     {
         foreach (var _ in Enumerable.Range(0, 4))
-            processes.Answers.Enqueue(FakeProcesses.Answered(""));
+            processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await Tasks().AddLabelAsync(12, "needs owner", TestContext.Current.CancellationToken);
         await Tasks().RemoveLabelAsync(12, "interrupted", TestContext.Current.CancellationToken);
@@ -444,8 +444,8 @@ public class GitHubTasksTests
             if (!OperatingSystem.IsWindows())
                 modes.Add(File.GetUnixFileMode(arguments[^1]));
         };
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
-        processes.Answers.Enqueue(FakeProcesses.Failed("gh: Not Found (HTTP 404)"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("gh: Not Found (HTTP 404)"));
 
         await Tasks().CommentAsync(12, report, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<TrackerException>(() => Tasks().CommentAsync(12, report, TestContext.Current.CancellationToken));
@@ -459,7 +459,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task ATaskIsAssignedToTheUserTheToolIsLoggedInAs()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await Tasks().AssignAsync(12, TestContext.Current.CancellationToken);
 
@@ -469,7 +469,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task WithoutABoardATaskIsAssignedInTheSameWay()
     {
-        processes.Answers.Enqueue(FakeProcesses.Answered(""));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
 
         await new GitHubTasks(processes, "acme/rocket", null).AssignAsync(12, TestContext.Current.CancellationToken);
 
@@ -479,7 +479,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task AnAssignmentThatIsRefusedSaysSo()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("failed to update https://github.com/acme/rocket/issues/12: 'rocketeer' not found"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("failed to update https://github.com/acme/rocket/issues/12: 'rocketeer' not found"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AssignAsync(12, TestContext.Current.CancellationToken));
 
@@ -489,7 +489,7 @@ public class GitHubTasksTests
     [Fact]
     public async Task AChangeThatIsRefusedSaysWhatWasNotDone()
     {
-        processes.Answers.Enqueue(FakeProcesses.Failed("could not add label: 'needs owner' not found"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed("could not add label: 'needs owner' not found"));
 
         var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().AddLabelAsync(12, "needs owner", TestContext.Current.CancellationToken));
 

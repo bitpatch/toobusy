@@ -33,7 +33,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal((3, "**Done.**\n\nDid it.\n\n_Session: `fake attach 3`_"), Assert.Single(tracker.Comments));
         var start = Assert.Single(assistant.Started);
         Assert.Equal((3, "#3 Task 3", ModelChoice.AssistantsOwn, "high"), (start.Task, start.Name, start.Model, start.Effort));
@@ -42,16 +42,59 @@ public sealed partial class SupervisorTests
         Assert.Contains("moved the task to In Progress", start.Message, StringComparison.Ordinal);
         Assert.Equal(1, assistant.Session(3).Stopped);
         Assert.Equal(
-            """
+            $"""
             ✻ v0.2.0 · 1 task in the queue · the assistant's own model · high effort · auto mode
             → #3 Task 3 — started · a new session · fake attach 3
               #3 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
-            ✔ #3 Task 3 — done in 3 s
+            ✔ #3 Task 3 — done in {Spoken.Time(policy.Poll)}
               #3 is closed, with the report of the session as its comment
             ✔ No task is left · 1 done
-              Worked 3 s
+              Worked {Spoken.Time(policy.Poll)}
             """.ReplaceLineEndings("\n"),
             log.Text);
+    }
+
+    // The order of the calls of the tracker is behaviour in two places, which these tests pin; the others look at
+    // what was done in any order. A task that is done is closed with its report in it, and moved to Done once it
+    // is closed.
+    [Theory]
+    [InlineData(Done)]
+    [InlineData(Half)]
+    public async Task ATaskHasItsReportBeforeItIsClosedAndIsMovedToDoneAfterThat(string reply)
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works().Ends(reply);
+
+        await RunAsync();
+
+        Assert.Equal(["comment 3", "close 3", "status 3 Done"], tracker.Did.Where(did => did is "comment 3" or "close 3" or "status 3 Done"));
+    }
+
+    // A task that goes back to Todo has its label first, so that no run takes it the moment it is there.
+    [Theory]
+    [InlineData("Which key is it?\nTOOBUSY: owner", "needs-owner")]
+    [InlineData("I tried twice.\nTOOBUSY: failed the tests do not pass", "needs-owner")]
+    [InlineData("I gave up.\nTOOBUSY: interrupted", "interrupted")]
+    public async Task ATaskThatGoesBackToTodoHasItsLabelBeforeItIsMoved(string reply, string label)
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works().Ends(reply);
+
+        await RunAsync();
+
+        Assert.Equal([$"label 3 +{label}", "status 3 Todo"], tracker.Did.Where(did => did == $"label 3 +{label}" || did == "status 3 Todo"));
+    }
+
+    [Fact]
+    public async Task ATaskThatALimitPausesHasItsLabelBeforeItIsMoved()
+    {
+        tracker.Add(3);
+        assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(null, new UsageWindow("weekly", 100, FakeClock.Start + TimeSpan.FromDays(1))))
+            .Limit();
+
+        Assert.Equal(RunEnd.Limited, (await RunAsync()).End);
+        Assert.Equal(["label 3 +interrupted", "status 3 Todo"], tracker.Did.Where(did => did is "label 3 +interrupted" or "status 3 Todo"));
     }
 
     [Fact]
@@ -144,7 +187,7 @@ public sealed partial class SupervisorTests
 
         Assert.Equal(RunEnd.Problem, result.End);
         Assert.Equal("#3 said that a part is done and named no task of what is left · fake attach 3", result.Why);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.StartsWith(
             $"**Failed.** The run stopped over this task: its session said that a part is done and named no task of what is left. Look at what went wrong, take the label `needs-owner` off, and a run takes the task again.\n\n{report}",
             tracker.Comments[0].Text,
@@ -162,9 +205,9 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did.Take(5));
+        AssertDid(3, "status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.StartsWith("**Waits for the owner.** Nothing could be done without you. Take the label `needs-owner` off", tracker.Comments[0].Text, StringComparison.Ordinal);
-        Assert.Contains("◇ #3 Task 3 — waits for the owner after 3 s", log.Lines);
+        Assert.Contains($"◇ #3 Task 3 — waits for the owner after {Spoken.Time(policy.Poll)}", log.Lines);
         Assert.Equal([3, 5], assistant.Started.Select(start => start.Task));
     }
 
@@ -178,14 +221,14 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
-        Assert.Contains("✖ #3 Task 3 — failed after 3 s: the tests do not pass", log.Lines);
+        Assert.Contains($"✖ #3 Task 3 — failed after {Spoken.Time(policy.Poll)}: the tests do not pass", log.Lines);
         Assert.Contains("  │ I tried twice.", log.Lines);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.Equal(
             (3, Briefing.Stopped("its session failed: the tests do not pass", "I tried twice.", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
         Assert.Single(assistant.Started);
-        Assert.Equal([(3, RunMark.Failed, 3)], log.Ends);
+        Assert.Equal([(3, RunMark.Failed, Seconds(policy.Poll))], log.Ends);
 
         // A failure is for the owner: no run goes on with the task by itself.
         Assert.Equal([Record(3), null], state.Written);
@@ -200,9 +243,9 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal("the session of #3 did not say how the task went · fake attach 3", result.Why);
-        Assert.Contains("✖ #3 Task 3 — ended after 3 s without saying how the task went", log.Lines);
+        Assert.Contains($"✖ #3 Task 3 — ended after {Spoken.Time(policy.Poll)} without saying how the task went", log.Lines);
         Assert.Null(state.Record);
-        Assert.Equal(["status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.Equal(
             (3, Briefing.Stopped("its session ended without saying how the task went", "I was about to", "fake attach 3", "needs-owner")),
             Assert.Single(tracker.Comments));
@@ -279,7 +322,7 @@ public sealed partial class SupervisorTests
         Assert.Equal([(3, RunMark.Failed)], Ended);
 
         // The record is forgotten, so the task is left to the owner: nothing else keeps the next run from it.
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
         Assert.StartsWith("**Failed.** The run stopped over this task: the tracker refused something after its session: The tracker refused: close 3.", tracker.Comments[^1].Text, StringComparison.Ordinal);
 
         // A refusal stays: it is told at once, and the call is not made again.

@@ -61,6 +61,9 @@ sealed class FakeTracker : ITaskTracker
     // What was done, as `status 12 InProgress`, `assign 12`, `label 12 +manual`, `comment 12`, `close 12`.
     public List<string> Did { get; } = [];
 
+    // What was done to one task, in its order.
+    public IEnumerable<string> DidTo(int number) => Did.Where(did => did.Split(' ')[1] == number.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
     public List<(int Number, string Text)> Comments { get; } = [];
 
     public List<string?> Read { get; } = [];
@@ -229,6 +232,8 @@ sealed class FakeAssistant : IAssistant
     // An assistant that has nothing left of the sessions of earlier runs.
     public bool Gone { get; set; }
 
+    public IEnumerable<FakeSession> Sessions => sessions.Values;
+
     // The session of a task; one that is not written works for a look and ends with the task done.
     public FakeSession Session(int task)
     {
@@ -264,15 +269,35 @@ sealed class FakeAssistant : IAssistant
     public UsageLimits ReadLimits() => Limits;
 }
 
-// A session as a play: an act is what the looks at it show one after another, the last of them for as long as the
-// act lasts. Telling the session something starts the next act; asking it something starts the act written for that.
+// A session as a play, written by the test with `Works`, `Asks`, `Ends`, `Limit`, `Lost` and `Unseen`, each one or
+// more looks. The rules of the play:
+// - An act is what the looks at the session show one after another. The last look of an act is shown again and
+//   again for as long as the act lasts: `Works()` alone is a session that works until something else happens.
+// - `Then()` opens the act that telling the session something starts. A session that is told something while no
+//   act follows stays in the act it is in.
+// - `WhenAsked()` opens the act that asking the session something starts, wherever the play is; telling it
+//   something never starts that act. A play has one such act at most.
+// - The play starts from its first act whenever the session is started or found: a second run that goes on with
+//   the session sees it from the beginning. A play that the test did not write is a session that works for a look
+//   and ends with the task done.
+// - `Unplayed` says what of the play the run did not come to: an act that was never looked at, or the last look of
+//   the last act. An act may be left before its last look, as when the session is asked to wrap up; the last act
+//   may not. The tests of the run fail over it, so that a play that no longer says what happened cannot pass
+//   unnoticed.
 sealed class FakeSession(int task) : IAssistantSession
 {
     readonly List<List<(SessionLook Look, Action? Do)>> acts = [[]];
+
+    // The acts that were looked at, whichever run looked, and whether the last look of the play was.
+    readonly HashSet<int> seen = [];
+    bool ended;
     int? onAsk;
     int act;
     int at;
     int steps;
+
+    // Whether the play is the one a session gets when the test wrote none.
+    bool unwritten;
 
     // What the session is known by: another name once it went on as a copy.
     public string Id { get; private set; } = $"fake-{task}";
@@ -347,15 +372,35 @@ sealed class FakeSession(int task) : IAssistantSession
     public FakeSession Begin()
     {
         if (acts[0].Count == 0)
+        {
+            unwritten = true;
             Works().Ends("Did it.\nTOOBUSY: done");
+        }
+
         (act, at) = (0, 0);
         return this;
+    }
+
+    // What of the play was not shown, in words; null for a play that was shown to its end, and for one the test did
+    // not write.
+    public string? Unplayed
+    {
+        get
+        {
+            if (unwritten || acts[0].Count == 0)
+                return null;
+            if (Enumerable.Range(0, acts.Count).FirstOrDefault(index => !seen.Contains(index), -1) is var missed and >= 0)
+                return $"act {missed + 1} of {acts.Count} of the session of #{task} was never looked at";
+            return ended ? null : $"the last look of the session of #{task} was never shown";
+        }
     }
 
     public Task<SessionLook> LookAsync(CancellationToken cancellationToken)
     {
         Budget.Spend(++Looks, $"looks at the session of #{task}");
+        seen.Add(act);
         var (look, and) = acts[act][Math.Min(at++, acts[act].Count - 1)];
+        ended |= act == acts.Count - 1 && at >= acts[act].Count;
         and?.Invoke();
         return Task.FromResult(look);
     }

@@ -95,7 +95,7 @@ public sealed partial class SupervisorTests
         workspace.Syncs.Enqueue(new BranchSync(SyncStatus.Unreachable, "origin/develop", Said: "fatal: unable to access 'https://github.com/acme/rocket/': Could not resolve host: github.com") { MayPass = true });
         workspace.Sync = new BranchSync(SyncStatus.Moved, "origin/develop", 0, 3);
         var paused = new List<RunStatus>();
-        clock.At(TimeSpan.FromSeconds(5), () => paused.Add(log.Statuses[^1]));
+        clock.At(policy.RetryPauses[0] / 2, () => paused.Add(log.Statuses[^1]));
         tracker.Add(3);
 
         var result = await RunAsync();
@@ -103,7 +103,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
         Assert.Equal(2, workspace.Synced);
         Assert.Equal(
-            ["▲ The remote did not answer: origin/develop is fetched again in 10 s", "  develop is moved forward by 3 commits to origin/develop", "  Running the command before #3: scripts/dev.sh ports free"],
+            [$"▲ The remote did not answer: origin/develop is fetched again in {Spoken.Time(policy.RetryPauses[0])}", "  develop is moved forward by 3 commits to origin/develop", "  Running the command before #3: scripts/dev.sh ports free"],
             log.Lines.Skip(1).Take(3));
 
         // The page shows the task meanwhile, as it does while the branch is brought up to date.
@@ -125,9 +125,9 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "origin/develop cannot be fetched: ssh: connect to host github.com port 22: Operation timed out · #3 is not taken"), result);
-        Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)], synced.Zip(synced.Skip(1), (before, after) => after - before));
+        Assert.Equal(policy.RetryPauses, synced.Zip(synced.Skip(1), (before, after) => after - before));
         Assert.Equal(
-            ["▲ The remote did not answer: origin/develop is fetched again in 10 s", "▲ The remote did not answer: origin/develop is fetched again in 30 s"],
+            policy.RetryPauses.Select(pause => $"▲ The remote did not answer: origin/develop is fetched again in {Spoken.Time(pause)}"),
             log.Lines.Where(line => line.StartsWith('▲')));
         Assert.Empty(tracker.Did);
         Assert.Empty(assistant.Started);

@@ -10,7 +10,7 @@ public sealed partial class SupervisorTests
     {
         tracker.Add(3);
         tracker.Add(5);
-        var session = assistant.Session(3).Works(and: () => sign.Unwritable = new LocalStateException("the sign of the run cannot be written: Permission denied")).Works().Ends(Done);
+        var session = assistant.Session(3).Works(and: () => sign.Unwritable = new LocalStateException("the sign of the run cannot be written: Permission denied"));
 
         var result = await RunAsync();
 
@@ -67,7 +67,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(new RunResult(RunEnd.Problem, 0, "the record of the run cannot be taken away: Permission denied"), result);
         Assert.Equal(1, session.Stopped);
         Assert.Equal([(3, RunMark.Failed)], Ended);
-        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3");
         Assert.Equal(Record(3), state.Record);
 
         state.Unclearable = null;
@@ -95,7 +95,7 @@ public sealed partial class SupervisorTests
         Assert.Equal(1, session.Stopped);
         Assert.Equal([(3, RunMark.Failed)], Ended);
         Assert.Equal(
-            ["■ Stopped the session of #3: the run cannot go on · fake attach 3", "  Running the command after #3: scripts/dev.sh server stop", "  the command after #3 passed in 2 s", $"✖ Stopped: {why} · the next task did not start · 0 done"],
+            ["■ Stopped the session of #3: the run cannot go on · fake attach 3", "  Running the command after #3: scripts/dev.sh server stop", $"  the command after #3 passed in {Spoken.Time(shell.Takes)}", $"✖ Stopped: {why} · the next task did not start · 0 done"],
             log.Lines.SkipWhile(line => !line.StartsWith('■')).Take(4));
         Assert.Equal([$"Stopped: {why}"], machine.Notified);
 
@@ -140,7 +140,7 @@ public sealed partial class SupervisorTests
 
         // The outcome stopped the session before the working tree was read, and it is not stopped again.
         Assert.Equal(1, session.Stopped);
-        Assert.Equal(["status 3 InProgress", "assign 3"], tracker.Did);
+        AssertDid("status 3 InProgress", "assign 3");
         Assert.Equal(Record(3), state.Record);
         Assert.Contains(log.Lines, line => line.StartsWith($"✖ Stopped: {why} · ", StringComparison.Ordinal));
     }
@@ -176,8 +176,8 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
-        Assert.Equal([$"▲ GitHub did not answer: {again} again in 10 s"], log.Lines.Where(line => line.StartsWith('▲')));
-        Assert.Equal(["status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done"], tracker.Did);
+        Assert.Equal([$"▲ GitHub did not answer: {again} again in {Spoken.Time(policy.RetryPauses[0])}"], log.Lines.Where(line => line.StartsWith('▲')));
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
         Assert.Equal(1, tracker.Silences);
     }
 }
