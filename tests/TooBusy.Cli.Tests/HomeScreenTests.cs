@@ -58,6 +58,16 @@ public sealed class HomeScreenTests : IDisposable
         terminal.AssertSaw(" ❯ Run          the tasks cannot be read\n");
     }
 
+    // A count that fails, with an error that whoever counts did not foresee, has found nothing out either.
+    [Fact]
+    public async Task ACountThatFailsSaysTheTasksCannotBeRead()
+    {
+        terminal.Keys.Press(Keys.Enter);
+
+        Assert.Equal(HomeAction.Run, await AskAsync(new TaskCount(() => Task.FromException<QueueOutlook?>(new IOException("The disk is full.")))));
+        terminal.AssertSaw(" ❯ Run          the tasks cannot be read\n");
+    }
+
     [Fact]
     public async Task TheRowThatWaitsDoesNotBlinkAndItsDotsRun()
     {

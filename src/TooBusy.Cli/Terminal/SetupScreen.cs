@@ -1,4 +1,5 @@
 using TooBusy.Core.Setup;
+using TooBusy.Infrastructure.Settings;
 
 namespace TooBusy.Cli.Terminal;
 
@@ -29,6 +30,18 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
         SetupTone.Failure => Line.Of("✘ " + note.Text, Tone.Error),
         SetupTone.Change => new Line(new Part("  → ", Tone.Accent), new Part(note.Text)),
         _ => Line.Of(note.Text),
+    };
+
+    // How a setup ended, in one line, and whether that is a failure.
+    public static (bool Failed, string Text) Ending(SetupResult result, bool demo) => result.Outcome switch
+    {
+        SetupOutcome.Written when demo => (false, $"Demo: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."),
+        SetupOutcome.Written when result.SettingsWritten => (false, $"The settings are written to {SettingsFile.DisplayPath}. Commit the file."),
+        SetupOutcome.Written => (false, "GitHub is set up as the settings say."),
+        SetupOutcome.NothingToChange => (false, "Nothing to change: the settings already say this."),
+        SetupOutcome.Declined => (true, "The setup was declined: nothing was changed."),
+        SetupOutcome.Failed => (true, $"{result.Failure} The settings were not written."),
+        _ => (true, "The setup was left: nothing was changed."),
     };
 
     public void Show(SetupProgress progress)

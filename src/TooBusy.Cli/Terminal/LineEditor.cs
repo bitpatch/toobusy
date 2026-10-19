@@ -7,14 +7,6 @@ public sealed class LineEditor(string text)
 
     public int Caret { get; private set; } = text.Length;
 
-    public bool AtEnd => Caret == Text.Length;
-
-    public void Set(string text)
-    {
-        Text = text;
-        Caret = text.Length;
-    }
-
     public void Insert(char character)
     {
         Text = Text.Insert(Caret, character.ToString());

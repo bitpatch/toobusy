@@ -34,6 +34,7 @@ public class CheckupTests
             ],
             checks.Select(check => check with { Details = [] }));
         Assert.All(checks, check => Assert.Empty(check.Details));
+        Assert.Equal(Checkup.Names, checks.Select(check => check.Name));
 
         // Every check starts before it ends, and they come one after another.
         Assert.Equal(checks.SelectMany(check => check.State == CheckState.Skipped ? (string[])[$"done {check.Name}"] : [$"start {check.Name}", $"done {check.Name}"]), view.Told);

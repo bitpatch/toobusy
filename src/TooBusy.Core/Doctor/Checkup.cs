@@ -18,6 +18,9 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
     public const string Labels = "labels";
     public const string Skill = "skill";
 
+    // The names of every check, in their order.
+    public static IReadOnlyList<string> Names { get; } = [Git, TrackerTool, TrackerLogin, Assistant, AssistantLogin, Settings, Repository, Board, Statuses, Labels, Skill];
+
     // Every check; the results are in the order of the checks.
     public async Task<IReadOnlyList<CheckResult>> RunAsync(ICheckupView view, CancellationToken cancellationToken)
     {

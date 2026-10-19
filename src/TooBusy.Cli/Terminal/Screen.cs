@@ -19,6 +19,9 @@ public sealed record Line(params Part[] Parts)
     public int Blinking { get; init; } = 1;
 
     public static Line Of(string text, Tone tone = Tone.Plain) => new(new Part(text, tone));
+
+    // The line as it is printed in the terminal outside a page: each piece in its colour, whole.
+    public string Painted(Palette palette) => string.Concat(Parts.Select(part => palette.Paint(part.Tone, part.Text, part.Ground)));
 }
 
 // One picture of a screen, from top to bottom: the bar with the title and, at its right, the status; the body; the

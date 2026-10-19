@@ -4,7 +4,6 @@ using TooBusy.Core.Doctor;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Setup;
-using TooBusy.Infrastructure.Settings;
 
 namespace TooBusy.Cli;
 
@@ -23,16 +22,15 @@ public sealed class Session(Page page, Workbench bench)
     // The last setup that was gone through; null when there was none.
     public SetupResult? Setup { get; private set; }
 
-    // The milestone that was chosen on the page; null when none was.
-    public MilestoneChoice? Chosen { get; private set; }
+    // The milestone, the model and the effort that were chosen on the page; null when none was.
+    public MilestoneChoice? ChosenMilestone { get; private set; }
 
-    // The model and the effort that were chosen on the page; null when none was.
     public ModelChoice? ChosenModel { get; private set; }
 
     public string? ChosenEffort { get; private set; }
 
     // Whether anything was chosen on the page.
-    public bool Chose => Chosen is not null || ChosenModel is not null || ChosenEffort is not null;
+    public bool Chose => ChosenMilestone is not null || ChosenModel is not null || ChosenEffort is not null;
 
     // How the runs that were on the page ended, in their order; null is one that never got to its end.
     public List<RunResult?> Runs { get; } = [];
@@ -197,7 +195,7 @@ public sealed class Session(Page page, Workbench bench)
     {
         Clear("Setting up this project", null);
         page.Body = [];
-        return Setup = await new ProjectSetup(new SetupScreen(page, leavesPage), bench.Environment, bench.Tracker, bench.Boards, bench.Settings, proposals).RunAsync(cancellationToken);
+        return Setup = await new ProjectSetup(new SetupScreen(page, leavesPage), bench.SetupMachine, bench.Tracker, bench.Boards, bench.Settings, proposals).RunAsync(cancellationToken);
     }
 
     // What `Settings` of the menu opens: the settings one under another with their values, until Escape goes back to
@@ -209,7 +207,7 @@ public sealed class Session(Page page, Workbench bench)
     {
         if (bench.Settings.Load()?.Settings is not null)
         {
-            var setup = new ProjectSetup(new SetupScreen(page, leavesPage: false), bench.Environment, bench.Tracker, bench.Boards, bench.Settings);
+            var setup = new ProjectSetup(new SetupScreen(page, leavesPage: false), bench.SetupMachine, bench.Tracker, bench.Boards, bench.Settings);
             using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var opening = setup.OpenAsync(stopping.Token);
             var chosen = await WaitAsync(new HomeWork(HomeAction.Settings, opening), opening, stopping, tasks);
@@ -224,7 +222,7 @@ public sealed class Session(Page page, Workbench bench)
             }
         }
 
-        var ended = Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
+        var ended = SetupScreen.Ending(await SetupAsync(leavesPage: false, cancellationToken), bench.Demo).Text;
         tasks.Forget();
         return (null, ended);
     }
@@ -254,7 +252,7 @@ public sealed class Session(Page page, Workbench bench)
             // statuses a run needs.
             said = result.Outcome switch
             {
-                SetupOutcome.Written or SetupOutcome.Failed => [Line.Of(Ending(result, bench.Demo).Text, Tone.Muted)],
+                SetupOutcome.Written or SetupOutcome.Failed => [Line.Of(SetupScreen.Ending(result, bench.Demo).Text, Tone.Muted)],
                 SetupOutcome.Declined => [Line.Of("The change was not saved.", Tone.Muted)],
                 _ => [.. result.Notes.Select(SetupScreen.Told)],
             };
@@ -274,7 +272,7 @@ public sealed class Session(Page page, Workbench bench)
             return false;
 
         bench.Personal.SaveMilestone(choice);
-        Chosen = choice;
+        ChosenMilestone = choice;
         standing = MilestoneStanding.Of(choice, open);
         return true;
     }
@@ -365,18 +363,6 @@ public sealed class Session(Page page, Workbench bench)
     // The model and the effort in a few words, as the menu shows them.
     string Assistant() =>
         $"{(bench.Personal.LoadModel() is { Name: { } name } ? name : "own model")} · {bench.Personal.LoadEffort()}";
-
-    // How a setup ended, in one line, and whether that is a failure.
-    public static (bool Failed, string Text) Ending(SetupResult result, bool demo) => result.Outcome switch
-    {
-        SetupOutcome.Written when demo => (false, $"Demo: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."),
-        SetupOutcome.Written when result.SettingsWritten => (false, $"The settings are written to {SettingsFile.DisplayPath}. Commit the file."),
-        SetupOutcome.Written => (false, "GitHub is set up as the settings say."),
-        SetupOutcome.NothingToChange => (false, "Nothing to change: the settings already say this."),
-        SetupOutcome.Declined => (true, "The setup was declined: nothing was changed."),
-        SetupOutcome.Failed => (true, $"{result.Failure} The settings were not written."),
-        _ => (true, "The setup was left: nothing was changed."),
-    };
 
     // Reads the open milestones, which the page cannot go on without: there is nowhere to go back to from here,
     // so Escape leaves the page. False when the user left instead of waiting.

@@ -7,27 +7,36 @@ public class PaletteTests
     [Fact]
     public void WithoutATerminalThereIsNoColour()
     {
-        Assert.Same(Palette.None, Palette.Detect(isTerminal: false, Variables(("COLORTERM", "truecolor"))));
+        Assert.Same(Palette.None, Palette.Detect(isTerminal: false, Variables(("TERM", "xterm-256color"), ("COLORTERM", "truecolor"))));
     }
 
     [Fact]
     public void NoColorTurnsTheColourOff()
     {
-        Assert.Same(Palette.None, Palette.Detect(isTerminal: true, Variables(("NO_COLOR", "1"), ("COLORTERM", "truecolor"))));
+        Assert.Same(Palette.None, Palette.Detect(isTerminal: true, Variables(("TERM", "xterm-256color"), ("NO_COLOR", "1"), ("COLORTERM", "truecolor"))));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("dumb")]
+    public void ATerminalThatDoesNotSayWhatItIsOrIsADumbOneHasNoColour(string? term)
+    {
+        Assert.Same(Palette.None, Palette.Detect(isTerminal: true, Variables(("TERM", term), ("COLORTERM", "truecolor"))));
     }
 
     [Fact]
     public void ATruecolorTerminalIsDarkUnlessItSaysOtherwise()
     {
-        Assert.Same(Palette.Dark, Palette.Detect(isTerminal: true, Variables(("COLORTERM", "truecolor"))));
-        Assert.Same(Palette.Dark, Palette.Detect(isTerminal: true, Variables(("COLORTERM", "24bit"), ("COLORFGBG", "15;0"))));
-        Assert.Same(Palette.Light, Palette.Detect(isTerminal: true, Variables(("COLORTERM", "truecolor"), ("COLORFGBG", "0;15"))));
+        Assert.Same(Palette.Dark, Palette.Detect(isTerminal: true, Variables(("TERM", "xterm-256color"), ("COLORTERM", "truecolor"))));
+        Assert.Same(Palette.Dark, Palette.Detect(isTerminal: true, Variables(("TERM", "xterm-256color"), ("COLORTERM", "24bit"), ("COLORFGBG", "15;0"))));
+        Assert.Same(Palette.Light, Palette.Detect(isTerminal: true, Variables(("TERM", "xterm-256color"), ("COLORTERM", "truecolor"), ("COLORFGBG", "0;15"))));
     }
 
     [Fact]
     public void ATerminalWithoutTruecolorGetsTheSixteenColours()
     {
-        Assert.Same(Palette.Basic, Palette.Detect(isTerminal: true, Variables()));
+        Assert.Same(Palette.Basic, Palette.Detect(isTerminal: true, Variables(("TERM", "xterm"))));
         Assert.Equal("\u001b[31m?\u001b[0m", Palette.Basic.Accent("?"));
     }
 
@@ -123,6 +132,6 @@ public class PaletteTests
         Assert.Equal("\u001b[38;2;88;88;88mtab\u001b[0m", Palette.Light.Paint(Tone.Quiet, "tab"));
     }
 
-    static Func<string, string?> Variables(params (string Name, string Value)[] variables) =>
+    static Func<string, string?> Variables(params (string Name, string? Value)[] variables) =>
         name => variables.Where(variable => variable.Name == name).Select(variable => variable.Value).FirstOrDefault();
 }

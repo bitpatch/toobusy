@@ -28,7 +28,8 @@ public sealed class MachineCheckup(IProcessRunner processes, Platform platform, 
         {
             Tool.Git => "git",
             Tool.GitHubCli => "gh",
-            _ => "claude",
+            Tool.ClaudeCode => "claude",
+            _ => throw new ArgumentOutOfRangeException(nameof(tool), tool, "There is no such tool."),
         };
         var result = await processes.RunAsync(command, ["--version"], Patience, cancellationToken);
         var runs = result is { Status: ProcessStatus.Exited, ExitCode: 0 };

@@ -10,7 +10,7 @@ public class LineEditorTests
         var editor = new LineEditor("acme");
         editor.Insert('/');
 
-        Assert.Equal(("acme/", 5, true), (editor.Text, editor.Caret, editor.AtEnd));
+        Assert.Equal(("acme/", 5), (editor.Text, editor.Caret));
     }
 
     [Fact]
@@ -21,7 +21,7 @@ public class LineEditorTests
         editor.Right();
         editor.Insert('c');
 
-        Assert.Equal(("acme", 2, false), (editor.Text, editor.Caret, editor.AtEnd));
+        Assert.Equal(("acme", 2), (editor.Text, editor.Caret));
     }
 
     [Fact]

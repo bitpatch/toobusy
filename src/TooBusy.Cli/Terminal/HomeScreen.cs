@@ -21,7 +21,7 @@ public sealed class TaskCount(Func<Task<QueueOutlook?>> count)
 {
     Task<QueueOutlook?>? counting;
 
-    // The count that is going on or is done; it never fails.
+    // The count that is going on or is done. One that failed found nothing out.
     public Task<QueueOutlook?> Counting => counting ??= count();
 
     public void Forget() => counting = null;
@@ -162,15 +162,15 @@ public static class HomeScreen
     {
         page.EscapeLeaves = wait is null;
         page.Keys = wait is null ? "" : "esc stop";
-        Choice Waiting(string name) => new(name, Note: wait!.Note, Off: true, Waits: true);
+        Choice Waiting(HomeAction row) => new(Name(row), Note: wait!.Note, Off: true, Waits: true);
         IReadOnlyList<Choice> Choices() =>
         [
-            wait?.Row == HomeAction.Run ? Waiting("Run") : Run(tasks.Counting, page.Width),
-            new("Assistant", Note: assistant),
-            new("Milestone", Note: milestone),
-            wait?.Row == HomeAction.Settings ? Waiting("Settings") : new("Settings"),
-            skipped.Count == 0 ? new("Skip labels", Note: "none", NoteTone: Tone.Muted) : new("Skip labels", Note: string.Join(", ", skipped)),
-            new("Exit", wait is null ? Picker.BackKey : ""),
+            wait?.Row == HomeAction.Run ? Waiting(HomeAction.Run) : Run(tasks.Counting, page.Width),
+            new(Name(HomeAction.Assistant), Note: assistant),
+            new(Name(HomeAction.Milestone), Note: milestone),
+            wait?.Row == HomeAction.Settings ? Waiting(HomeAction.Settings) : new(Name(HomeAction.Settings)),
+            skipped.Count == 0 ? new(Name(HomeAction.SkipLabels), Note: "none", NoteTone: Tone.Muted) : new(Name(HomeAction.SkipLabels), Note: string.Join(", ", skipped)),
+            new(Name(HomeAction.Exit), wait is null ? Picker.BackKey : ""),
         ];
 
         // The count at `Run` goes on while another row waits, and is drawn when it is done.
@@ -197,17 +197,29 @@ public static class HomeScreen
         return picked is { } index ? (HomeAction)index : null;
     }
 
-    // What stands before the note of `Run`: the margin, the pointer, the widest name, `Skip labels`, the two spaces
-    // after it, and the column that is kept free at the edge.
-    const int BeforeNote = 1 + 2 + 11 + 2 + 1;
+    // The names of the rows, in the order of `HomeAction`.
+    static readonly string[] Names = ["Run", "Assistant", "Milestone", "Settings", "Skip labels", "Exit"];
 
-    static Choice Run(Task<QueueOutlook?> counting, int width) => counting switch
+    static string Name(HomeAction row) => Names[(int)row];
+
+    // What stands before the note of `Run`: the margin, the pointer, the widest name, the two spaces after it, and
+    // the column that is kept free at the edge.
+    static readonly int BeforeNote = 1 + 2 + Names.Max(name => name.Length) + 2 + 1;
+
+    // A count that has not ended waits; one that failed, or found nothing out, cannot read the tasks.
+    static Choice Run(Task<QueueOutlook?> counting, int width) => counting.Status switch
     {
-        { IsCompleted: false } => new("Run", Off: true, Waits: true),
-        { Result: null } => new("Run", "the tasks cannot be read"),
-        { Result: { Interrupted: { } task } } => new("Run", Note: Cut("interrupted: " + Spoken.Task(task), width - BeforeNote), NoteTone: Tone.Warning),
-        { Result: { Tasks: 0 } } => new("Run", Note: "no tasks", Off: true),
-        { Result: { Tasks: var count } } => new("Run", Note: Spoken.Tasks(count)),
+        TaskStatus.RanToCompletion => Counted(counting.Result, width),
+        TaskStatus.Faulted or TaskStatus.Canceled => Counted(null, width),
+        _ => new(Name(HomeAction.Run), Off: true, Waits: true),
+    };
+
+    static Choice Counted(QueueOutlook? outlook, int width) => outlook switch
+    {
+        null => new(Name(HomeAction.Run), "the tasks cannot be read"),
+        { Interrupted: { } task } => new(Name(HomeAction.Run), Note: Cut("interrupted: " + Spoken.Task(task), width - BeforeNote), NoteTone: Tone.Warning),
+        { Tasks: 0 } => new(Name(HomeAction.Run), Note: "no tasks", Off: true),
+        { Tasks: var count } => new(Name(HomeAction.Run), Note: Spoken.Tasks(count)),
     };
 
     // The text as long as the room allows: the end of what does not fit gives way to an ellipsis.

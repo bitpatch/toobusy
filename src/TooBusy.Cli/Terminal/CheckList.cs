@@ -9,7 +9,7 @@ namespace TooBusy.Cli.Terminal;
 public sealed class CheckList : ICheckupView, IDisposable
 {
     // The names of the checks stand in a column as wide as the longest of them.
-    const int Names = 17;
+    static readonly int Names = Checkup.Names.Max(name => name.Length);
 
     readonly TextWriter output;
     readonly Palette palette;

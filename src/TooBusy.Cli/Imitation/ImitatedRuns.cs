@@ -54,9 +54,17 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
 
     // The made-up tasks: those that were kept while one of them is interrupted or has a record, and otherwise tasks
     // that are made up anew, so that a demo can be run again and again. The first of them have a task that a run was
-    // killed over, with its record, so that a demo starts by going on with a session.
+    // killed over, with its record, so that a demo starts by going on with a session. Settings that were changed in
+    // the demo so that the kept tasks no longer fit them start it over: the tasks are made up anew for them, and the
+    // record of the old ones is forgotten.
     ImitatedTasks Tasks(QueueRules rules, bool killed = true)
     {
+        if (kept is not null && !kept.Fits(rules))
+        {
+            kept = null;
+            remembered.Clear();
+        }
+
         if (kept is null && !killed)
         {
             kept = new ImitatedTasks(rules, killed: false);
@@ -141,11 +149,13 @@ public sealed class ImitatedTasks : ITaskTracker
     static readonly string[] Types = ["feature", "bug", "chore", "docs"];
 
     readonly List<QueueTask> open = [];
+    readonly QueueRules made;
     readonly string manual;
     readonly BoardStatuses statuses;
 
     public ImitatedTasks(QueueRules rules, bool killed)
     {
+        made = rules;
         manual = rules.Labels.Manual;
         statuses = rules.Statuses;
         string Type(int kind) => rules.Labels.Take.Count > 0 ? rules.Labels.Take[kind % rules.Labels.Take.Count] : Types[kind];
@@ -178,6 +188,16 @@ public sealed class ImitatedTasks : ITaskTracker
 
     // Whether a task carries the label that a run puts on one it had to stop.
     public bool HasInterrupted(string label) => open.Any(task => task.Has(label));
+
+    // Whether the tasks were made up for rules such as these: the same labels, the same board and the same statuses
+    // on it. The labels a run skips do not make other tasks.
+    public bool Fits(QueueRules rules) =>
+        rules.Board == made.Board
+        && rules.Statuses == made.Statuses
+        && rules.Labels.Manual == made.Labels.Manual
+        && rules.Labels.Interrupted == made.Labels.Interrupted
+        && rules.Labels.Blocking.SequenceEqual(made.Labels.Blocking)
+        && rules.Labels.Take.SequenceEqual(made.Labels.Take);
 
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);

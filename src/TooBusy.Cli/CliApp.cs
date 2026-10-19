@@ -39,6 +39,13 @@ public static class CliApp
         return (parts[0], parts[1][..Math.Min(parts[1].Length, CommitLength)]);
     }
 
+    // Where an assistant that is told to set a project up finds the walk through the setup: the help says it, and
+    // so do the messages of a project that is not set up and of `init` where there is no terminal.
+    const string ForAnAssistant = "An assistant that sets a project up for its owner starts with `toobusy init --assist`.";
+
+    // What `run` and `queue` say where the project has no tasks to read.
+    const string NoTasks = "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take";
+
     public static RootCommand CreateRootCommand(CliContext context)
     {
         var demo = new Option<bool>("--demo")
@@ -72,7 +79,7 @@ public static class CliApp
         root.SetAction(async (result, cancellationToken) =>
         {
             if (context.Terminal is not { } terminal)
-                return FindSettings(context) is null ? ExitCode.NotReady : root.Parse(["--help"]).Invoke(result.InvocationConfiguration);
+                return FindSetUp(context) is null ? ExitCode.NotReady : root.Parse(["--help"]).Invoke(result.InvocationConfiguration);
             if (FindProject(context) is not { } folder || await OpenAsync(context, folder, result.GetValue(demo), ready: true, watched: true, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
@@ -290,7 +297,7 @@ public static class CliApp
                 if (await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: false, cancellationToken) is not { } unasked)
                     return ExitCode.NotReady;
 
-                var setup = await new ProjectSetup(null, unasked.Environment, unasked.Tracker, unasked.Boards, unasked.Settings, proposals).RunAsync(cancellationToken);
+                var setup = await new ProjectSetup(null, unasked.SetupMachine, unasked.Tracker, unasked.Boards, unasked.Settings, proposals).RunAsync(cancellationToken);
                 context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
                 foreach (var note in setup.Notes)
                 {
@@ -328,10 +335,6 @@ public static class CliApp
         });
         return command;
     }
-
-    // Where an assistant that is told to set a project up finds the walk through the setup: the help says it, and
-    // so do the messages of a project that is not set up and of `init` where there is no terminal.
-    const string ForAnAssistant = "An assistant that sets a project up for its owner starts with `toobusy init --assist`.";
 
     // Tells the assistant of the owner how to set the project up: the introduction with the list of the steps and
     // the first step, or the step of the number alone. It needs a project and no terminal, reads what the setup
@@ -553,11 +556,8 @@ public static class CliApp
             }
 
             // A demo shows the run in any project: where there are no settings it makes them up.
-            if ((result.GetValue(demo) ? FindProject(context) : FindSettings(context)?.Path) is null)
-                return ExitCode.NotReady;
-
-            var root = ProjectLocator.FindRoot(context.Folder)!;
-            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: context.Terminal is not null, cancellationToken) is not { } bench)
+            if ((result.GetValue(demo) ? FindProject(context) : FindSetUp(context)) is not { } root
+                || await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: context.Terminal is not null, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (ValidSettings(context, bench) is not { } settings)
@@ -581,21 +581,21 @@ public static class CliApp
             if (await ChosenMilestoneAsync(context, bench, cancellationToken) is not { } milestone)
                 return ExitCode.Failed;
 
-            if (bench.Personal.LoadModel() is null)
+            if (bench.Personal.LoadModel() is not { } model)
             {
                 Say(context, "toobusy: the model is not chosen.");
                 Say(context, "Run `toobusy model` to choose it.");
                 return ExitCode.Failed;
             }
 
-            if (bench.Personal.LoadEffort() is null)
+            if (bench.Personal.LoadEffort() is not { } effort)
             {
                 Say(context, "toobusy: the effort is not chosen.");
                 Say(context, "Run `toobusy effort` to choose it.");
                 return ExitCode.Failed;
             }
 
-            if (bench.OpenRun(settings, milestone.Title, bench.Personal.LoadModel()!, bench.Personal.LoadEffort()!, only, most, Labels(result.GetValue(skip))) is not { } run)
+            if (bench.OpenRun(settings, milestone.Title, model, effort, only, most, Labels(result.GetValue(skip))) is not { } run)
             {
                 Say(context, NoTasks);
                 return ExitCode.Failed;
@@ -625,11 +625,8 @@ public static class CliApp
         command.SetAction(async (result, cancellationToken) =>
         {
             // A demo shows the queue in any project: where there are no settings it makes them up.
-            if ((result.GetValue(demo) ? FindProject(context) : FindSettings(context)?.Path) is null)
-                return ExitCode.NotReady;
-
-            var root = ProjectLocator.FindRoot(context.Folder)!;
-            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: false, cancellationToken) is not { } bench)
+            if ((result.GetValue(demo) ? FindProject(context) : FindSetUp(context)) is not { } root
+                || await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: false, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (ValidSettings(context, bench) is not { } settings)
@@ -709,17 +706,22 @@ public static class CliApp
         return command;
     }
 
-    const string NoTasks = "toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take";
-
-    // The settings of the project when they validate; otherwise it says what is wrong with them and gives null.
+    // The settings of the project when they validate; otherwise it says what is wrong with them, or that there are
+    // none, and gives null.
     static ProjectSettings? ValidSettings(CliContext context, Workbench bench)
     {
-        var settings = bench.Settings.Load();
-        if (settings is not { Settings: null })
-            return settings!.Settings;
+        var loaded = bench.Settings.Load();
+        if (loaded?.Settings is { } valid)
+            return valid;
+
+        if (loaded is null)
+        {
+            SayNotSetUp(context);
+            return null;
+        }
 
         Say(context, "toobusy: the settings of this project are not valid.");
-        foreach (var problem in settings.Errors)
+        foreach (var problem in loaded.Errors)
             context.Error.WriteLine(context.ErrorPalette.Error(problem.Describe(SettingsFile.DisplayPath)));
         return null;
     }
@@ -818,20 +820,18 @@ public static class CliApp
     {
         var palette = context.OutputPalette;
         setup ??= new SetupResult(SetupOutcome.Left, []);
-        foreach (var answer in setup.Answers)
-            context.Output.WriteLine($"{palette.Success("✔")} {answer.Label,-16} {answer.Value}");
 
         // No question asks for the commands around a task, the branch and the permission mode: what the options made of
         // them is said after the answers.
-        foreach (var setting in setup.Unasked)
-            context.Output.WriteLine($"{palette.Success("✔")} {setting.Label,-16} {setting.Value}");
+        foreach (var answer in setup.Answers.Concat(setup.Unasked))
+            context.Output.WriteLine(Picker.Answer(answer.Label, answer.Value).Painted(palette));
 
         // A setup that asked nothing showed nobody what it was about to do on GitHub: it says what it did. A demo
         // did none of it.
         foreach (var done in unasked && !demo ? setup.Done : [])
             context.Output.WriteLine(done);
 
-        var (failed, text) = Session.Ending(setup, demo);
+        var (failed, text) = SetupScreen.Ending(setup, demo);
         context.Output.WriteLine(
             failed ? $"{palette.Error("✘")} {text}"
             : setup.Outcome == SetupOutcome.NothingToChange ? text
@@ -853,13 +853,13 @@ public static class CliApp
     {
         (string Label, string? Value)[] choices =
         [
-            ("Milestone", session.Chosen is { } milestone ? milestone.Title ?? "none" : null),
+            ("Milestone", session.ChosenMilestone is { } milestone ? milestone.Title ?? "none" : null),
             ("Model", session.ChosenModel is { } model ? ModelScreen.Describe(model) : null),
             ("Effort", session.ChosenEffort),
         ];
         var chosen = choices.Where(choice => choice.Value is not null).ToList();
         foreach (var (label, value) in chosen)
-            context.Output.WriteLine($"{context.OutputPalette.Success("✔")} {label,-16} {value}");
+            context.Output.WriteLine(Picker.Answer(label, value!).Painted(context.OutputPalette));
         if (demo && chosen.Count > 0)
             context.Output.WriteLine(context.OutputPalette.Muted("Demo: what was chosen is not remembered."));
         return chosen.Count > 0;
@@ -908,23 +908,28 @@ public static class CliApp
         return root;
     }
 
-    // The settings file of the project; without a project or without the file it says so and gives null.
-    static SettingsFile? FindSettings(CliContext context)
+    // The root of a project that has its settings file; without a project or without the file it says so and gives
+    // null.
+    static string? FindSetUp(CliContext context)
     {
         if (FindProject(context) is not { } root)
             return null;
+        if (new SettingsFile(root).Exists)
+            return root;
 
-        var file = new SettingsFile(root);
-        if (file.Exists)
-            return file;
+        SayNotSetUp(context);
+        return null;
+    }
 
+    // That the project has no settings, and how it gets them.
+    static void SayNotSetUp(CliContext context)
+    {
         Say(context, "toobusy: this project is not set up yet.");
         Say(context, "Run `toobusy init` to set it up.");
 
         // Nobody is at a terminal to be asked: who reads this may be an assistant.
         if (context.Terminal is null)
             Say(context, ForAnAssistant);
-        return null;
     }
 
     // A line where errors go. It gives no exit code: a command that fails returns its own, where it fails, so that

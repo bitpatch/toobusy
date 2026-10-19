@@ -16,22 +16,47 @@ namespace TooBusy.Cli;
 
 // Everything the commands work with in one project: its root, its settings, the tracker, the choice of the user and
 // its runs. It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the
-// tasks are read from; null when the `origin` remote is not a GitHub repository. Machine is what the checks of
-// `doctor` ask, and Runs is what a run is made of: the tasks it reads, the record it leaves and the sign it puts up.
-public sealed record Workbench(
-    string Root,
-    bool Demo,
-    string? Repository,
-    ISetupEnvironment Environment,
-    ISetupTracker Tracker,
-    ISetupBoards Boards,
-    ISettingsStore Settings,
-    IMilestones Milestones,
-    IPersonalSettings Personal,
-    IClock Clock,
-    ICheckupMachine Machine,
-    IProjectRuns Runs)
+// tasks are read from; null when the `origin` remote is not a GitHub repository. SetupMachine is what the setup asks
+// of the machine, Machine is what the checks of `doctor` ask, and Runs is what a run is made of: the tasks it reads,
+// the record it leaves and the sign it puts up.
+public sealed class Workbench(
+    string root,
+    bool demo,
+    string? repository,
+    ISetupEnvironment setupMachine,
+    ISetupTracker tracker,
+    ISetupBoards boards,
+    ISettingsStore settings,
+    IMilestones milestones,
+    IPersonalSettings personal,
+    IClock clock,
+    ICheckupMachine machine,
+    IProjectRuns runs)
 {
+    public string Root => root;
+
+    public bool Demo => demo;
+
+    public string? Repository => repository;
+
+    public ISetupEnvironment SetupMachine => setupMachine;
+
+    public ISetupTracker Tracker => tracker;
+
+    public ISetupBoards Boards => boards;
+
+    public ISettingsStore Settings => settings;
+
+    public IMilestones Milestones => milestones;
+
+    public IPersonalSettings Personal => personal;
+
+    public IClock Clock => clock;
+
+    public ICheckupMachine Machine => machine;
+
+    public IProjectRuns Runs => runs;
+
     // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
     // reading changes nothing: the `origin` remote, the boards and the milestones; what it would make, link, write
     // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,

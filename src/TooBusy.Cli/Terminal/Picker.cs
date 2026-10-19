@@ -24,18 +24,27 @@ public static class Picker
     // empty before what explains them, so that that stands in one column. `Back` names its key in that column.
     public const string Current = "current";
 
+    // The labels of what is settled stand in a column, on the page and in what is left in the terminal after it
+    // alike: one wider than the longest label of the setup and of the choices of the user, so that they line up
+    // whatever is shown together.
     const int LabelWidth = 16;
+
+    // What a list without choices says.
+    const string Nothing = "There is nothing to choose from.";
 
     // Whether a list on the page is to end with `Back`: it is, unless Escape leaves the page from here.
     public static bool GoesBack(Page page) => !page.EscapeLeaves;
 
     // The keys that move the pointer of every list, a selection, a multiple choice and the menu of a run alike: the
-    // arrows, `k` and `j`, and Shift+Tab and Tab. The question about the board keeps Tab for its tabs.
+    // arrows, `k` and `j`, and Shift+Tab and Tab. The question about the board keeps Tab for its tabs. `k` and `j`
+    // with Ctrl or Alt are other keys, such as those of a line of text.
     public static bool Up(ConsoleKeyInfo key) =>
-        key.Key is ConsoleKey.UpArrow or ConsoleKey.K || key.Key == ConsoleKey.Tab && key.Modifiers.HasFlag(ConsoleModifiers.Shift);
+        key.Key == ConsoleKey.UpArrow || key.Key == ConsoleKey.K && Bare(key) || key.Key == ConsoleKey.Tab && key.Modifiers.HasFlag(ConsoleModifiers.Shift);
 
     public static bool Down(ConsoleKeyInfo key) =>
-        key.Key is ConsoleKey.DownArrow or ConsoleKey.J || key.Key == ConsoleKey.Tab && !key.Modifiers.HasFlag(ConsoleModifiers.Shift);
+        key.Key == ConsoleKey.DownArrow || key.Key == ConsoleKey.J && Bare(key) || key.Key == ConsoleKey.Tab && !key.Modifiers.HasFlag(ConsoleModifiers.Shift);
+
+    static bool Bare(ConsoleKeyInfo key) => (key.Modifiers & (ConsoleModifiers.Control | ConsoleModifiers.Alt)) == 0;
 
     // Asks to choose one of the choices, one under another, starting at the given one. Gives the index of the
     // chosen one, or null when Escape is pressed. `shortcut` lets a key choose at once. Wherever Escape goes back
@@ -100,7 +109,7 @@ public static class Picker
         {
             var lines = new List<Line>();
             if (options.Count == 0)
-                lines.Add(Line.Of("There is nothing to choose from.", Tone.Muted));
+                lines.Add(Line.Of(Nothing, Tone.Muted));
             top = Window(lines, rows, at, top, Rows, out var pointer, index => index == options.Count
                 ? BackRow(index == at)
                 : Marked(index == at, options[index], chosen.Contains(index), widest));
@@ -150,7 +159,8 @@ public static class Picker
     // The row that goes back, with its key at its right.
     public static Line BackRow(bool pointed) => Row(pointed, Back, BackKey);
 
-    // Something that is settled, as every screen lists it: a mark, its name and its value.
+    // Something that is settled, as every screen lists it and every command reports it: a mark, its name and its
+    // value.
     public static Line Answer(string label, string value) =>
         new(new Part("✔ ", Tone.Success), new Part(label.PadRight(LabelWidth) + " ", Tone.Muted), new Part(value));
 
@@ -200,7 +210,7 @@ public static class Picker
         {
             back = ends ?? GoesBack(page);
             choices = back ? [.. offered, new Choice(Back, BackKey)] : offered;
-            At = Math.Clamp(At, 0, choices.Count - 1);
+            At = Math.Clamp(At, 0, Math.Max(0, choices.Count - 1));
 
             // Names that something follows are as wide as the widest of them, so that what follows stands in a column.
             // In a list with a choice of now its mark has a column of its own, where `Back` names its key.
@@ -217,7 +227,14 @@ public static class Picker
                 return Row(index == At, choices[index], name, marks && !(back && index == choices.Count - 1));
             });
 
-            // A choice that is off does not blink under the pointer: it does not wait to be chosen.
+            // A choice that is off does not blink under the pointer: it does not wait to be chosen. A list without
+            // choices, which has nowhere to go back to either, says so, and only Escape leaves it.
+            if (choices.Count == 0)
+            {
+                page.Draw(question, [Line.Of(Nothing, Tone.Muted)], keys);
+                return;
+            }
+
             page.Draw(question, lines, keys.Length == 0 ? "↑↓ move · enter choose" : $"↑↓ move · enter choose · {keys}", chosen: choices[At].Off ? null : pointer, waiting: waits, back: back);
         }
 
@@ -225,6 +242,8 @@ public static class Picker
         // going back.
         public (bool Done, int? Chosen) Press(ConsoleKeyInfo key, Func<ConsoleKey, int?>? shortcut)
         {
+            if (choices.Count == 0)
+                return (key.Key == ConsoleKey.Escape, null);
             if (Up(key))
                 At = (At + choices.Count - 1) % choices.Count;
             else if (Down(key))
