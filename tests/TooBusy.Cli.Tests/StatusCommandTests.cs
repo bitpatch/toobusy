@@ -136,23 +136,32 @@ public sealed class StatusCommandTests : CliAppTests
         Assert.Equal(left, File.ReadAllText(Path.Combine(local.FullName, "run.json")));
     }
 
-    [Fact]
-    public async Task StatusOfADemoShowsAMadeUpRunThatGoesOn()
+    // Outside a git repository, and in a project where a run goes on, the demo is the same: what goes on there is not
+    // read.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StatusOfADemoShowsAMadeUpRunThatGoesOn(bool inAProject)
     {
-        GitRepository();
+        if (inAProject)
+        {
+            GitRepository();
+            GoingRun(Working);
+        }
 
         var (exit, output, error) = await RunAsync("status", "--demo");
 
         Assert.Equal(3, exit);
         Assert.Equal("", error);
         Assert.Equal(
-            "A run is going on: #102 Export the orders as a file · claude attach 1a2b3c4d" + Environment.NewLine + "Demo: the run is made up." + Environment.NewLine,
+            "A run is going on: #102 Export the orders as a CSV file · claude attach 1a2b3c4d" + Environment.NewLine + "Demo: the run is made up." + Environment.NewLine,
             output);
 
         var (code, json, _) = await RunAsync("status", "--demo", "--json");
         Assert.Equal(3, code);
         Assert.StartsWith("{", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Demo", json, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+        Assert.Contains("\"url\": \"https://github.com/example/demo-project/issues/102\"", json, StringComparison.Ordinal);
+        Assert.Equal(inAProject, Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 }

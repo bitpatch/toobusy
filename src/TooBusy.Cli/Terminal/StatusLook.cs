@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using TooBusy.Cli.Imitation;
 using TooBusy.Core.Run;
 using TooBusy.Infrastructure.Run;
 
@@ -12,12 +13,12 @@ namespace TooBusy.Cli.Terminal;
 // next run goes on with.
 public static class StatusLook
 {
-    // The run of a demo: it goes on nowhere.
+    // The run of a demo, in its made-up project: it goes on nowhere.
     public static GoingRun MadeUp { get; } = new(4242, new DateTimeOffset(2030, 1, 1, 9, 0, 0, TimeSpan.Zero), new RunSign(RunPhase.Working)
     {
         Task = 102,
-        Title = "Export the orders as a file",
-        Url = "https://github.com/example/project/issues/102",
+        Title = "Export the orders as a CSV file",
+        Url = DemoProject.Issue(102),
         Open = "claude attach 1a2b3c4d",
     });
 

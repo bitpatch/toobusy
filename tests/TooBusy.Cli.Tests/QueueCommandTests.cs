@@ -288,16 +288,14 @@ public sealed class QueueCommandTests : CliAppTests
             error);
     }
 
-    [Theory]
-    [InlineData("queue")]
-    [InlineData("run", "--demo")]
-    public async Task RunAndQueueRefuseSettingsThatAreNotValid(params string[] args)
+    [Fact]
+    public async Task QueueRefusesSettingsThatAreNotValid()
     {
         GitRepository();
         WriteSettings(Settings.Replace("blocking = [\"manual\"]", "blocking = \"manual\"", StringComparison.Ordinal));
         await RunAsync("milestone", "--none");
 
-        var (exit, output, error) = await RunAsync(Context(Tracker(OpenTasks)), args);
+        var (exit, output, error) = await RunAsync(Context(Tracker(OpenTasks)), ["queue"]);
 
         Assert.Equal(1, exit);
         Assert.Equal("", output);
@@ -324,7 +322,6 @@ public sealed class QueueCommandTests : CliAppTests
     [Fact]
     public async Task QueueOfADemoWaitsForNothing()
     {
-        GitRepository();
         var clock = new InstantClock();
 
         var (exit, _, _) = await RunAsync(Context(null) with { Clock = clock }, ["queue", "--demo"]);
@@ -333,37 +330,64 @@ public sealed class QueueCommandTests : CliAppTests
         Assert.Equal(InstantClock.Start, clock.Now);
     }
 
+    // The fifteen tasks of the made-up shop, as the first run of a demo finds them, in a project that has a queue
+    // of its own: the task a run was killed over stands first as one left with a session.
     [Fact]
     public async Task QueueOfADemoShowsTheMadeUpTasksOfADemoOfARun()
     {
         GitRepository();
+        WriteSettings(SettingsWithABoard);
+        var processes = new ScriptedProcesses();
 
-        var (exit, output, error) = await RunAsync("queue", "--demo");
+        var (exit, output, error) = await RunAsync(Context(processes), ["queue", "--demo"]);
 
         Assert.Equal("", error);
         Assert.Equal(0, exit);
-        Assert.StartsWith(
-            "Ready" + Environment.NewLine + "  #100 Rename the settings page                  left with a session" + Environment.NewLine + "  #101 Show the total of an order in its header" + Environment.NewLine,
-            output,
-            StringComparison.Ordinal);
-        Assert.Contains("Later" + Environment.NewLine + "  #105 Describe the export in the manual         waits for #102" + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.Contains("Held" + Environment.NewLine + "  #106 Move the site to the new hosting", output, StringComparison.Ordinal);
-        Assert.EndsWith(Environment.NewLine + "Demo: the tasks are made up." + Environment.NewLine, output, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
+        Assert.Empty(processes.Asked);
+        Assert.Equal(
+            """
+            Ready
+              #100 Rename the settings page                       left with a session
+              #101 Show the total of an order in its header
+              #102 Export the orders as a CSV file
+              #103 Fix the rounding of a discount
+              #104 Update the dependencies
+              #106 Let a customer save a cart for later
+              #107 Send an email when an order ships
+              #108 Find products whatever accents the search has
+              #109 Show the stock of a product on its page
+              #110 Add a page of frequently asked questions
+              #111 Load the list of orders page by page
 
-        // What an assistant reads has nothing but the lists.
+            Later
+              #105 Describe the export in the manual              waits for #102
+
+            Held
+              #112 Choose the payment provider                    it waits for the owner: it has the manual label
+              #113 Redesign the checkout page                     it has the design label
+              #114 Add a dark theme                               its status is In Progress
+            Demo: the tasks are made up.
+
+            """.ReplaceLineEndings(),
+            output);
+        Assert.Equal(SettingsWithABoard, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
+        Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy", "local")));
+
+        // What an assistant reads has nothing but the lists, with the labels and the addresses of the tasks.
         var (_, json, _) = await RunAsync("queue", "--demo", "--json");
 
         using var queue = System.Text.Json.JsonDocument.Parse(json);
-        Assert.Equal(100, queue.RootElement.GetProperty("ready")[0].GetProperty("number").GetInt32());
-        Assert.Equal("session", queue.RootElement.GetProperty("ready")[0].GetProperty("first").GetString());
+        var first = queue.RootElement.GetProperty("ready")[0];
+        Assert.Equal(100, first.GetProperty("number").GetInt32());
+        Assert.Equal("session", first.GetProperty("first").GetString());
+        Assert.Equal("https://github.com/example/demo-project/issues/100", first.GetProperty("url").GetString());
+        Assert.Equal(["chore"], first.GetProperty("labels").EnumerateArray().Select(label => label.GetString()));
+        Assert.Equal(["design", "feature"], queue.RootElement.GetProperty("held")[1].GetProperty("labels").EnumerateArray().Select(label => label.GetString()).Order());
     }
 
     [Fact]
     public async Task QueueShowsTheQueueOfARunThatSkipsLabelsAsTextAndAsJson()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("queue", "--demo", "--skip-label", "feature,docs");
 
         // The task of the record has no label the run skips.
@@ -371,19 +395,26 @@ public sealed class QueueCommandTests : CliAppTests
         Assert.StartsWith(
             """
             Ready
-              #100 Rename the settings page                  left with a session
+              #100 Rename the settings page                       left with a session
               #103 Fix the rounding of a discount
               #104 Update the dependencies
+              #108 Find products whatever accents the search has
+              #111 Load the list of orders page by page
 
             Later
               no tasks
 
             Held
-              #101 Show the total of an order in its header  it has the feature label, which this run skips
-              #102 Export the orders as a file               it has the feature label, which this run skips
-              #105 Describe the export in the manual         it has the docs label, which this run skips
-              #106 Move the site to the new hosting          it has the draft label
-              #107 Add a dark theme                          it has the feature label, which this run skips
+              #101 Show the total of an order in its header       it has the feature label, which this run skips
+              #102 Export the orders as a CSV file                it has the feature label, which this run skips
+              #105 Describe the export in the manual              it has the docs label, which this run skips
+              #106 Let a customer save a cart for later           it has the feature label, which this run skips
+              #107 Send an email when an order ships              it has the feature label, which this run skips
+              #109 Show the stock of a product on its page        it has the feature label, which this run skips
+              #110 Add a page of frequently asked questions       it has the docs label, which this run skips
+              #112 Choose the payment provider                    it waits for the owner: it has the manual label
+              #113 Redesign the checkout page                     it has the design label
+              #114 Add a dark theme                               it has the feature label, which this run skips
 
             """.ReplaceLineEndings(),
             output,

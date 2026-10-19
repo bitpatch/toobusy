@@ -7,14 +7,13 @@ using TooBusy.Infrastructure.Settings;
 
 namespace TooBusy.Cli.Imitation;
 
-// What `init --demo` puts in place of the machine and the tracker: everything is installed and logged in,
-// every board can be read and has statuses, the repository has made-up labels, the project has whatever skill it
-// names, and nothing is made or linked.
-// The repository itself is the one it is given: the real `origin` of the project when it is known.
-public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTracker
+// What `init --demo` puts in place of the machine and the tracker: everything is installed and logged in, the
+// repository is the one of the made-up project, with its labels, every board can be read and has statuses, the
+// project has whatever skill it names, and nothing is made or linked.
+public sealed class ImitatedSetup : ISetupEnvironment, ISetupTracker
 {
     public Task<SetupEnvironment> InspectAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(new SetupEnvironment([], TrackerReachable: true, origin));
+        Task.FromResult(new SetupEnvironment([], TrackerReachable: true, DemoProject.Repository));
 
     public SkillLook FindSkill(string name) => Skill(name);
 
@@ -26,88 +25,78 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
     // The statuses of a board of a demo: those GitHub gives a new one.
     public static IReadOnlyList<string> Statuses { get; } = BoardStatuses.Default.Names;
 
-    // What every other made-up board calls its statuses, so that the questions about them can be tried.
+    // What one of the made-up boards calls its statuses, so that the questions about them can be tried.
     public static IReadOnlyList<string> OtherStatuses { get; } = ["Backlog", "Ready", "Doing", "Review", "Shipped"];
 
     public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<string>?>(ImitatedBoards.NamesOtherwise(board) ? OtherStatuses : Statuses);
+        Task.FromResult<IReadOnlyList<string>?>(StatusesOf(board));
+
+    // What a board of a demo calls its statuses: one of the made-up boards calls them otherwise, and every other
+    // board as GitHub does.
+    public static IReadOnlyList<string> StatusesOf(string board) => ImitatedBoards.NamesOtherwise(board) ? OtherStatuses : Statuses;
 
     public Task<IReadOnlyList<string>> ReadLabelsAsync(string repository, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<string>>(["bug", "feature", "chore", "docs", "draft", "interrupted", "manual", "question"]);
+        Task.FromResult(DemoProject.Labels);
 
     public Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken) =>
-        Task.FromResult($"https://github.com/{(owner.Organisation ? "orgs" : "users")}/{owner.Login}/projects/1");
+        Task.FromResult(ImitatedBoards.Next(owner));
 
     public Task LinkBoardAsync(string board, string repository, CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task CreateLabelAsync(string repository, string name, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
-// The boards of a demo: the real ones of the user when they can be read, and made-up ones after them until
-// there are enough to try a list that scrolls. The owners a board can be made for are filled up the same way.
+// The boards of a demo: a few made-up ones of the user and of the organisation of the repository, the board of the
+// settings among them, linked to the repository; the user and the organisation are those a board can be made for.
 // They take their time, so that the wait for them can be looked at, unless nobody watches: a setup without a screen
 // has no wait to look at.
-public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watched) : ISetupBoards
+public sealed class ImitatedBoards(IClock clock, bool watched) : ISetupBoards
 {
-    const int Enough = 10;
-
-    // The address of a made-up board, before its number.
-    const string MadeUp = "https://github.com/users/example/projects/";
-
     static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
-    static readonly string[] Titles =
-        ["Rocket", "Moon base", "Night shift", "Lighthouse", "Paper trail", "Second wind", "Tide table", "Open road", "Low tide", "Far shore"];
-
-    static readonly string[] Logins =
+    static readonly SetupBoard[] Boards =
     [
-        "example", "example-labs", "example-studio", "example-works", "example-press",
-        "example-tools", "example-garden", "example-harbour", "example-atlas", "example-north",
+        new(DemoProject.Board, DemoProject.BoardTitle, Linked: true),
+        new($"{Address(DemoProject.Organisation, organisation: true)}2", "Marketing site", Linked: false),
+        new($"{Address(DemoProject.Organisation, organisation: true)}3", "Roadmap", Linked: false),
+        new($"{Address(DemoProject.User, organisation: false)}1", "Side projects", Linked: false),
     ];
 
-    // Whether a board is one of the made-up ones that call their statuses otherwise than GitHub does: every
-    // other of them.
-    public static bool NamesOtherwise(string board) =>
-        board.StartsWith(MadeUp, StringComparison.OrdinalIgnoreCase) && int.TryParse(board[MadeUp.Length..], out var number) && number % 2 == 0;
+    static readonly SetupOwner[] Owners = [new(DemoProject.User, Organisation: false), new(DemoProject.Organisation, Organisation: true)];
+
+    // Whether a board is the made-up one that calls its statuses otherwise than GitHub does.
+    public static bool NamesOtherwise(string board) => board.Equals(Boards[1].Address, StringComparison.OrdinalIgnoreCase);
+
+    // The address a new board of the owner would have: the next number after their made-up boards.
+    public static string Next(SetupOwner owner)
+    {
+        var address = Address(owner.Login, owner.Organisation);
+        return $"{address}{Boards.Count(board => board.Address.StartsWith(address, StringComparison.OrdinalIgnoreCase)) + 1}";
+    }
 
     public async Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
     {
-        var waited = watched ? clock.DelayAsync(Wait, cancellationToken) : Task.CompletedTask;
-        var read = real is null ? SetupBoards.None : await real.ReadAsync(repository, cancellationToken);
-        await waited;
-        var boards = Titles.Take(Math.Max(0, Enough - read.Boards.Count))
-            .Select((title, index) => new SetupBoard($"{MadeUp}{index + 1}", $"{title} (made up)", Linked: false));
-        var owners = Logins.Take(Math.Max(0, Enough - read.Owners.Count))
-            .Select((login, index) => new SetupOwner(login, Organisation: index > 0));
-        return new SetupBoards([.. read.Boards, .. boards], [.. read.Owners, .. owners]);
+        if (watched)
+            await clock.DelayAsync(Wait, cancellationToken);
+        return new SetupBoards(Boards, Owners);
     }
+
+    // The address of a board of the owner, before its number.
+    static string Address(string login, bool organisation) => $"https://github.com/{(organisation ? "orgs" : "users")}/{login}/projects/";
 }
 
-// The milestones of a demo: the real open ones of the repository when they can be read, and made-up ones after
-// them until there are enough to try a list that scrolls.
-public sealed class ImitatedMilestones(IMilestones? real) : IMilestones
+// The milestones of a demo: a few made-up open ones of the repository.
+public sealed class ImitatedMilestones : IMilestones
 {
-    const int Enough = 10;
-
-    static readonly (string Title, int Month, int Tasks)[] MadeUp =
+    public static IReadOnlyList<Milestone> Open { get; } =
     [
-        ("v0.1.0", 1, 3), ("v0.2.0", 2, 12), ("v0.3.0", 4, 7), ("v0.4.0", 0, 21), ("v1.0.0", 9, 34),
-        ("Backlog", 0, 58), ("Polish", 0, 1), ("Docs", 0, 0), ("Research", 0, 5), ("Someday", 0, 16),
+        new("v1.0.0", new DateOnly(2030, 3, 1), 15),
+        new("v1.1.0", new DateOnly(2030, 6, 1), 6),
+        new("Later", null, 9),
     ];
 
-    IReadOnlyList<Milestone>? shown;
-
-    // The real ones are read once: a demo shows the same milestones for as long as it lasts.
-    public async Task<IReadOnlyList<Milestone>?> ReadOpenAsync(string repository, CancellationToken cancellationToken)
-    {
-        if (shown is not null)
-            return shown;
-
-        var read = real is null ? null : await real.ReadOpenAsync(repository, cancellationToken);
-        var made = MadeUp.Take(Math.Max(0, Enough - (read?.Count ?? 0)))
-            .Select(milestone => new Milestone($"{milestone.Title} (made up)", milestone.Month == 0 ? null : new DateOnly(2030, milestone.Month, 1), milestone.Tasks));
-        return shown = [.. read ?? [], .. made];
-    }
+    public Task<IReadOnlyList<Milestone>?> ReadOpenAsync(string repository, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Milestone>?>(Open);
 }
 
 // The choices of the user in a demo: they are remembered until the demo ends, and nowhere else.
@@ -126,27 +115,22 @@ public sealed class UnsavedChoice(MilestoneChoice? milestone, ModelChoice? model
     public void SaveEffort(string effort) => level = effort;
 }
 
-// The settings of a demo: the file is read as it is and never written; what the demo saves is remembered until it
-// ends, so that the demo goes on as if the file were written. A demo that is to show a project that is set up
-// starts with made-up settings where the project has none.
-public sealed class UnwrittenSettings(ISettingsStore file, bool madeUp = false) : ISettingsStore
+// The settings of a demo: there is no file, and what the demo saves is remembered until it ends, so that the demo goes
+// on as if a file were written. A demo that shows a project that is set up starts with the made-up settings, and any
+// other with none.
+public sealed class UnwrittenSettings(ProjectSettings? settings) : ISettingsStore
 {
-    ProjectSettings? saved = madeUp && file.Load() is null
-        ? new ProjectSettings(
-            new TrackerSettings(SettingsKeys.GitHubTracker, "https://github.com/users/example/projects/1"),
-            new QueueSettings(new LabelSettings(["draft"], ["feature", "bug", "chore", "docs"], "manual", "interrupted")),
-            new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
-        {
-            Session = new SessionSettings("task-auto"),
-        }
-        : null;
+    ProjectSettings? saved = settings;
 
-    public string DisplayPath => file.DisplayPath;
+    public string DisplayPath => SettingsFile.DisplayPath;
 
-    public SettingsValidation? Load() => saved is null ? file.Load() : new SettingsValidation(saved, []);
+    public SettingsValidation? Load() => saved is null ? null : new SettingsValidation(saved, []);
 
-    public SettingsPreview Preview(ProjectSettings settings) =>
-        saved is null ? file.Preview(settings) : new SettingsPreview(SettingsToml.Write(saved), SettingsToml.Write(settings));
+    public SettingsPreview Preview(ProjectSettings settings)
+    {
+        var before = saved is null ? "" : SettingsToml.Write(saved);
+        return new SettingsPreview(before, SettingsToml.Write(settings, before));
+    }
 
     public void Save(ProjectSettings settings) => saved = settings;
 }

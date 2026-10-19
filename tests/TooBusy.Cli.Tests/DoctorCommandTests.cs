@@ -156,12 +156,11 @@ public sealed class DoctorCommandTests : CliAppTests
     [Fact]
     public async Task DoctorOfADemoChecksAMadeUpMachineThatHasItAll()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("doctor", "--demo");
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("✘", output, StringComparison.Ordinal);
+        Assert.Contains("✔ repository         example/demo-project" + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.Contains("✔ labels" + Environment.NewLine + "✔ skill              .claude/skills/task-auto/SKILL.md" + Environment.NewLine + "Demo: the checks were made up." + Environment.NewLine, output, StringComparison.Ordinal);
     }
 }

@@ -14,13 +14,13 @@ using TooBusy.Trackers.GitHub;
 
 namespace TooBusy.Cli;
 
-// Everything the commands work with in one project: its root, its settings, the tracker, the choice of the user and
-// its runs. It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the
-// tasks are read from; null when the `origin` remote is not a GitHub repository. SetupMachine is what the setup asks
-// of the machine, Machine is what the checks of `doctor` ask, and Runs is what a run is made of: the tasks it reads,
-// the record it leaves and the sign it puts up.
+// Everything the commands work with in one project: its folder, its settings, the tracker, the choice of the user and
+// its runs. It is put together in one place, real or, for a demo, imitated. Folder is the folder of the project as the
+// bar names it. Repository is where the milestones and the tasks are read from; null when the `origin` remote is not a
+// GitHub repository. SetupMachine is what the setup asks of the machine, Machine is what the checks of `doctor` ask,
+// and Runs is what a run is made of: the tasks it reads, the record it leaves and the sign it puts up.
 public sealed class Workbench(
-    string root,
+    string folder,
     bool demo,
     string? repository,
     ISetupEnvironment setupMachine,
@@ -33,7 +33,7 @@ public sealed class Workbench(
     ICheckupMachine machine,
     IProjectRuns runs)
 {
-    public string Root => root;
+    public string Folder => folder;
 
     public bool Demo => demo;
 
@@ -57,49 +57,17 @@ public sealed class Workbench(
 
     public IProjectRuns Runs => runs;
 
-    // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
-    // reading changes nothing: the `origin` remote, the boards and the milestones; what it would make, link, write
-    // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,
-    // whatever the project is: where there are no settings they are made up, the first milestone is the chosen one,
-    // the model is the assistant's own and the effort is the proposed one. `watched` says whether a page shows what
-    // is read while it is read: a demo takes its time over the boards and the tasks only then, so that the wait for
-    // them can be looked at. `processes` runs the commands of the machine, and `home` is the home folder of the user,
-    // where Claude Code keeps its conversations unless `CLAUDE_CONFIG_DIR` among the `variables` of the environment
-    // puts them elsewhere.
-    public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, bool watched, IClock clock, string home, Func<string, string?> variables, CancellationToken cancellationToken)
+    // The project at `root`, shown as `folder`. `personalFolder` is where the choices of the user are kept.
+    // `processes` runs the commands of the machine, and `home` is the home folder of the user, where Claude Code keeps
+    // its conversations unless `CLAUDE_CONFIG_DIR` among the `variables` of the environment puts them elsewhere.
+    public static async Task<Workbench> OpenAsync(string root, string folder, IProcessRunner? processes, string personalFolder, IClock clock, string home, Func<string, string?> variables, CancellationToken cancellationToken)
     {
-        if (demo)
-        {
-            var read = processes is null ? "example/project" : await new GitOrigin(processes).ReadAsync(root, cancellationToken);
-            var repository = read ?? "example/project";
-            var imitated = new ImitatedSetup(read);
-            var unwritten = new UnwrittenSettings(new SettingsFile(root), madeUp: ready);
-            var milestones = new ImitatedMilestones(processes is null ? null : new GitHubMilestones(processes));
-            var first = ready && MilestoneOrder.Sorted(await milestones.ReadOpenAsync(repository, cancellationToken) ?? []) is [var lowest, ..] ? lowest : null;
-            return new Workbench(
-                root,
-                demo,
-                repository,
-                imitated,
-                imitated,
-                new ImitatedBoards(processes is null ? null : new GitHubBoards(processes), clock, watched),
-                unwritten,
-                milestones,
-                new UnsavedChoice(
-                    first is null ? null : new MilestoneChoice(first.Title),
-                    ready ? ModelChoice.AssistantsOwn : null,
-                    ready ? ClaudeCodeOptions.ProposedEffort : null),
-                clock,
-                new ImitatedCheckup(clock, unwritten),
-                new ImitatedRuns(clock, watched));
-        }
-
         processes ??= new NoProcesses();
         var origin = await new GitOrigin(processes).ReadAsync(root, cancellationToken);
         var machine = new MachineCheckup(processes, MachineCheckup.Here, root, ClaudeFolders.Configuration(home, variables));
         return new Workbench(
-            root,
-            demo,
+            folder,
+            demo: false,
             origin,
             new MachineEnvironment(machine, origin),
             new GitHubSetup(processes),
@@ -110,6 +78,34 @@ public sealed class Workbench(
             clock,
             machine,
             new ProjectRuns(root, origin, processes, clock, home, variables));
+    }
+
+    // The made-up project of a demo, the same wherever it is opened: nothing of the folder or of the machine is read,
+    // and what it would make, link, write and remember is imitated. A demo that is `ready` shows a project that is
+    // set up and has everything chosen: its settings are made up, the first milestone is the chosen one, the model
+    // is the assistant's own and the effort is the proposed one; any other demo starts with no settings and nothing
+    // chosen. `watched` says whether a page shows what is read while it is read: a demo takes its time over the
+    // boards and the tasks only then, so that the wait for them can be looked at.
+    public static Workbench OpenDemo(bool ready, bool watched, IClock clock)
+    {
+        var imitated = new ImitatedSetup();
+        var unwritten = new UnwrittenSettings(ready ? DemoProject.Settings : null);
+        return new Workbench(
+            DemoProject.Folder,
+            demo: true,
+            DemoProject.Repository,
+            imitated,
+            imitated,
+            new ImitatedBoards(clock, watched),
+            unwritten,
+            new ImitatedMilestones(),
+            new UnsavedChoice(
+                ready ? new MilestoneChoice(MilestoneOrder.Sorted(ImitatedMilestones.Open)[0].Title) : null,
+                ready ? ModelChoice.AssistantsOwn : null,
+                ready ? ClaudeCodeOptions.ProposedEffort : null),
+            clock,
+            new ImitatedCheckup(clock, unwritten),
+            new ImitatedRuns(clock, watched));
     }
 
     // The checks of everything a run needs, over the settings as they are now.

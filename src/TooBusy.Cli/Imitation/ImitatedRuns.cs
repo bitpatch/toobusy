@@ -9,10 +9,10 @@ namespace TooBusy.Cli.Imitation;
 // and a machine that is left alone. Each shows what a run meets: a task whose session a kill stopped and which goes
 // on with it, a task that is done, a session that stops with a question and is told to go on alone, a task done in
 // part whose session makes a task of what is left and is marked as waiting after its report, a usage limit that is
-// waited out, a task that opens after another, and tasks that are held. Nothing is changed anywhere. The made-up tasks
-// and the record are kept in memory for as long as the demo goes on, and nowhere else: the menu and the next run see
-// a task that an abort left interrupted. The menu counts the tasks and takes a moment over it, as a tracker does, so
-// that the count can be looked at, unless nobody watches.
+// waited out, a task that opens after another, and tasks that are held; the others are done plainly. Nothing is
+// changed anywhere. The made-up tasks and the record are kept in memory for as long as the demo goes on, and nowhere
+// else: the menu and the next run see a task that an abort left interrupted. The menu counts the tasks and takes a
+// moment over it, as a tracker does, so that the count can be looked at, unless nobody watches.
 public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
 {
     // A demo does not make anybody wait as a run does.
@@ -137,10 +137,10 @@ public sealed class UnwrittenState : IRunState
     public void Clear() => record = null;
 }
 
-// The tasks of a demo, made up to fit the rules of the project: each has a label that lets it in, one waits for
-// another, and, where the rules can hold a task, one is held by a label and one by its status. What a run changes
-// is changed here and nowhere else. The first tasks of a demo have one more: a task that a run was killed over, which
-// stands as one that is worked on and has a record.
+// The tasks of a demo, the work of a small online shop, made up to fit the rules of the project: each has a label
+// that lets it in, one waits for another, one is held for the owner, and, where the rules can hold a task, one is held
+// by a label and one by its status. What a run changes is changed here and nowhere else. The first tasks of a demo
+// have one more: a task that a run was killed over, which stands as one that is worked on and has a record.
 public sealed class ImitatedTasks : ITaskTracker
 {
     // The task a run was killed over.
@@ -168,14 +168,21 @@ public sealed class ImitatedTasks : ITaskTracker
         if (killed)
             Add(Killed, "Rename the settings page", [Type(2)], BoardStatus.InProgress);
         Add(101, "Show the total of an order in its header", [Type(0)]);
-        Add(102, "Export the orders as a file", [Type(0)]);
+        Add(102, "Export the orders as a CSV file", [Type(0)]);
         Add(103, "Fix the rounding of a discount", [Type(1)]);
         Add(104, "Update the dependencies", [Type(2)]);
         Add(105, "Describe the export in the manual", [Type(3)], after: [102]);
+        Add(106, "Let a customer save a cart for later", [Type(0)]);
+        Add(107, "Send an email when an order ships", [Type(0)]);
+        Add(108, "Find products whatever accents the search has", [Type(1)]);
+        Add(109, "Show the stock of a product on its page", [Type(0)]);
+        Add(110, "Add a page of frequently asked questions", [Type(3)]);
+        Add(111, "Load the list of orders page by page", [Type(2)]);
+        Add(112, "Choose the payment provider", [Type(2), manual]);
         if (rules.Labels.Blocking.Count > 0)
-            Add(106, "Move the site to the new hosting", [Type(2), rules.Labels.Blocking[0]]);
+            Add(113, "Redesign the checkout page", [Type(0), rules.Labels.Blocking[^1]]);
         if (rules.Board)
-            Add(107, "Add a dark theme", [Type(0)], BoardStatus.InProgress);
+            Add(114, "Add a dark theme", [Type(0)], BoardStatus.InProgress);
     }
 
     // What a made-up session does when it makes a task of what is left of its own: the new task has the manual
@@ -235,7 +242,7 @@ public sealed class ImitatedTasks : ITaskTracker
         return Task.CompletedTask;
     }
 
-    static string Address(int number) => $"https://github.com/example/project/issues/{number}";
+    static string Address(int number) => DemoProject.Issue(number);
 
     void Change(int number, Func<QueueTask, QueueTask> change)
     {
@@ -279,10 +286,10 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
         [
             new(
                 [(2, "Read docs/orders.md"), (2, "Read src/Orders/OrderList.cs")],
-                new SessionLook(SessionPhase.Asking, Asks: "input needed", Reply: "The task does not say what kind of file the export is. Should it be CSV or JSON?")),
+                new SessionLook(SessionPhase.Asking, Asks: "input needed", Reply: "The task does not say which orders the file has. All of them, or those the list shows with its filters?")),
             new(
                 [(2, "Edit src/Export/CsvExport.cs"), (3, "Bash: dotnet test"), (2, "Bash: git push")],
-                Ended("The list of the orders has a button that saves it as a CSV file.\n\n- Decided without the owner: CSV, because the manual speaks of spreadsheets.\n- Checked with the tests of the export: 9 pass.\n- Commit b2c3d4e.\n\nTOOBUSY: done")),
+                Ended("The list of the orders has a button that saves the orders it shows as a CSV file.\n\n- Decided without the owner: the orders the list shows with its filters, as the button stands over the list.\n- Checked with the tests of the export: 9 pass.\n- Commit b2c3d4e.\n\nTOOBUSY: done")),
         ],
         [103] =
         [
@@ -290,7 +297,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
                 [(2, "Read src/Pricing/Discount.cs"), (3, "Edit src/Pricing/Discount.cs"), (3, "Bash: dotnet test"), (2, "Bash: git push")],
                 Reported(Rounded))
             {
-                Leaves = (108, "Decide what a discount of more than the price does"),
+                Leaves = (115, "Decide what a discount of more than the price does"),
             },
             new([], Reported(Rounded)),
         ],
@@ -307,9 +314,26 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
         [
             new(
                 [(2, "Read src/Export/CsvExport.cs"), (3, "Edit docs/manual/export.md"), (2, "Bash: git push")],
-                Ended("The manual has a page on saving the orders as a file.\n\n- Commit e5f6a7b.\n\nTOOBUSY: done")),
+                Ended("The manual has a page on saving the orders as a CSV file.\n\n- Commit e5f6a7b.\n\nTOOBUSY: done")),
         ],
+        [106] = Plainly("Edit src/Cart/SavedCarts.cs", "A cart can be saved for later from its page and is found again under Saved carts.\n\n- Checked with the tests of the cart: 27 pass.\n- Commit a7b8c9d."),
+        [107] = Plainly("Edit src/Mail/OrderShipped.cs", "The customer gets an email with the tracking number when an order is marked as shipped.\n\n- Checked with the tests of the mail: 14 pass.\n- Commit b8c9d0e."),
+        [108] = Plainly("Edit src/Search/ProductSearch.cs", "The search compares the names of the products without their accents: “creme” finds “Crème brûlée”.\n\n- Checked with the tests of the search: 19 pass.\n- Commit c9d0e1f."),
+        [109] = Plainly("Edit src/Products/ProductPage.razor", "The page of a product says how many are in stock, and “Out of stock” when none are.\n\n- Checked with the tests of the pages: 21 pass.\n- Commit d0e1f2a."),
+        [110] =
+        [
+            new(
+                [(2, "Edit docs/faq.md"), (1, "Bash: git push")],
+                Ended("The site has a page of frequently asked questions, on delivery, returns and payment, linked from its footer.\n\n- Commit e1f2a3b.\n\nTOOBUSY: done")),
+        ],
+        [111] = Plainly("Edit src/Orders/OrderList.cs", "The list of the orders loads fifty of them at a time, and the next fifty as it is scrolled.\n\n- Checked with the tests of the orders: 44 pass.\n- Commit f2a3b4c."),
     };
+
+    // The play of a task that is done plainly: a change, the tests and the push, and the report.
+    static Act[] Plainly(string change, string report) =>
+    [
+        new([(1, change), (2, "Bash: dotnet test"), (1, "Bash: git push")], Ended($"{report}\n\nTOOBUSY: done")),
+    ];
 
     // What a session does when it is asked to wrap up.
     static readonly Act WrapUp = new(
@@ -356,7 +380,7 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
     const string Rounded =
         "A discount is rounded once, to the cent, half up, and the cart and the order show the same price.\n\n- Checked with the tests of the prices: 31 pass.\n- Commit c3d4e5f.\n\n"
         + "Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. "
-        + "I made #108 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
+        + "I made #115 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.\n\n"
         + "TOOBUSY: partial";
 
     // What the name of a made-up session starts with.

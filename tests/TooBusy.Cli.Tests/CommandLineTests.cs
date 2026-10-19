@@ -30,15 +30,15 @@ public sealed class CommandLineTests : CliAppTests
 
     [Theory]
     [InlineData]
-    [InlineData("run")]
-    [InlineData("run", "--demo")]
-    [InlineData("queue")]
-    [InlineData("queue", "--demo")]
-    [InlineData("doctor")]
-    [InlineData("status")]
-    [InlineData("init", "--demo")]
+    [InlineData("init")]
+    [InlineData("init", "--yes")]
     [InlineData("init", "--assist")]
     [InlineData("init", "--assist", "10")]
+    [InlineData("milestone")]
+    [InlineData("run")]
+    [InlineData("queue")]
+    [InlineData("doctor")]
+    [InlineData("status")]
     public async Task OutsideAGitRepositoryACommandFails(params string[] args)
     {
         var (exit, output, error) = await RunAsync(args);
@@ -46,6 +46,43 @@ public sealed class CommandLineTests : CliAppTests
         Assert.Equal(2, exit);
         Assert.Equal("", output);
         Assert.Equal("toobusy: not inside a git repository" + Environment.NewLine, error);
+    }
+
+    // Every command that has a demo shows it in any folder, outside a git repository too, and without a place for
+    // the choices of the user: it reads nothing of the folder and runs no command of the machine. The same comes
+    // out in a project that has its own settings, `origin`, choices and a run that goes on.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0, "init", "--yes")]
+    [InlineData(0, "init", "--assist")]
+    [InlineData(0, "init", "--assist", "3")]
+    [InlineData(0, "init", "--assist", "10")]
+    [InlineData(0, "milestone", "v1.0.0")]
+    [InlineData(0, "model")]
+    [InlineData(0, "effort", "max")]
+    [InlineData(0, "run", "--max", "1")]
+    [InlineData(1, "run", "--task", "105")]
+    [InlineData(0, "queue", "--json")]
+    [InlineData(3, "status")]
+    [InlineData(0, "doctor")]
+    public async Task ADemoIsTheSameInAnyFolderAndRunsNoCommand(int code, params string[] args)
+    {
+        var outside = new ScriptedProcesses();
+        var (exit, output, error) = await RunAsync(Context(outside) with { PersonalFolder = null }, [.. args, "--demo"]);
+
+        GitRepository();
+        WriteSettings(SettingsWithABoard + SkillOfTheProject);
+        await RunAsync("milestone", "--none");
+        GoingRun(Working);
+        var inside = GitHub(milestones: "1\tv2\t\t3\n", Labels);
+        var (again, there, wrong) = await RunAsync(Context(inside), [.. args, "--demo"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(code, exit);
+        Assert.NotEqual("", output);
+        Assert.Empty(outside.Asked);
+        Assert.Equal((exit, output, error), (again, there, wrong));
+        Assert.Empty(inside.Asked);
     }
 
     [Theory]
@@ -107,10 +144,12 @@ public sealed class CommandLineTests : CliAppTests
         WriteSettings(Settings);
         var inside = folder.CreateSubdirectory("src").CreateSubdirectory("deep");
 
-        var (exit, output, _) = await RunFromAsync(inside.FullName, "run", "--demo");
+        var (exit, output, _) = await RunFromAsync(inside.FullName, "milestone", "--none");
 
+        // The choice is kept for the project, and read again at its root.
         Assert.Equal(0, exit);
-        Assert.Contains("Demo", output, StringComparison.Ordinal);
+        Assert.StartsWith("Milestone: none.", output, StringComparison.Ordinal);
+        Assert.Equal("Milestone: no milestone", (await RunAsync("milestone")).Output.Trim());
     }
 
     [Fact]

@@ -109,7 +109,7 @@ public sealed class AssistCommandTests : CliAppTests
             boards,
             StringComparison.Ordinal);
 
-        var (_, milestones, _) = await RunAsync(Context(processes), ["init", "--assist", "4", "--demo"]);
+        var (_, milestones, _) = await RunAsync(Context(processes), ["init", "--assist", "4"]);
         Assert.Contains("The open milestones of acme/rocket, each with its open tasks:\n\n- v1: 12 tasks, due 2030-03-01\n- v2: 1 task\n", milestones, StringComparison.Ordinal);
 
         // Nothing is asked of GitHub but what is read: no label and no board is made, and nothing is linked.
@@ -241,16 +241,28 @@ public sealed class AssistCommandTests : CliAppTests
         Assert.Equal(plain, output);
     }
 
+    // A demo tells the walk over the made-up project as it stands before a setup, outside a git repository too: what
+    // the steps choose among is made up, and nothing is asked of the machine.
     [Fact]
-    public async Task ADemoChangesNothingOfAssist()
+    public async Task ADemoOfAssistTellsTheStepsOverTheMadeUpProject()
     {
-        GitRepository();
-        var (_, plain, _) = await RunAsync("init", "--assist");
+        var processes = new ScriptedProcesses();
 
-        var (exit, output, _) = await RunAsync("init", "--assist", "--demo");
+        var (exit, introduction, _) = await RunAsync(Context(processes), ["init", "--assist", "--demo"]);
+        var (_, labels, _) = await RunAsync(Context(processes), ["init", "--assist", "2", "--demo"]);
+        var (_, boards, _) = await RunAsync(Context(processes), ["init", "--assist", "3", "--demo"]);
+        var (_, milestones, _) = await RunAsync(Context(processes), ["init", "--assist", "4", "--demo"]);
 
         Assert.Equal(0, exit);
-        Assert.Equal(plain, output);
+        Assert.Empty(processes.Asked);
+        Assert.Contains("2. **Which tasks are taken.** Not set: there are no settings yet.", introduction, StringComparison.Ordinal);
+        Assert.Contains("The labels of example/demo-project: `feature`, `bug`, `chore`, `docs`, `draft`, `design`, `manual`, `interrupted`.", labels, StringComparison.Ordinal);
+        Assert.Contains(
+            "- Demo project, https://github.com/orgs/example/projects/1, linked to example/demo-project: Todo, In Progress, Done\n"
+            + "- Marketing site, https://github.com/orgs/example/projects/2: Backlog, Ready, Doing, Review, Shipped. **It is not named as GitHub names a board: the command says which status is which.**\n",
+            boards,
+            StringComparison.Ordinal);
+        Assert.Contains("The open milestones of example/demo-project, each with its open tasks:\n\n- v1.0.0: 15 tasks, due 2030-03-01\n- v1.1.0: 6 tasks, due 2030-06-01\n- Later: 9 tasks\n", milestones, StringComparison.Ordinal);
     }
 
     // The projects the steps are told over: one that toobusy has never seen, one whose settings do not validate,

@@ -35,7 +35,7 @@ public sealed class SetupScreen(Page page, bool leavesPage = true) : ISetupDialo
     // How a setup ended, in one line, and whether that is a failure.
     public static (bool Failed, string Text) Ending(SetupResult result, bool demo) => result.Outcome switch
     {
-        SetupOutcome.Written when demo => (false, $"Demo: nothing was made, linked or written; {SettingsFile.DisplayPath} is left as it was."),
+        SetupOutcome.Written when demo => (false, "Demo: nothing was made, linked or written."),
         SetupOutcome.Written when result.SettingsWritten => (false, $"The settings are written to {SettingsFile.DisplayPath}. Commit the file."),
         SetupOutcome.Written => (false, "GitHub is set up as the settings say."),
         SetupOutcome.NothingToChange => (false, "Nothing to change: the settings already say this."),

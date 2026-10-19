@@ -494,15 +494,14 @@ public sealed class InitCommandTests : CliAppTests
     [Fact]
     public async Task WithYesADemoChangesNothing()
     {
-        GitRepository();
-
         var (exit, output, error) = await RunAsync("init", "--demo", "--yes", "--take-label", "bug");
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
+        Assert.StartsWith("toobusy · Setting up this project · ~/Projects/demo-project" + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.Contains("✔ Labels to take   bug", output, StringComparison.Ordinal);
         Assert.DoesNotContain("was made in", output, StringComparison.Ordinal);
-        Assert.EndsWith("Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was." + Environment.NewLine, output, StringComparison.Ordinal);
+        Assert.EndsWith("Demo: nothing was made, linked or written." + Environment.NewLine, output, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 
@@ -511,7 +510,6 @@ public sealed class InitCommandTests : CliAppTests
     [Fact]
     public async Task WithYesADemoWaitsForNothing()
     {
-        GitRepository();
         var clock = new InstantClock();
 
         var (exit, _, _) = await RunAsync(Context(null) with { Clock = clock }, ["init", "--demo", "--yes"]);
@@ -523,8 +521,6 @@ public sealed class InitCommandTests : CliAppTests
     [Fact]
     public async Task WithYesInATerminalNoScreenIsOpened()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunWithKeysAsync(new Keys(), "init", "--demo", "--yes");
 
         Assert.Equal(0, exit);
@@ -543,8 +539,6 @@ public sealed class InitCommandTests : CliAppTests
     [InlineData("toobusy: give `--branch` or `--no-branch`, not both", "--branch", "develop", "--no-branch")]
     public async Task OptionsThatAnswerTheSameQuestionDifferentlyAreAWrongCommandLine(string message, params string[] options)
     {
-        GitRepository();
-
         var (exit, _, error) = await RunAsync(["init", "--yes", "--demo", .. options]);
 
         Assert.Equal(2, exit);
@@ -574,10 +568,9 @@ public sealed class InitCommandTests : CliAppTests
     [Fact]
     public async Task ADemoOfTheSetupGoesThroughTheStepsAndWritesNothing()
     {
-        GitRepository();
-
-        // The first of the boards, no blocking labels, any label, the label `manual` of the made-up ones for the
-        // owner, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        // The board of the made-up project, which is linked to its repository, no blocking labels, any label, the
+        // label `manual` of the made-up ones for the owner, the label `interrupted` of the made-up ones, the skill
+        // that is proposed, yes.
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, error) = await RunWithKeysAsync(keys, "init", "--demo");
@@ -593,16 +586,16 @@ public sealed class InitCommandTests : CliAppTests
         Assert.DoesNotContain("There is no skill", output, StringComparison.Ordinal);
         Assert.Equal(
             [
-                $"toobusy · Setting up this project · ~{Path.DirectorySeparatorChar}{folder.Name}",
+                "toobusy · Setting up this project · ~/Projects/demo-project",
                 "✔ Tracker          GitHub",
-                "✔ Project          Rocket (made up)  https://github.com/users/example/projects/1",
+                "✔ Project          Demo project  https://github.com/orgs/example/projects/1",
                 "✔ Blocking labels  none",
                 "✔ Labels to take   any task",
                 "✔ Manual label     manual",
                 "✔ Interrupt label  interrupted",
                 "✔ Skill            task-auto",
                 "✔ Assistant        Claude Code",
-                "Demo: nothing was made, linked or written; .toobusy/settings.toml is left as it was.",
+                "Demo: nothing was made, linked or written.",
                 "",
             ],
             Report(output).Split(Environment.NewLine));
@@ -610,103 +603,84 @@ public sealed class InitCommandTests : CliAppTests
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 
+    // A demo of the setup starts from a project that has no settings, whatever the project it is run in has, and
+    // asks the machine nothing.
     [Fact]
-    public async Task ADemoOfTheSetupStartsFromTheSettingsThatExist()
+    public async Task ADemoOfTheSetupStartsFromNoSettingsAndReadsNothingOfTheProject()
     {
         GitRepository();
-        WriteSettings(Settings);
-        var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("✔ Project          none", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Blocking labels  manual", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Manual label     manual", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Skill            none", Report(output), StringComparison.Ordinal);
-        Assert.EndsWith("Nothing to change: the settings already say this." + Environment.NewLine, Report(output), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ADemoOfTheSetupReadsTheOriginAndTheBoardsOfTheUser()
-    {
-        GitRepository();
-        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
-            ? "https://github.com/bitpatch/toobusy.git\n"
-            : "owner\tuser\tdenis\nboard\thttps://github.com/users/denis/projects/3\tFatgard\nlinked\thttps://github.com/orgs/bitpatch/projects/4\tToobusy\n", ""));
-
-        // The board that is linked, no blocking labels, any label, the label `manual` of the made-up ones for the
-        // owner, the label `interrupted` of the made-up ones, the skill that is proposed, yes.
+        WriteSettings(SettingsWithABoard);
+        var processes = new ScriptedProcesses();
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.Contains(processes.Asked, asked => asked.Command == "git" && asked.Arguments.SequenceEqual(["-C", folder.FullName, "remote", "get-url", "origin"]));
-        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.Contains("owner=bitpatch") && asked.Arguments.Contains("name=toobusy"));
-        Assert.Contains("Toobusy  https://github.com/orgs/bitpatch/projects/4  linked to this repository", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Project          Toobusy  https://github.com/orgs/bitpatch/projects/4", Report(output), StringComparison.Ordinal);
+        Assert.Empty(processes.Asked);
+        Assert.Contains("✔ Project          Demo project  https://github.com/orgs/example/projects/1", Report(output), StringComparison.Ordinal);
+        Assert.Contains("✔ Blocking labels  none", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Manual label     manual", Report(output), StringComparison.Ordinal);
-        Assert.Contains("✔ Interrupt label  interrupted", Report(output), StringComparison.Ordinal);
-        Assert.DoesNotContain(processes.Asked, asked => asked.Arguments.Contains("create"));
+        Assert.EndsWith("Demo: nothing was made, linked or written." + Environment.NewLine, Report(output), StringComparison.Ordinal);
+        Assert.DoesNotContain("acme", output, StringComparison.Ordinal);
+        Assert.Equal(SettingsWithABoard, File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")));
     }
 
     [Fact]
-    public async Task ADemoOfTheSetupHasMadeUpBoardsThatCallTheirStatusesOtherwise()
+    public async Task ADemoOfTheSetupOffersTheMadeUpBoardsOfTwoOwnersAndTheMadeUpLabels()
     {
-        GitRepository();
-        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git" ? "https://github.com/bitpatch/toobusy.git\n" : "owner\tuser\tdenis\n", ""));
+        // Another project: the last of the boards, then Enter on every question, the last one included.
+        var keys = new Keys()
+            .Press(Keys.Down, Keys.Enter).Until("❯ Side projects", Keys.Down)
+            .Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Demo project    https://github.com/orgs/example/projects/1  linked", output, StringComparison.Ordinal);
+        Assert.Contains("Marketing site  https://github.com/orgs/example/projects/2", output, StringComparison.Ordinal);
+        Assert.Contains("Roadmap         https://github.com/orgs/example/projects/3", output, StringComparison.Ordinal);
+        Assert.Contains("Side projects   https://github.com/users/demo-user/projects/1", output, StringComparison.Ordinal);
+        foreach (var label in new[] { "feature", "bug", "chore", "docs", "draft", "design", "manual", "interrupted" })
+            Assert.Contains($"◯ {label}", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Project          Side projects  https://github.com/users/demo-user/projects/1", Report(output), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoOfTheSetupHasAMadeUpBoardThatCallsItsStatusesOtherwise()
+    {
         // The board of the option, the second of its statuses for a task to do and what is proposed after it, then
         // Enter on every question, the last one included.
         var keys = new Keys().Press(Keys.Enter, Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo", "--board", "https://github.com/users/example/projects/2");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo", "--board", "https://github.com/orgs/example/projects/2");
 
         Assert.Equal(0, exit);
+        Assert.Contains("✔ Project          Marketing site  https://github.com/orgs/example/projects/2", Report(output), StringComparison.Ordinal);
         Assert.Contains("✔ Statuses         Ready, Doing, Shipped", Report(output), StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 
     [Fact]
-    public async Task ADemoOfTheSetupGoesWithMadeUpBoardsWhenTheRealOnesCannotBeRead()
+    public async Task ADemoOfTheSetupMakesANewBoardForTheUserOrTheOrganisationOfTheRepository()
     {
-        GitRepository();
-        var processes = new ScriptedProcesses(_ => new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+        // Another project, a new one called Rocket, for the organisation of the repository, which is proposed, then
+        // Enter on every question, the last one included.
+        var keys = new Keys()
+            .Press(Keys.Down, Keys.Enter, Keys.Tab, Keys.Tab).Type("Rocket").Until("❯ example", Keys.Down)
+            .Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
 
-        // Nothing is verified without a repository, so the statuses of the board are typed: three questions more,
-        // each with the name GitHub gives.
-        var keys = new Keys().Press(Keys.Down, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
+        var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(0, exit);
-        Assert.Contains("The `origin` remote is not a GitHub repository", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Project          Moon base (made up)  https://github.com/users/example/projects/2", Report(output), StringComparison.Ordinal);
-        Assert.Contains("A task is taken only from this status of the board. Type what the board calls it.", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("✔ Statuses", Report(output), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ADemoOfTheSetupOffersEnoughOwnersToScroll()
-    {
-        GitRepository();
-        var processes = new ScriptedProcesses(command => new ProcessResult(ProcessStatus.Exited, 0, command == "git"
-            ? "https://github.com/bitpatch/toobusy.git\n"
-            : "owner\torg\tbitpatch\nowner\tuser\tdenis\n", ""));
-        var keys = new Keys().Press(Keys.Tab, Keys.Tab).Type("Rocket").Until("❯ example", Keys.Down).Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter);
-
-        var (exit, output, _) = await RunWithKeysAsync(keys, processes, "init", "--demo");
-
-        Assert.Equal(0, exit);
-        Assert.Contains("↓ 5 more", output, StringComparison.Ordinal);
+        Assert.Contains("❯ example    organisation", output, StringComparison.Ordinal);
+        Assert.Contains("  demo-user  your account", output, StringComparison.Ordinal);
         Assert.Contains("The project “Rocket” will be made for example.", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Project          new: Rocket (example)", Report(output), StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task DecliningTheSetupFails()
     {
-        GitRepository();
         var keys = new Keys().Press(Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Enter, Keys.Down, Keys.Enter);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
@@ -720,14 +694,13 @@ public sealed class InitCommandTests : CliAppTests
     [InlineData(true)]
     public async Task EscapeTwiceFromTheFirstStepAndCtrlCTwiceLeaveTheSetup(bool controlC)
     {
-        GitRepository();
         var keys = new Keys().Press(Keys.Enter).Press(controlC ? [Keys.ControlC, Keys.ControlC] : [Keys.Escape, Keys.Escape, Keys.Escape]);
 
         var (exit, output, _) = await RunWithKeysAsync(keys, "init", "--demo");
 
         Assert.Equal(1, exit);
         Assert.Equal(
-            $"toobusy · Setting up this project · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}✘ The setup was left: nothing was changed.{Environment.NewLine}",
+            $"toobusy · Setting up this project · ~/Projects/demo-project{Environment.NewLine}✘ The setup was left: nothing was changed.{Environment.NewLine}",
             Report(output));
     }
 

@@ -40,6 +40,8 @@ If something goes wrong, you can always give the logs to your assistant and ask 
 
 If you want to set it up yourself, run `toobusy init` in your project folder.
 
+To see what it looks like first, add `--demo` to any command, for example `toobusy --demo` or `toobusy run --demo`. A demo shows a made-up project, a small online shop with its own board and fifteen tasks, and is the same in any folder: it reads nothing of the folder it is run in, starts no session and changes nothing.
+
 Once everything is ready, just run the `toobusy` command in your project folder. You will see how many tasks can be done in automatic mode, and choose Run.
 
 Tasks are taken from the milestone you chose, or all of them if you do not specify one.

@@ -100,8 +100,6 @@ public sealed class ChoiceCommandTests : CliAppTests
     [Fact]
     public async Task ADemoRemembersNoModelAndNoEffort()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("model", "opus", "--demo");
         var (_, effort, _) = await RunAsync("effort", "max", "--demo");
         var (_, page, _) = await RunWithKeysAsync(new Keys().Press(Keys.Enter), "effort", "--demo");
@@ -276,12 +274,15 @@ public sealed class ChoiceCommandTests : CliAppTests
     [Fact]
     public async Task ADemoRemembersNoMilestone()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("milestone", "--none", "--demo");
+        var (_, chosen, _) = await RunAsync("milestone", "v1.1.0", "--demo");
+        var (_, shown, _) = await RunAsync("milestone", "--demo");
 
+        // The milestones are the made-up ones of the demo.
         Assert.Equal(0, exit);
         Assert.StartsWith("Milestone: none.", output, StringComparison.Ordinal);
+        Assert.Equal("Milestone: v1.1.0 · due 2030-06-01 · 6 open tasks" + Environment.NewLine, chosen);
+        Assert.StartsWith("Milestone: not chosen" + Environment.NewLine, shown, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
 }

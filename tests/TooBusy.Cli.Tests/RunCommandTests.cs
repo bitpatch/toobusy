@@ -10,16 +10,24 @@ namespace TooBusy.Cli.Tests;
 // `toobusy run`: what a run needs before it starts, a run without a terminal and on its page, and a demo of one.
 public sealed class RunCommandTests : CliAppTests
 {
+    // A demo is the same in any folder: in a project with a board, labels and commands around a task of its own, it
+    // reads none of them, nor the `origin` remote, and runs no command of the machine or of the project.
     [Fact]
-    public async Task ADemoOfARunRunsNoCommandOfTheProject()
+    public async Task ADemoOfARunReadsNothingOfTheProjectAndRunsNoCommand()
     {
         GitRepository();
         var mark = Path.Combine(Path.GetTempPath(), $"toobusy-demo-{Guid.NewGuid():N}");
-        WriteSettings(Settings + $"\n[task]\nbefore = \"touch '{mark}'; exit 1\"\nafter = \"touch '{mark}'\"\n");
+        WriteSettings(SettingsWithABoard + $"\n[task]\nbefore = \"touch '{mark}'; exit 1\"\nafter = \"touch '{mark}'\"\n");
+        var processes = new ScriptedProcesses();
 
-        var (exit, output, _) = await RunAsync("run", "--demo", "--max", "1");
+        var (exit, output, error) = await RunAsync(Context(processes), ["run", "--demo", "--max", "1"]);
 
         Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Empty(processes.Asked);
+        var lines = output.Split(Environment.NewLine);
+        Assert.Equal("✻ v1.0.0 · 12 tasks in the queue, 1 at most · the assistant's own model · high effort · auto mode", lines[1]);
+        Assert.Equal("  Held: #112 it waits for the owner: it has the manual label · #113 it has the design label · #114 its status is In Progress", lines[3]);
         Assert.DoesNotContain("command", output, StringComparison.Ordinal);
         Assert.False(File.Exists(mark));
     }
@@ -45,13 +53,11 @@ public sealed class RunCommandTests : CliAppTests
     [Fact]
     public async Task ADemoOfARunOfOneTaskDoesThatTaskAndNoOther()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("run", "--demo", "--task", "101");
 
         // The task a run was killed over is not among the tasks of such a demo: its record would hold the run.
         Assert.Equal(0, exit);
-        Assert.Contains("✻ v0.1.0 (made up) · #101 and no other task · ", output, StringComparison.Ordinal);
+        Assert.Contains("✻ v1.0.0 · #101 and no other task · ", output, StringComparison.Ordinal);
         Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
         Assert.Contains("‖ Stopped after #101, as you asked · 1 done", output, StringComparison.Ordinal);
         Assert.Equal(["#101"], Regex.Matches(output, @"#\d+").Select(match => match.Value).Distinct());
@@ -60,8 +66,6 @@ public sealed class RunCommandTests : CliAppTests
     [Fact]
     public async Task ADemoOfARunOfTheTaskARunWasKilledOverGoesOnWithItsSession()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("run", "--demo", "--task", "100");
 
         Assert.Equal(0, exit);
@@ -70,11 +74,11 @@ public sealed class RunCommandTests : CliAppTests
     }
 
     [Theory]
-    [InlineData("999", "it is not among the open tasks of the milestone v0.1.0 (made up)")]
+    [InlineData("999", "it is not among the open tasks of the milestone v1.0.0")]
+    [InlineData("105", "it waits for #102")]
+    [InlineData("112", "it waits for the owner: it has the manual label")]
     public async Task ARunOfATaskThatARunWouldNotTakeStartsNothingAndFails(string number, string why)
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("run", "--demo", "--task", number);
 
         // A demo writes no log, so it names none.
@@ -88,25 +92,24 @@ public sealed class RunCommandTests : CliAppTests
     [Fact]
     public async Task ARunLeavesOutTheTasksWithTheLabelsItSkipsAndGoesOnWithTheTaskOfTheRecord()
     {
-        GitRepository();
-
         // The option is given again, and with several names at once.
         var (exit, output, _) = await RunAsync("run", "--demo", "--skip-label", "docs", "--skip-label", "Feature, chore");
 
         Assert.Equal(0, exit);
         var lines = output.Split(Environment.NewLine);
-        Assert.Equal("✻ v0.1.0 (made up) · 2 tasks in the queue · skips docs, Feature, chore · the assistant's own model · high effort · auto mode", lines[1]);
+        Assert.Equal("✻ v1.0.0 · 3 tasks in the queue · skips docs, Feature, chore · the assistant's own model · high effort · auto mode", lines[1]);
         Assert.Equal(
             "  Held: #101 it has the feature label, which this run skips · #102 it has the feature label, which this run skips · #104 it has the chore label, which this run skips"
-            + " · #105 it has the docs label, which this run skips · #106 it has the draft label · #107 it has the feature label, which this run skips",
+            + " · #105 it has the docs label, which this run skips · #106 it has the feature label, which this run skips · #107 it has the feature label, which this run skips"
+            + " · #109 it has the feature label, which this run skips · #110 it has the docs label, which this run skips · #111 it has the chore label, which this run skips"
+            + " · #112 it waits for the owner: it has the manual label · #113 it has the design label · #114 it has the feature label, which this run skips",
             lines[2]);
 
         // The task an earlier run left with a session has a label the run skips, and is gone on with all the same.
         Assert.Contains("→ #100 Rename the settings page — taken again · its session was stopped, and goes on", output, StringComparison.Ordinal);
-        Assert.Contains("→ #103 Fix the rounding of a discount — started", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("→ #101", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("→ #104", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("→ #105", output, StringComparison.Ordinal);
+        Assert.Equal(
+            ["→ #100", "→ #103", "→ #108"],
+            output.Split(Environment.NewLine).Where(line => line.StartsWith("→ #", StringComparison.Ordinal)).Select(line => line[..6]));
     }
 
     [Fact]
@@ -126,15 +129,13 @@ public sealed class RunCommandTests : CliAppTests
     [Fact]
     public async Task ADemoOfARunOfANumberOfTasksStopsAfterThem()
     {
-        GitRepository();
-
         var (exit, output, _) = await RunAsync("run", "--demo", "--max", "2");
 
         Assert.Equal(0, exit);
-        Assert.Contains("✻ v0.1.0 (made up) · 6 tasks in the queue, 2 at most · the assistant's own model · high effort · auto mode", output, StringComparison.Ordinal);
+        Assert.Contains("✻ v1.0.0 · 12 tasks in the queue, 2 at most · the assistant's own model · high effort · auto mode", output, StringComparison.Ordinal);
         Assert.Contains("✔ #100 Rename the settings page — done", output, StringComparison.Ordinal);
         Assert.Contains("✔ #101 Show the total of an order in its header — done", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("#102 Export the orders as a file —", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("#102 Export the orders as a CSV file —", output, StringComparison.Ordinal);
         Assert.EndsWith($"‖ Stopped after 2 tasks, as you asked · 2 done{Environment.NewLine}  Worked 15 s{Environment.NewLine}", output, StringComparison.Ordinal);
     }
 
@@ -181,22 +182,29 @@ public sealed class RunCommandTests : CliAppTests
         // A run enters no screen of its own: its bar, its tasks and how they went stay in the history of the
         // terminal, with nothing of the task that was worked on and nothing of the menu.
         Assert.DoesNotContain("\u001b[?1049", output, StringComparison.Ordinal);
+        // The bar names the folder of the made-up project, whatever folder the demo is run in.
         var rows = Scroll.Read(output).Written;
-        Assert.StartsWith($"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name} ", rows[1], StringComparison.Ordinal);
+        Assert.StartsWith("  toobusy · ~/Projects/demo-project ", rows[1], StringComparison.Ordinal);
         Assert.EndsWith(" Running the queue · demo", rows[1], StringComparison.Ordinal);
         Assert.Equal(
             [
                 "",
                 " ✔ #100 Rename the settings page  0:06",
                 " ✔ #101 Show the total of an order in its header  0:09",
-                " ✔ #102 Export the orders as a file  0:21",
+                " ✔ #102 Export the orders as a CSV file  0:21",
                 " ▲ #103 ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that",
                 "   none will come · claude attach 4f2a103 (made up)",
                 " ◐ #103 Fix the rounding of a discount  0:11",
                 " ✔ #104 Update the dependencies  0:16",
                 " ✔ #105 Describe the export in the manual  0:07",
+                " ✔ #106 Let a customer save a cart for later  0:04",
+                " ✔ #107 Send an email when an order ships  0:04",
+                " ✔ #108 Find products whatever accents the search has  0:04",
+                " ✔ #109 Show the stock of a product on its page  0:04",
+                " ✔ #110 Add a page of frequently asked questions  0:03",
+                " ✔ #111 Load the list of orders page by page  0:04",
                 "",
-                " 6 tasks in 70 s · 5 done · 1 done in part",
+                " 12 tasks in 93 s · 11 done · 1 done in part",
                 "Demo: the tasks and the sessions were made up, and nothing was changed.",
             ],
             rows.Skip(3));
@@ -533,24 +541,22 @@ public sealed class RunCommandTests : CliAppTests
     }
 
     [Fact]
-    public async Task ADemoOfTheRunNeedsNoSettingsEither()
+    public async Task ADemoOfTheRunNeedsNoProject()
     {
-        GitRepository();
-
+        // Outside a git repository. The whole of a demo: a task whose session a kill stopped and which goes on with
+        // it, a task that is done, a session that asks and is told to go on alone, a task done in part whose session
+        // made a task of what is left and was marked as waiting after its report, a usage limit that is waited out, a
+        // task that opened after another one, the tasks that are done plainly, and the tasks that are held. The
+        // messages the sessions are sent are those of Briefing, whose tests pin their words.
         var (exit, output, _) = await RunAsync("run", "--demo");
 
-        // The whole of a demo: a task whose session a kill stopped and which goes on with it, a task that is done, a
-        // session that asks and is told to go on alone, a task done in part whose session made a task of what is left
-        // and was marked as waiting after its report, a usage limit that is waited out, a task that opened after
-        // another one, and the tasks that are held. The messages the sessions are sent are those of Briefing, whose
-        // tests pin their words.
         Assert.Equal(0, exit);
         Assert.Equal(
             $"""
             Demo: nothing is changed.
-            ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort · auto mode
+            ✻ v1.0.0 · 12 tasks in the queue · the assistant's own model · high effort · auto mode
               Opens later: #105 after #102
-              Held: #106 it has the draft label · #107 its status is In Progress
+              Held: #112 it waits for the owner: it has the manual label · #113 it has the design label · #114 its status is In Progress
             → #100 Rename the settings page — taken again · its session was stopped, and goes on · claude attach 4f2a100 (made up)
               #100 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #100 Rename the settings page — done in 6 s
@@ -559,13 +565,13 @@ public sealed class RunCommandTests : CliAppTests
               #101 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #101 Show the total of an order in its header — done in 9 s
               #101 is closed, with the report of the session as its comment
-            → #102 Export the orders as a file — started · a new session with the skill task-auto · claude attach 4f2a102 (made up)
+            → #102 Export the orders as a CSV file — started · a new session with the skill task-auto · claude attach 4f2a102 (made up)
               #102 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
-              │ The task does not say what kind of file the export is. Should it be CSV or JSON?
+              │ The task does not say which orders the file has. All of them, or those the list shows with its filters?
             ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
               “{Briefing.Alone(102, "manual")}”
-            ✔ #102 Export the orders as a file — done in 21 s
+            ✔ #102 Export the orders as a CSV file — done in 21 s
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session with the skill task-auto · claude attach 4f2a103 (made up)
               #103 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
@@ -573,7 +579,7 @@ public sealed class RunCommandTests : CliAppTests
               │ A discount is rounded once, to the cent, half up, and the cart and the order show the same price.
               │ - Checked with the tests of the prices: 31 pass.
               │ - Commit c3d4e5f.
-              │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.
+              │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #115 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.
               “{Briefing.NoAnswer(103, "manual")}”
             ◐ #103 Fix the rounding of a discount — done in part in 11 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
@@ -588,9 +594,33 @@ public sealed class RunCommandTests : CliAppTests
               #105 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
             ✔ #105 Describe the export in the manual — done in 7 s
               #105 is closed, with the report of the session as its comment
-              Held: #106 it has the draft label · #107 its status is In Progress · #108 it waits for the owner: it has the manual label
-            ✔ No task is left · 5 done · 1 done in part
-              Worked 70 s
+            → #106 Let a customer save a cart for later — started · a new session with the skill task-auto · claude attach 4f2a106 (made up)
+              #106 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #106 Let a customer save a cart for later — done in 4 s
+              #106 is closed, with the report of the session as its comment
+            → #107 Send an email when an order ships — started · a new session with the skill task-auto · claude attach 4f2a107 (made up)
+              #107 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #107 Send an email when an order ships — done in 4 s
+              #107 is closed, with the report of the session as its comment
+            → #108 Find products whatever accents the search has — started · a new session with the skill task-auto · claude attach 4f2a108 (made up)
+              #108 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #108 Find products whatever accents the search has — done in 4 s
+              #108 is closed, with the report of the session as its comment
+            → #109 Show the stock of a product on its page — started · a new session with the skill task-auto · claude attach 4f2a109 (made up)
+              #109 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #109 Show the stock of a product on its page — done in 4 s
+              #109 is closed, with the report of the session as its comment
+            → #110 Add a page of frequently asked questions — started · a new session with the skill task-auto · claude attach 4f2a110 (made up)
+              #110 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #110 Add a page of frequently asked questions — done in 3 s
+              #110 is closed, with the report of the session as its comment
+            → #111 Load the list of orders page by page — started · a new session with the skill task-auto · claude attach 4f2a111 (made up)
+              #111 is In Progress on the board and assigned to the current user; the session is told that toobusy keeps its task
+            ✔ #111 Load the list of orders page by page — done in 4 s
+              #111 is closed, with the report of the session as its comment
+              Held: #112 it waits for the owner: it has the manual label · #113 it has the design label · #114 its status is In Progress · #115 it waits for the owner: it has the manual label
+            ✔ No task is left · 11 done · 1 done in part
+              Worked 93 s
 
             """.ReplaceLineEndings(),
             output);

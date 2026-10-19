@@ -158,7 +158,7 @@ public sealed class MenuTests : CliAppTests
     }
 
     [Fact]
-    public async Task TheBarOfTheMenuOfADemoShowsTheVersionAndThatItIsADemo()
+    public async Task TheBarOfTheMenuOfADemoShowsTheMadeUpProjectTheVersionAndThatItIsADemo()
     {
         GitRepository();
         using var terminal = new TestTerminal(width: 120, height: 30);
@@ -169,7 +169,7 @@ public sealed class MenuTests : CliAppTests
         var exit = await CliApp.RunAsync(["--demo"], Context(null) with { Output = terminal.Output, Terminal = terminal.Device }, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exit);
-        Assert.Equal(Bar(120, $"v{CliApp.Version} · demo"), terminal.Frame[1]);
+        Assert.Equal(Bar(120, $"v{CliApp.Version} · demo", "~/Projects/demo-project"), terminal.Frame[1]);
     }
 
     [Fact]
@@ -488,15 +488,13 @@ public sealed class MenuTests : CliAppTests
     [Fact]
     public async Task ADemoSkipsTheChosenLabelsOfItsMenuInTheRunsItOpens()
     {
-        GitRepository();
-
         // `feature` and `docs` among the made-up labels; the run, which goes on with the task of the record and
         // takes none with them; the menu it comes back to counts the tasks made up anew without them; and out.
         var keys = new Keys()
             .Hold(() => Shown("interrupted: #100 Rename the settings page")).Until("❯ Skip labels", Keys.Up).Press(Keys.Enter)
-            .Hold(() => Shown("◯ question")).Until("❯ ◯ feature", Keys.Down).Press(Keys.Space).Until("❯ ◯ docs", Keys.Down).Press(Keys.Space, Keys.Enter)
+            .Hold(() => Shown("◯ interrupted")).Until("❯ ◯ feature", Keys.Down).Press(Keys.Space).Until("❯ ◯ docs", Keys.Down).Press(Keys.Space, Keys.Enter)
             .Hold(() => Shown("Skip labels  feature, docs")).Until("❯ Run", Keys.Up).Press(Keys.Enter)
-            .Hold(() => Shown("❯ Run          2 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
+            .Hold(() => Shown("❯ Run          4 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
 
         var (exit, output, error) = await RunLiveAsync(keys, null, ["--demo"]);
 
@@ -504,7 +502,15 @@ public sealed class MenuTests : CliAppTests
         Assert.Equal("", error);
         Assert.Contains("✔ Skipped labels   feature, docs", output, StringComparison.Ordinal);
         var rows = Scroll.Read(output).Rows.Where(row => row.StartsWith(" ✔ #", StringComparison.Ordinal) || row.StartsWith(" ◐ #", StringComparison.Ordinal)).ToList();
-        Assert.Equal([" ✔ #100 Rename the settings page  0:06", " ◐ #103 Fix the rounding of a discount  0:11", " ✔ #104 Update the dependencies  0:16"], rows);
+        Assert.Equal(
+            [
+                " ✔ #100 Rename the settings page  0:06",
+                " ◐ #103 Fix the rounding of a discount  0:11",
+                " ✔ #104 Update the dependencies  0:16",
+                " ✔ #108 Find products whatever accents the search has  0:04",
+                " ✔ #111 Load the list of orders page by page  0:04",
+            ],
+            rows);
     }
 
     [Fact]
@@ -593,10 +599,8 @@ public sealed class MenuTests : CliAppTests
     }
 
     [Fact]
-    public async Task ADemoShowsAProjectThatIsReadyWhereThereAreNoSettings()
+    public async Task ADemoShowsTheMadeUpProjectReadyOutsideAGitRepository()
     {
-        GitRepository();
-
         // Straight to the menu, which names the task a run was killed over: the run, which goes on with it and
         // comes back to the menu by itself when it is over, and out.
         var keys = new Keys()
@@ -608,25 +612,28 @@ public sealed class MenuTests : CliAppTests
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         Assert.DoesNotContain("Write the settings?", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Project          https://github.com/users/example/projects/1", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Project          https://github.com/orgs/example/projects/1", output, StringComparison.Ordinal);
         Assert.Contains("✔ Statuses         Todo: Todo · In Progress: In Progress · Done: Done", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Blocking labels  draft", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Blocking labels  draft, design", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Labels to take   feature, bug, chore, docs", output, StringComparison.Ordinal);
         Assert.Contains("✔ Manual label     manual", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Milestone        v0.1.0 (made up) · due 2030-01-01 · 3 open tasks", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Interrupt label  interrupted", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Skill            task-auto", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Milestone        v1.0.0 · due 2030-03-01 · 15 open tasks", output, StringComparison.Ordinal);
         Assert.Contains("✔ Model            the assistant's own", output, StringComparison.Ordinal);
         Assert.Contains("✔ Effort           high", output, StringComparison.Ordinal);
         Assert.Contains("❯ Run          interrupted: #100 Rename the settings page", output, StringComparison.Ordinal);
 
         // The menu that the run comes back to says how the run went, and counts the tasks that are made up anew.
-        Assert.Contains("❯ Run          5 tasks", output, StringComparison.Ordinal);
-        Assert.Contains("6 tasks in 70 s · 5 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
+        Assert.Contains("❯ Run          11 tasks", output, StringComparison.Ordinal);
+        Assert.Contains("12 tasks in 93 s · 11 done · 1 done in part", output.Split("What to do")[^2], StringComparison.Ordinal);
 
         // The screen is left for the run and entered again for the menu; the tasks of the run stay in the history
         // of the terminal, and only what else there is to say is printed under them.
         Assert.Equal(2, output.Split("\u001b[?1049h").Length - 1);
         var rows = Scroll.Read(output).Rows.Where(row => row.Length > 0).ToList();
         Assert.Contains(" ✔ #100 Rename the settings page  0:06", rows);
-        Assert.Equal([" 6 tasks in 70 s · 5 done · 1 done in part", "Demo: the tasks and the sessions were made up, and nothing was changed."], rows.TakeLast(2));
+        Assert.Equal([" 12 tasks in 93 s · 11 done · 1 done in part", "Demo: the tasks and the sessions were made up, and nothing was changed."], rows.TakeLast(2));
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
@@ -634,8 +641,6 @@ public sealed class MenuTests : CliAppTests
     [Fact]
     public async Task ADemoRemembersAnAbortAndTheMenuAndTheNextRunStartWithTheInterruptedTask()
     {
-        GitRepository();
-
         // The run is aborted while the first new task is worked on. The menu it comes back to says which task was
         // interrupted instead of the number of tasks; Run takes that task first, and when the run is over the tasks
         // are counted.
@@ -644,7 +649,7 @@ public sealed class MenuTests : CliAppTests
             .Hold(() => Shown("Read src/Orders/Order.cs")).Type("/")
             .Hold(() => Shown("❯ stop")).Press(Keys.Down, Keys.Enter)
             .Hold(() => Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
-            .Hold(() => Shown("5 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
+            .Hold(() => Shown("❯ Run          11 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var context = Context(null) with
         {
             Clock = new PacedClock(),
@@ -667,16 +672,28 @@ public sealed class MenuTests : CliAppTests
         Assert.False(File.Exists(Path.Combine(personal.FullName, "projects.toml")));
     }
 
+    // The menu of a demo in a project with settings and a choice of the milestone of its own shows neither, and asks
+    // the machine nothing.
     [Fact]
-    public async Task ADemoShowsTheSettingsThatExist()
+    public async Task ADemoShowsNoneOfTheProjectItIsOpenedIn()
     {
         GitRepository();
-        WriteSettings(Settings);
+        WriteSettings(SettingsWithABoard);
+        await RunAsync("milestone", "--none");
+        var processes = new ScriptedProcesses();
 
-        var (_, output, _) = await RunWithKeysAsync(new Keys().Until("❯ Exit", Keys.Up).Press(Keys.Enter), ["--demo"]);
+        var (exit, output, error) = await RunWithKeysAsync(new Keys().Until("❯ Exit", Keys.Up).Press(Keys.Enter), processes, ["--demo"]);
 
-        Assert.Contains("✔ Project          none", output, StringComparison.Ordinal);
-        Assert.Contains("✔ Blocking labels  manual", output, StringComparison.Ordinal);
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Empty(processes.Asked);
+        Assert.Contains("✔ Project          https://github.com/orgs/example/projects/1", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Blocking labels  draft, design", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Manual label     manual", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Milestone        v1.0.0 · ", output, StringComparison.Ordinal);
+        Assert.Contains("❯ Run          interrupted: #100 Rename the settings page", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("acme", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("needs-owner", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -710,11 +727,11 @@ public sealed class MenuTests : CliAppTests
         Assert.DoesNotContain(processes.Asked, asked => asked.Command == "claude");
     }
 
-    // The line of the bar of the page in a terminal so wide: the tool and the folder at the left, and the status
-    // two columns from the right edge.
-    string Bar(int width, string status)
+    // The line of the bar of the page in a terminal so wide: the tool and the folder at the left, the one of the test
+    // where no other is given, and the status two columns from the right edge.
+    string Bar(int width, string status, string? shown = null)
     {
-        var title = $"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}";
+        var title = $"  toobusy · {shown ?? $"~{Path.DirectorySeparatorChar}{folder.Name}"}";
         return title + new string(' ', width - 2 - title.Length - status.Length) + status;
     }
 }
