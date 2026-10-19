@@ -44,7 +44,6 @@ public static class CliApp
         var demo = new Option<bool>("--demo")
         {
             Description = "Show the tool over made-up data: nothing is made, linked, written or remembered.",
-            Recursive = true,
         };
         var root = new RootCommand($"Runs the tasks of your tracker one after another with AI coding assistants. {ForAnAssistant}");
         root.Options.OfType<VersionOption>().Single().Action = new PrintVersion();
@@ -60,6 +59,11 @@ public static class CliApp
         root.Subcommands.Add(CreateQueueCommand(context, demo));
         root.Subcommands.Add(CreateStatusCommand(context, demo));
         root.Subcommands.Add(CreateDoctorCommand(context, demo));
+
+        // `--demo` is an option of every command but `about`, which reads nothing but the settings and changes
+        // nothing: there is nothing of it to imitate.
+        foreach (var command in root.Subcommands)
+            command.Options.Add(demo);
         root.Subcommands.Add(CreateAboutCommand(context));
 
         // Without a command the tool opens its page in a terminal: the setup when the project needs it, the choices
@@ -190,9 +194,9 @@ public static class CliApp
         var todoStatus = new Option<string?>("--todo-status") { Description = "What the board calls the status a task is taken from; `Todo` when it is not given.", HelpName = "name" };
         var inProgressStatus = new Option<string?>("--in-progress-status") { Description = "What the board calls the status a run moves a task to before its session; `In Progress` when it is not given.", HelpName = "name" };
         var doneStatus = new Option<string?>("--done-status") { Description = "What the board calls the status a run moves a task to when it is done; `Done` when it is not given.", HelpName = "name" };
-        var blocking = new Option<string[]>("--blocking-label") { Description = "A label that keeps a task out; give it again for every such label.", HelpName = "name" };
+        var blocking = new Option<string[]>("--blocking-label") { Description = "A label that keeps a task out; give it again for every such label, or several names separated by commas.", HelpName = "name" };
         var noBlocking = new Option<bool>("--no-blocking-labels") { Description = "No label keeps a task out." };
-        var take = new Option<string[]>("--take-label") { Description = "A label that lets a task in; give it again for every such label.", HelpName = "name" };
+        var take = new Option<string[]>("--take-label") { Description = "A label that lets a task in; give it again for every such label, or several names separated by commas.", HelpName = "name" };
         var noTake = new Option<bool>("--no-take-labels") { Description = "Any task is taken, whatever its labels." };
         var manual = new Option<string?>("--manual-label") { Description = "The label of a task that waits for the owner; it is made when the repository does not have it.", HelpName = "name" };
         var interrupt = new Option<string?>("--interrupt-label") { Description = "The label of a task that a run had to stop; it is made when the repository does not have it.", HelpName = "name" };

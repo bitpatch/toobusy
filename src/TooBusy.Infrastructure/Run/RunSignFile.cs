@@ -118,7 +118,8 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
         }
     }
 
-    // Only the sign of this process is taken down.
+    // The sign of this process is taken down, and one that says nothing, as of a run that died: only the sign of
+    // another run that goes on stays.
     public void Lower()
     {
         try

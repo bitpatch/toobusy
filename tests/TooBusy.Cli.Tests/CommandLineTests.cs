@@ -126,6 +126,35 @@ public sealed class CommandLineTests : CliAppTests
         Assert.Equal("", error);
     }
 
+    [Theory]
+    [InlineData]
+    [InlineData("init")]
+    [InlineData("milestone")]
+    [InlineData("model")]
+    [InlineData("effort")]
+    [InlineData("run")]
+    [InlineData("queue")]
+    [InlineData("status")]
+    [InlineData("doctor")]
+    public async Task EveryCommandButAboutHasADemo(params string[] command)
+    {
+        var (exit, output, _) = await RunAsync([.. command, "--help"]);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("--demo", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AboutHasNoDemoAsThereIsNothingOfItToImitate()
+    {
+        var (_, help, _) = await RunAsync("about", "--help");
+        var (exit, _, error) = await RunAsync("about", "--demo");
+
+        Assert.DoesNotContain("--demo", help, StringComparison.Ordinal);
+        Assert.Equal(2, exit);
+        Assert.Contains("--demo", error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task UnknownArgumentIsAWrongCommandLine()
     {

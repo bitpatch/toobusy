@@ -13,9 +13,9 @@ namespace TooBusy.Cli.Terminal;
 // the owner, what it said last and how it is opened stand there too, and are gone when it goes on.
 //
 // Under the task is the place of the commands, between two rules. Nothing is typed there: a pointer blinks where
-// the menu opens, and `/` opens the menu of the commands that mean something at the moment, the arrows move, Enter
-// runs one and Escape closes the menu. A session that waits for the owner brings the two commands that are for it
-// without being asked. Once the run was told to stop or to abort, the line of the pointer says that it does instead
+// the menu opens, and `/` opens the menu of the commands that mean something at the moment, the keys of every list
+// move in it, Enter runs one and Escape closes the menu. A session that waits for the owner brings the two commands
+// that are for it without being asked. Once the run was told to stop or to abort, the line of the pointer says that it does instead
 // of where the menu opens. At its right edge stands how much of the usage limits is used, `limits used: 5-hour 41% ·
 // weekly 12%`, and nothing while the menu is open. Under the second rule stand the keys and, at their right, the place of the task among the tasks
 // of the run: `task 4 of 9`, as the queue was read before the task.
@@ -113,9 +113,9 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                     (open, at) = (true, 0);
                 else if (listed.Count == 0)
                     continue;
-                else if (key.Key == ConsoleKey.UpArrow)
+                else if (Picker.Up(key))
                     at = (at + listed.Count - 1) % listed.Count;
-                else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.Tab)
+                else if (Picker.Down(key))
                     at = (at + 1) % listed.Count;
                 else if (key.Key == ConsoleKey.Enter)
                     (open, at) = (Sent(run, listed[at]), 0);

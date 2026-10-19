@@ -61,6 +61,9 @@ public sealed class Keys
     // Whether a key is pressed and not read yet.
     public bool Waiting => Next() is (true, false);
 
+    // A letter pressed alone, with its key as the terminal names it: `Type` gives the character only, as a paste does.
+    public static ConsoleKeyInfo Letter(char letter) => Of(ConsoleKey.A + (char.ToUpperInvariant(letter) - 'A'), letter);
+
     // A letter pressed together with Ctrl.
     public static ConsoleKeyInfo Control(char letter) =>
         new((char)(char.ToUpperInvariant(letter) - '@'), ConsoleKey.A + (char.ToUpperInvariant(letter) - 'A'), shift: false, alt: false, control: true);

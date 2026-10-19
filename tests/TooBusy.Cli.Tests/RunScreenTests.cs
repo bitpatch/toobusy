@@ -395,6 +395,31 @@ public sealed class RunScreenTests : IDisposable
     }
 
     [Fact]
+    public async Task TheMenuMovesWithTheKeysOfEveryList()
+    {
+        RunCommand? sent = null;
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working);
+            sent = await run.NextAsync();
+            return new RunResult(RunEnd.Stopped, 0);
+        });
+
+        // Tab goes down to `abort`, Shift+Tab back up to `stop`, and `j` down again.
+        terminal.Keys
+            .Hold(() => Has("press / to show the menu")).Type("/")
+            .Hold(() => Has("❯ stop")).Press(Keys.Tab)
+            .Hold(() => Has("❯ abort")).Press(Keys.ShiftTab)
+            .Hold(() => Has("❯ stop")).Press(Keys.Letter('j'))
+            .Hold(() => Has("❯ abort")).Press(Keys.Enter);
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal(RunCommand.Abort, sent);
+    }
+
+    [Fact]
     public async Task ASessionThatWaitsForTheOwnerShowsWhatItSaidAndBringsItsTwoCommands()
     {
         var sent = new List<RunCommand>();

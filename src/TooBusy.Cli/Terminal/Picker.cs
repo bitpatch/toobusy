@@ -29,6 +29,14 @@ public static class Picker
     // Whether a list on the page is to end with `Back`: it is, unless Escape leaves the page from here.
     public static bool GoesBack(Page page) => !page.EscapeLeaves;
 
+    // The keys that move the pointer of every list, a selection, a multiple choice and the menu of a run alike: the
+    // arrows, `k` and `j`, and Shift+Tab and Tab. The question about the board keeps Tab for its tabs.
+    public static bool Up(ConsoleKeyInfo key) =>
+        key.Key is ConsoleKey.UpArrow or ConsoleKey.K || key.Key == ConsoleKey.Tab && key.Modifiers.HasFlag(ConsoleModifiers.Shift);
+
+    public static bool Down(ConsoleKeyInfo key) =>
+        key.Key is ConsoleKey.DownArrow or ConsoleKey.J || key.Key == ConsoleKey.Tab && !key.Modifiers.HasFlag(ConsoleModifiers.Shift);
+
     // Asks to choose one of the choices, one under another, starting at the given one. Gives the index of the
     // chosen one, or null when Escape is pressed. `shortcut` lets a key choose at once. Wherever Escape goes back
     // and does not leave the page, the list ends with `Back`, which does what Escape does. A list longer than `rows`
@@ -109,9 +117,9 @@ public static class Picker
             if (options.Count == 0)
                 continue;
 
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
+            if (Up(key))
                 at = (at + rows - 1) % rows;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J)
+            else if (Down(key))
                 at = (at + 1) % rows;
             else if (key.Key == ConsoleKey.Spacebar && at < options.Count && !options[at].Off && !chosen.Remove(at))
                 chosen.Add(at);
@@ -217,9 +225,9 @@ public static class Picker
         // going back.
         public (bool Done, int? Chosen) Press(ConsoleKeyInfo key, Func<ConsoleKey, int?>? shortcut)
         {
-            if (key.Key is ConsoleKey.UpArrow or ConsoleKey.K)
+            if (Up(key))
                 At = (At + choices.Count - 1) % choices.Count;
-            else if (key.Key is ConsoleKey.DownArrow or ConsoleKey.J or ConsoleKey.Tab)
+            else if (Down(key))
                 At = (At + 1) % choices.Count;
             else if (key.Key == ConsoleKey.Enter && !choices[At].Off)
                 return (true, back && At == choices.Count - 1 ? null : At);

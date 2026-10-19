@@ -87,6 +87,20 @@ public sealed class SetupScreenTests : IDisposable
     }
 
     [Fact]
+    public void KAndJAndTabAndShiftTabMoveThePointerOfEveryListAsTheArrowsDo()
+    {
+        terminal.Keys.Press(Keys.Tab, Keys.Tab, Keys.ShiftTab, Keys.Enter);
+        Assert.Equal(1, screen.Choose("Milestone rule", "", Rules, 0));
+
+        terminal.Keys.Press(Keys.Letter('j'), Keys.Letter('j'), Keys.Letter('k'), Keys.Enter);
+        Assert.Equal(1, screen.Choose("Milestone rule", "", Rules, 0));
+
+        // Up from the first option to `Back` and on to the last option, then down past `Back` to the first one.
+        terminal.Keys.Press(Keys.ShiftTab, Keys.ShiftTab, Keys.Space, Keys.Tab, Keys.Tab, Keys.Space, Keys.Letter('j'), Keys.Letter('k'), Keys.Enter);
+        Assert.Equal([0, 2], screen.ChooseMany("Blocking labels", "", Labels("bug", "draft", "manual"), []));
+    }
+
+    [Fact]
     public void TheLastRowOfAListGoesBackAsEscapeDoes()
     {
         terminal.Keys.Press(Keys.Up, Keys.Enter, Keys.Up, Keys.Enter, Keys.Down, Keys.Down, Keys.Enter, Keys.Down, Keys.Down, Keys.Enter);
