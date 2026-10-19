@@ -55,13 +55,27 @@ public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> pla
 
     public void Send(RunCommand command) => commands.Writer.TryWrite(command);
 
-    // The next command of the page; a run that is killed meanwhile stops waiting.
-    public async Task<RunCommand> NextAsync() => await commands.Reader.ReadAsync(kill);
+    // The next command of the page; a run that is killed meanwhile stops waiting. A page that sends none within the
+    // patience of the keys fails the test instead of keeping it waiting.
+    public async Task<RunCommand> NextAsync()
+    {
+        using var patience = CancellationTokenSource.CreateLinkedTokenSource(kill);
+        patience.CancelAfter(Keys.Patience);
+        try
+        {
+            return await commands.Reader.ReadAsync(patience.Token);
+        }
+        catch (OperationCanceledException) when (!kill.IsCancellationRequested)
+        {
+            throw new InvalidOperationException($"The page sent no command in {Keys.Patience.TotalSeconds} s.");
+        }
+    }
 
-    // Goes on working for ever, as a run that only a kill ends.
+    // Goes on working, as a run that only a kill ends. One that is not killed within the patience of the keys fails
+    // the test instead of keeping it waiting.
     public async Task<RunResult> ForEverAsync()
     {
-        await Task.Delay(Timeout.Infinite, kill);
-        return new RunResult(RunEnd.Emptied, 0);
+        await Task.Delay(Keys.Patience, kill);
+        throw new InvalidOperationException($"The run was not killed in {Keys.Patience.TotalSeconds} s.");
     }
 }

@@ -4,12 +4,16 @@ using TooBusy.Core.Run;
 namespace TooBusy.Core.Tests;
 
 // A clock that moves only when somebody waits: a delay takes no time of the test, and what is planned for a moment
-// happens when the clock passes it. A run that never ends is stopped after two days of its own time.
+// happens when the clock passes it. A run that never ends is stopped after two days of its own time; one that goes
+// round waiting for no time never gets there, and the budget stops it.
 sealed class FakeClock : IClock
 {
     public static readonly DateTimeOffset Start = new(2030, 1, 1, 9, 0, 0, TimeSpan.Zero);
 
     readonly List<(DateTimeOffset At, Action Do)> planned = [];
+
+    // How many waits in a row did not move the clock.
+    int still;
 
     public DateTimeOffset Now { get; private set; } = Start;
 
@@ -19,6 +23,8 @@ sealed class FakeClock : IClock
     public Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        still = time > TimeSpan.Zero ? 0 : still + 1;
+        Budget.Spend(still, "waits in a row for no time");
         Now += time;
         Assert.True(Now - Start < TimeSpan.FromDays(2), "The run did not end in two days of its own time.");
         foreach (var due in planned.Where(plan => plan.At <= Now).OrderBy(plan => plan.At).ToList())
@@ -29,6 +35,20 @@ sealed class FakeClock : IClock
 
         cancellationToken.ThrowIfCancellationRequested();
         return Task.CompletedTask;
+    }
+}
+
+// What ends a run that goes round without waiting, which the two days of the clock do not: a call that a run makes
+// again and again, as a reading of the queue, a look at a session or a wait that does not move the clock, fails the
+// test once it is made far more often than any test needs, instead of keeping the whole run of the tests from ending.
+static class Budget
+{
+    const int Calls = 100_000;
+
+    public static void Spend(int made, string what)
+    {
+        if (made > Calls)
+            Assert.Fail($"The run did not end: {made} {what}.");
     }
 }
 
@@ -79,6 +99,7 @@ sealed class FakeTracker : ITaskTracker
     public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken)
     {
         Read.Add(milestone);
+        Budget.Spend(Read.Count, "readings of the queue");
         Do("read", cancellationToken);
         return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
     }
@@ -333,7 +354,7 @@ sealed class FakeSession(int task) : IAssistantSession
 
     public Task<SessionLook> LookAsync(CancellationToken cancellationToken)
     {
-        Looks++;
+        Budget.Spend(++Looks, $"looks at the session of #{task}");
         var (look, and) = acts[act][Math.Min(at++, acts[act].Count - 1)];
         and?.Invoke();
         return Task.FromResult(look);

@@ -19,7 +19,8 @@ public sealed class SupervisorTests : IDisposable
     readonly FakeSign sign = new();
     readonly Log log = new();
     readonly FakeCommands shell;
-    readonly CancellationTokenSource kill = new();
+    // The kill of the run, which the runner of the tests gives too: a run it stops is killed, and not left going.
+    readonly CancellationTokenSource kill = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
 
     RunPlan plan = new("v0.2.0", Rules, ModelChoice.AssistantsOwn, "high");
     // The times the tests count in look at a session every three seconds, whatever a run of the tool does.

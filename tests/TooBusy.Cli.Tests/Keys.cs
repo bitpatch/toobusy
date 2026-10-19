@@ -7,8 +7,9 @@ namespace TooBusy.Cli.Tests;
 // where the test waits for it cannot go on for ever.
 public sealed class Keys
 {
-    // How long a key that is held back is waited for by a page that cannot go on without it.
-    static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+    // How long a key that is held back is waited for by a page that cannot go on without it. A test that waits for
+    // the page in another way waits as long.
+    public static TimeSpan Patience { get; } = TimeSpan.FromSeconds(20);
 
     readonly Queue<(ConsoleKeyInfo Key, Func<bool>? Until)> keys = new();
 

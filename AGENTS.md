@@ -40,6 +40,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 - A change of what a screen looks like is looked at before it is shown: take pictures with `tools/screenshot.py` and read them. The tests see the text of a screen, not its colours.
 - The code and the documentation say the same thing. Before a task is finished, check whether its change calls for one in the documentation: docs/SPEC.md, docs/IDEA.md, docs/ARCHITECTURE.md, the README, the text of `toobusy about`, the steps of `toobusy init --assist`, the help of a command and this file. Change what it does, in the same commit.
 - New behaviour comes with tests. Core is tested with hand-written fakes of its ports.
+- A test does not wait without an end, so that a regression fails it with a message instead of hanging the whole run. A screen test waits for the page through `Keys.Hold`, `ScriptedRun.NextAsync`, `SeenAsync` or `GoneAsync`, which give up after `Keys.Patience` with a message, the last two with what the screen shows; a run in Core is ended by its fakes: the two days of `FakeClock` and the `Budget` of the calls a run makes again and again, in `RunFakes.cs`.
 - Package versions go into `Directory.Packages.props`, not into project files.
 - Do not add placeholder code for features that are not being built yet.
 

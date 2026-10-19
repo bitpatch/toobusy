@@ -47,8 +47,8 @@ public sealed class RunScreenTests : IDisposable
         return terminal;
     }
 
-    // What the terminal's own screen has at the moment.
-    bool Has(string text) => terminal.Tape.Text.Contains(text, StringComparison.Ordinal);
+    // What the terminal's own screen has at the moment: the one of the test, unless another is named.
+    bool Has(string text, TestTerminal? on = null) => (on ?? terminal).Tape.Text.Contains(text, StringComparison.Ordinal);
 
     [Fact]
     public async Task ATaskThatIsOverIsOneLineAndTheOneThatIsWorkedOnStandsUnderIt()
@@ -248,8 +248,7 @@ public sealed class RunScreenTests : IDisposable
         var run = new ScriptedRun(async (run, view) =>
         {
             view.Show(Working with { Limits = new UsageLimits(new UsageWindow("5-hour", 11, null), new UsageWindow("weekly", 4, null)) });
-            while (!narrow.Tape.Text.Contains("Edit src/Export.cs", StringComparison.Ordinal))
-                await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+            await SeenAsync("Edit src/Export.cs", narrow);
             return new RunResult(RunEnd.Emptied, 0);
         });
 
@@ -324,17 +323,22 @@ public sealed class RunScreenTests : IDisposable
     }
 
     // Waits until the terminal's own screen shows the text.
-    async Task SeenAsync(string text)
-    {
-        while (!Has(text))
-            await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
-    }
+    Task SeenAsync(string text, TestTerminal? on = null) => UntilAsync(() => Has(text, on), $"show \"{text}\"", on);
 
     // Waits until the terminal's own screen does not show the text any more.
-    async Task GoneAsync(string text)
+    Task GoneAsync(string text) => UntilAsync(() => !Has(text), $"stop showing \"{text}\"");
+
+    // Waits until that is so. A page that does not get there within the patience of the keys fails the test with
+    // what its screen shows, instead of keeping the run, and the whole run of the tests with it, from ever ending.
+    async Task UntilAsync(Func<bool> done, string what, TestTerminal? on = null)
     {
-        while (Has(text))
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (!done())
+        {
+            if (waited.Elapsed > Keys.Patience)
+                throw new InvalidOperationException($"The screen did not {what} in {Keys.Patience.TotalSeconds} s. It shows:\n{(on ?? terminal).Tape.Text}");
             await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
+        }
     }
 
     // The line of the commands, with the pointer that shows where the menu opens.
@@ -351,10 +355,9 @@ public sealed class RunScreenTests : IDisposable
     // Waits until that line is a bar of so many cells, whatever they are, and gives it.
     async Task<string> CellsAsync(int count)
     {
-        string? bar;
-        while ((bar = Bar()) is null || bar.Trim().Length != count || bar.Trim().Any(cell => cell is not ('▰' or '▱')))
-            await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
-        return bar;
+        string? bar = null;
+        await UntilAsync(() => (bar = Bar()) is not null && bar.Trim().Length == count && bar.Trim().All(cell => cell is '▰' or '▱'), $"show a bar of {count} cells");
+        return bar!;
     }
 
     [Fact]
@@ -749,7 +752,7 @@ public sealed class RunScreenTests : IDisposable
 
     // The end of what a killed run does not cut, which the keys of the test give: a page that stops reading them
     // fails the test instead of keeping it waiting.
-    static Task Settled(TaskCompletionSource settled) => settled.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+    static Task Settled(TaskCompletionSource settled) => settled.Task.WaitAsync(Keys.Patience, TestContext.Current.CancellationToken);
 
     // Moves the time of the page on, once, and says that it did.
     bool Later(TimeSpan time)
