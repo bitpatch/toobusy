@@ -30,11 +30,14 @@ public sealed class SettingsFile(string projectRoot) : ISettingsStore
         }
     }
 
-    // Writes a new file, or changes the values of the existing one and keeps the rest of it.
+    // Writes a new file, or changes the values of the existing one and keeps the rest of it. The file is put in place
+    // whole, never half written: a toobusy that is stopped while it writes leaves the settings as they were.
     public void Save(ProjectSettings settings)
     {
         var text = Preview(settings).After;
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-        File.WriteAllText(Path, text);
+        var written = Path + ".tmp";
+        File.WriteAllText(written, text);
+        File.Move(written, Path, overwrite: true);
     }
 }

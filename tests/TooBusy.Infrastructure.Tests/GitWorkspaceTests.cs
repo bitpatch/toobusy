@@ -121,6 +121,8 @@ public class GitWorkspaceTests
     [InlineData("fatal: Cannot prompt because terminal prompts have been disabled.\nerror: RPC failed; HTTP 503 curl 22 The requested URL returned error: 503", false)]
     [InlineData("error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false)]
     [InlineData("fatal: 'origin' does not appear to be a git repository", false)]
+    [InlineData("remote: Repository not found.\nfatal: repository 'https://github.com/acme/timeout/' not found", false)]
+    [InlineData("fatal: 'connection-refused' does not appear to be a git repository", false)]
     public async Task AFetchThatFailedMayPassWhenTheRemoteDidNotAnswer(string error, bool mayPass)
     {
         var processes = new ScriptedProcesses(Exited(Behind), new ProcessResult(ProcessStatus.Exited, 128, "", error));

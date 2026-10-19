@@ -684,13 +684,14 @@ public sealed class RunCommandTests : CliAppTests
 
     // The machine of a run of one task, #12 Export the data, in a project cloned from acme/rocket whose working tree
     // is clean. `gh` lists the task and the labels of the settings, and takes the task out of the queue once it is
-    // closed; Claude Code starts one session for it, abc12345, and lists that session in the state it is given.
-    // `running` sees every command as it is asked, and `leaves` is a file that git tells of as changed once the
-    // session is started. What the session says is written by `Converse`.
+    // closed; Claude Code starts one session for it, abc12345, and lists that session in the state it is given, and
+    // as one that no process has once it is stopped. `running` sees every command as it is asked, and `leaves` is a
+    // file that git tells of as changed once the session is started. What the session says is written by `Converse`.
     static ScriptedProcesses SessionMachine(string state, Action<string, IReadOnlyList<string>>? running = null, string? leaves = null)
     {
         var closed = false;
         var started = false;
+        var stopped = false;
         var status = state == "done" ? "idle" : "busy";
         return new ScriptedProcesses((command, arguments) =>
         {
@@ -703,6 +704,8 @@ public sealed class RunCommandTests : CliAppTests
                 ("gh", "label") => Labels,
                 ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
                 ("claude", "--bg") => Do(() => started = true) + "backgrounded · abc12345 · #12 Export the data\n",
+                ("claude", "stop") => Do(() => stopped = true) + "stopped abc12345\n",
+                ("claude", "agents") when stopped => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"stopped"}]""",
                 ("claude", "agents") => $$"""[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"{{state}}","status":"{{status}}","pid":1}]""",
                 _ => "",
             }, "");

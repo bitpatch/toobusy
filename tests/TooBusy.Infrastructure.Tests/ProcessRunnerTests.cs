@@ -17,6 +17,15 @@ public class ProcessRunnerTests
         Assert.Equal(new ProcessResult(ProcessStatus.Exited, 3, "out\n", "err\n"), result);
     }
 
+    // What a command prints is read as UTF-8, whatever the machine says of its language.
+    [Fact]
+    public async Task WhatACommandPrintsIsReadAsUtf8()
+    {
+        var result = await runner.RunAsync("sh", ["-c", "printf 'Exportă — “готово” ✔'; printf 'ошибка ✖' >&2"], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(("Exportă — “готово” ✔", "ошибка ✖"), (result.Output, result.Error));
+    }
+
     [Fact]
     public async Task ArgumentsArePassedAsTheyAre()
     {

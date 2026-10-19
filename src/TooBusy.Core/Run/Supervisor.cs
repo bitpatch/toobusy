@@ -305,7 +305,7 @@ public sealed class Supervisor(
         await Quietly(async () =>
         {
             if ((found ?? await assistant.FindAsync(before.Session, CancellationToken.None)) is { } session)
-                await session.StopAsync(CancellationToken.None);
+                await StopAsync(before.Number, session, CancellationToken.None);
         });
         state.Clear();
         Say(RunMark.Attention, $"#{before.Number} was left with a session by an earlier run, but it is not gone on with: {why} · its session is stopped and forgotten"
@@ -583,12 +583,12 @@ public sealed class Supervisor(
         }
         catch (TrackerException refused)
         {
-            await Quietly(() => session.StopAsync(CancellationToken.None));
+            await StopAsync(number, session, CancellationToken.None);
             return Stop($"{refused.Message} · the session of #{number} is stopped, and the next run goes on with it · {session.Open}");
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
         {
-            await Quietly(() => session.StopAsync(CancellationToken.None));
+            await StopAsync(number, session, CancellationToken.None);
             left = $"#{number} was being taken, and the next run goes on with its session · {session.Open}";
             Say(RunMark.Interrupted, $"Killed the session of #{number} while the task was taken: the next run goes on with its session · {session.Open}");
             throw;
@@ -620,7 +620,7 @@ public sealed class Supervisor(
             {
                 if (!paused)
                 {
-                    await Quietly(() => session.StopAsync(CancellationToken.None));
+                    await StopAsync(number, session, CancellationToken.None);
                     left = $"#{number} stays {plan.Rules.Statuses.InProgress}, and the next run goes on with its session · {session.Open}";
                     Say(RunMark.Interrupted, $"Killed the session of #{number}: the task stays {plan.Rules.Statuses.InProgress}, and the next run goes on with its session · {session.Open}");
                 }
@@ -678,7 +678,7 @@ public sealed class Supervisor(
             {
                 if (await assistant.FindStartedAsync(cut.Start, cut.Since, CancellationToken.None) is { } session)
                 {
-                    await session.StopAsync(CancellationToken.None);
+                    await StopAsync(number, session, CancellationToken.None);
                     found = session;
                 }
             });
@@ -701,7 +701,7 @@ public sealed class Supervisor(
     async Task<RunResult?> BreakOffAsync(int number, IAssistantSession session, Exception failed)
     {
         if (!paused)
-            await Quietly(() => session.StopAsync(CancellationToken.None));
+            await StopAsync(number, session, CancellationToken.None);
         if (failed is LocalStateException unwritten)
             return Stop($"{unwritten.Message} · the session of #{number} is stopped · {session.Open}");
 
@@ -996,7 +996,7 @@ public sealed class Supervisor(
         bool waited;
         try
         {
-            await Quietly(() => session.StopAsync(kill));
+            await StopAsync(number, session, kill);
             kill.ThrowIfCancellationRequested();
 
             var known = limits.Near is { ResetsAt: not null } near && near.Used >= policy.Spent ? limits.Near : null;
@@ -1033,7 +1033,7 @@ public sealed class Supervisor(
         paused = true;
         var calls = CancellationToken.None;
         var missing = new List<string>();
-        await Quietly(() => session.StopAsync(calls));
+        await StopAsync(number, session, calls);
         await Try(missing, () => LabelAsync(number, plan.Rules.Labels.Interrupted, kill, uncut: true));
         await Try(missing, () => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
         await Try(missing, () => tracker.CommentAsync(number, Briefing.Paused(why, session.Open), calls));
@@ -1062,14 +1062,14 @@ public sealed class Supervisor(
         WorkspaceState? tree = null;
         try
         {
-            await Quietly(() => session.StopAsync(kill));
+            await StopAsync(number, session, kill);
             kill.ThrowIfCancellationRequested();
             if (OutcomeOf(look) is { Kind: not OutcomeKind.Failed })
                 tree = await workspace.ReadAsync(kill);
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
         {
-            await Quietly(() => session.StopAsync(CancellationToken.None));
+            await StopAsync(number, session, CancellationToken.None);
             left = $"#{number} was being settled, and the next run settles it · {session.Open}";
             Say(RunMark.Interrupted, $"Killed while #{number} was being settled: nothing of how it went is told yet, and the next run settles it · {session.Open}");
             throw;
@@ -1570,6 +1570,21 @@ public sealed class Supervisor(
             return false;
         }
     }
+
+    // Stops the session of a task, so that nothing works on with nobody watching. A session that the assistant still
+    // has as working after it is said, for the owner to stop by hand; the run goes on as it would.
+    async Task StopAsync(int number, IAssistantSession session, CancellationToken cancellationToken) =>
+        await Quietly(async () =>
+        {
+            try
+            {
+                await session.StopAsync(cancellationToken);
+            }
+            catch (AssistantException working)
+            {
+                Say(RunMark.Attention, $"The session of #{number} did not stop: {working.Message} · stop it by hand · {session.Open}");
+            }
+        });
 
     // What is tried for good measure: a refusal of it changes nothing of what the run does next.
     static async Task Quietly(Func<Task> attempt)

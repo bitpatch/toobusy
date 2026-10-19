@@ -632,6 +632,40 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal(["--bg", "--resume", Conversation, "Go on alone."], claude.Asked[^1]);
     }
 
+    // A session that is stopped is waited for until the list has it as one that no process has.
+    [Fact]
+    public async Task AStoppedSessionIsWaitedForUntilNothingHasIt()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Listings.Enqueue(Listing(Entry(Id, Conversation, "working", "busy")));
+        claude.Sessions = Listing(Entry(Id, Conversation, "stopped"));
+        claude.Answer = _ => Exited($"stopped {Id}\n");
+
+        await session.StopAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([["stop", Id], ["agents", "--json", "--all"], ["agents", "--json", "--all"]], claude.Asked.Skip(1));
+        Assert.Equal(TimeSpan.FromMilliseconds(500), clock.Passed);
+    }
+
+    // A session that the list has as working twenty seconds after it was stopped is said: it may work on in the
+    // working copy with nobody watching. A list that cannot be read does not say so.
+    [Fact]
+    public async Task ASessionThatDoesNotStopIsSaid()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        claude.Answer = _ => Exited("");
+
+        var working = await Assert.ThrowsAsync<AssistantException>(() => session.StopAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("Claude Code still lists the session 15555bc6 as working 20 s after it was stopped", working.Message);
+        Assert.Equal(TimeSpan.FromSeconds(20), clock.Passed);
+
+        claude.List = new ProcessResult(ProcessStatus.Exited, 1, "", "");
+        await session.StopAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(TimeSpan.FromSeconds(20), clock.Passed);
+    }
+
     // A list that cannot be read does not say that nothing has the session: the copy is not taken on its word.
     [Fact]
     public async Task AListThatCannotBeReadAfterACopyMeansATryAgain()
@@ -700,7 +734,7 @@ public sealed class ClaudeCodeTests : IDisposable
         await session.StopAsync(TestContext.Current.CancellationToken);
 
         Assert.False(File.Exists(folders.Request));
-        Assert.Equal(["stop", Id], claude.Asked[^1]);
+        Assert.Equal(["stop", Id], claude.Asked[^2]);
     }
 
     // A session or a script of the project may take the local folder away while the run goes on, as `git clean -fdx`
@@ -834,8 +868,13 @@ public sealed class ClaudeCodeTests : IDisposable
         // An earlier session of the same task, started before, is not the one, and neither is another task's.
         Assert.NotNull(session);
         Assert.Equal("claude attach cccc3333", session.Open);
+        claude.Answer = _ =>
+        {
+            claude.Sessions = Listing(Entry("cccc3333", "conversation-new", "stopped", startedAt: after + 500));
+            return Exited("stopped cccc3333\n");
+        };
         await session.StopAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(["stop", "cccc3333"], claude.Asked[^1]);
+        Assert.Equal(["stop", "cccc3333"], claude.Asked[^2]);
     }
 
     [Fact]

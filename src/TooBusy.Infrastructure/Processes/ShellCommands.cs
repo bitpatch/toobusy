@@ -7,7 +7,8 @@ namespace TooBusy.Infrastructure.Processes;
 
 // The commands of a project, run through the shell of the machine in a folder, `sh -c`.
 // The input of a command is closed at once and git's prompts are off, as `Unattended` has them, so that it does not
-// wait for an answer. What it prints to its output and to where its errors go is kept as one text, as it comes.
+// wait for an answer. What it prints to its output and to where its errors go is kept as one text, as it comes, read
+// as UTF-8.
 public sealed class ShellCommands(string folder) : IProjectCommands
 {
     // How long what a command printed is read on after it exited: something it left behind, as a server it started,
@@ -21,6 +22,8 @@ public sealed class ShellCommands(string folder) : IProjectCommands
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
+        process.StartInfo.StandardOutputEncoding = Encoding.UTF8;
+        process.StartInfo.StandardErrorEncoding = Encoding.UTF8;
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.CreateNoWindow = true;
         process.StartInfo.WorkingDirectory = folder;
@@ -51,7 +54,7 @@ public sealed class ShellCommands(string folder) : IProjectCommands
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            ProcessRunner.Kill(process);
             cancellationToken.ThrowIfCancellationRequested();
             return new CommandEnd(CommandStatus.TimedOut, 0, Text(printed));
         }

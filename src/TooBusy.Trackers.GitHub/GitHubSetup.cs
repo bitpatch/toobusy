@@ -13,37 +13,43 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
-    public async Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken) =>
-        BoardAddress.Parse(board) is null ? "That is not the address of a project."
-        : await CheckBoardAsync(board, cancellationToken) switch
+    // A `gh` that is not there or cannot be started is told apart from a GitHub that did not answer.
+    public async Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken)
+    {
+        if (Parts(board) is not var (kind, login, number))
+            return "That is not the address of a project.";
+
+        var result = await ReadBoardAsync(kind, login, number, cancellationToken);
+        return Access(result) switch
         {
             BoardAccess.Readable => null,
-            BoardAccess.NoAnswer => "GitHub did not answer, so the project could not be checked.",
+            BoardAccess.NoAnswer when result.Status == ProcessStatus.TimedOut => "GitHub did not answer, so the project could not be checked.",
+            BoardAccess.NoAnswer => $"The project could not be checked. {GitHubCli.Unanswered(result)}",
             BoardAccess.LacksScope => Scope,
             _ => "The project cannot be read: it does not exist, or you have no access to it.",
         };
+    }
 
     // Whether the board can be read with the scope it needs, and when not, what stands in the way.
-    public async Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken)
-    {
-        if (Parts(board) is not var (kind, login, number))
-            return BoardAccess.Unreadable;
+    public async Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken) =>
+        Parts(board) is var (kind, login, number) ? Access(await ReadBoardAsync(kind, login, number, cancellationToken)) : BoardAccess.Unreadable;
 
-        var result = await AskAsync(
+    Task<ProcessResult> ReadBoardAsync(string kind, string login, int number, CancellationToken cancellationToken) =>
+        AskAsync(
             [
                 "-f", $"login={login}", "-F", $"number={number}",
                 "-f", $"query=query($login: String!, $number: Int!) {{ {kind}(login: $login) {{ projectV2(number: $number) {{ id }} }} }}",
                 "--jq", $".data.{kind}.projectV2.id // empty",
             ],
             cancellationToken);
-        return result switch
-        {
-            { Status: not ProcessStatus.Exited } => BoardAccess.NoAnswer,
-            { ExitCode: 0 } when result.Output.Trim().Length > 0 => BoardAccess.Readable,
-            _ when LacksScope(result) => BoardAccess.LacksScope,
-            _ => BoardAccess.Unreadable,
-        };
-    }
+
+    static BoardAccess Access(ProcessResult result) => result switch
+    {
+        { Status: not ProcessStatus.Exited } => BoardAccess.NoAnswer,
+        { ExitCode: 0 } when result.Output.Trim().Length > 0 => BoardAccess.Readable,
+        _ when LacksScope(result) => BoardAccess.LacksScope,
+        _ => BoardAccess.Unreadable,
+    };
 
     // What the board calls its statuses, the options of its `Status` field, in their order: none for a board without
     // the field, and null when the board cannot be read. The field is looked for among all of them: GitHub answers
@@ -63,7 +69,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
         if (result is not { Status: ProcessStatus.Exited, ExitCode: 0 })
             return null;
 
-        var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).ToList();
+        var lines = Tsv.Lines(result.Output).ToList();
         return lines.Contains("board") ? [.. lines.Select(line => line.Split('\t', 2)).Where(fields => fields is ["status", { Length: > 0 }]).Select(fields => fields[1])] : null;
     }
 
@@ -81,9 +87,7 @@ public sealed class GitHubSetup(IProcessRunner processes) : ISetupTracker
     {
         var result = await processes.RunAsync(
             "gh", ["label", "list", "--repo", repository, "--limit", "1000", "--json", "name", "--jq", ".[].name"], Patience, cancellationToken);
-        return result is { Status: ProcessStatus.Exited, ExitCode: 0 }
-            ? [.. result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).Where(name => name.Length > 0)]
-            : null;
+        return result is { Status: ProcessStatus.Exited, ExitCode: 0 } ? [.. Tsv.Lines(result.Output)] : null;
     }
 
     public async Task<string> CreateBoardAsync(SetupOwner owner, string title, CancellationToken cancellationToken)

@@ -318,6 +318,10 @@ sealed class FakeSession(int task) : IAssistantSession
     // whose token the kill cancels is cut then, and not counted.
     public Action? Stopping { get; set; }
 
+    // What the assistant says of the session when it still has it as working after it was stopped; null for one that
+    // stops.
+    public string? Unstoppable { get; set; }
+
     // Why the session does not go on when it is told something; null for one that goes on.
     public string? Deaf { get; set; }
 
@@ -439,7 +443,7 @@ sealed class FakeSession(int task) : IAssistantSession
         Stopping?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         Stopped++;
-        return Task.CompletedTask;
+        return Unstoppable is { } working ? Task.FromException(new AssistantException(working)) : Task.CompletedTask;
     }
 
     FakeSession Add(SessionLook look, Action? and = null)

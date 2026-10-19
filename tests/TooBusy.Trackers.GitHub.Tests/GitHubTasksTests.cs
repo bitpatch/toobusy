@@ -283,6 +283,8 @@ public class GitHubTasksTests
     [InlineData("GraphQL: Could not resolve to an Issue with the number of 12. (repository.issue)", false)]
     [InlineData("gh: Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.", false)]
     [InlineData("could not add label: 'needs owner' not found", false)]
+    [InlineData("could not add label: 'timeout' not found", false)]
+    [InlineData("GraphQL: Could not resolve to a User with the login of 'connection-refused'. (user)", false)]
     [InlineData("To get started with GitHub CLI, please run:  gh auth login", false)]
     public async Task AFailureThatMayPassIsToldApartFromOneThatStays(string error, bool mayPass)
     {
@@ -513,6 +515,27 @@ public class GitHubTasksTests
                 ["issue", "edit", "12", "--repo", "acme/rocket", "--remove-label", "interrupted"],
                 ["issue", "comment", "12", "--repo", "acme/rocket", "--body", "Done.\n\nTwo lines."],
                 ["issue", "close", "12", "--repo", "acme/rocket"],
+            ],
+            processes.Asked.Select(asked => asked.Arguments));
+    }
+
+    // The tool takes the labels of an option as a line of comma-separated values: a label with a comma or a quote is
+    // quoted as one of them, so that it is one label.
+    [Fact]
+    public async Task ALabelWithACommaOrAQuoteIsOneLabelForTheTool()
+    {
+        foreach (var _ in Enumerable.Range(0, 3))
+            processes.Answers.Enqueue(ScriptedProcesses.Answered(""));
+
+        await Tasks().AddLabelAsync(12, "needs owner, later", TestContext.Current.CancellationToken);
+        await Tasks().RemoveLabelAsync(12, "needs owner, later", TestContext.Current.CancellationToken);
+        await Tasks().AddLabelAsync(12, "the \"big\" one", TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [
+                ["issue", "edit", "12", "--repo", "acme/rocket", "--add-label", "\"needs owner, later\""],
+                ["issue", "edit", "12", "--repo", "acme/rocket", "--remove-label", "\"needs owner, later\""],
+                ["issue", "edit", "12", "--repo", "acme/rocket", "--add-label", "\"the \"\"big\"\" one\""],
             ],
             processes.Asked.Select(asked => asked.Arguments));
     }

@@ -86,13 +86,14 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
 
     // Whether a fetch failed in a way that may pass: it did not end in its time, git did not reach the remote, or the
     // remote answered with a status of the 500s or a 429. A remote that refuses, as over a login or a repository that
-    // is not there, stays, whatever git says after that, and so does a login that git could not ask for.
+    // is not there, stays, whatever git says after that, and so does a login that git could not ask for. What git
+    // quotes is a name or an address it was given, and is not read: a repository called `timeout` is no timeout.
     static bool Passing(ProcessResult result)
     {
         if (result.Status != ProcessStatus.Exited)
             return result.Status == ProcessStatus.TimedOut;
 
-        var said = result.Error + "\n" + result.Output;
+        var said = Quotation().Replace(result.Error + "\n" + result.Output, "");
         if (Unasked(said))
             return false;
         if (HttpStatus().Match(said) is { Success: true } status)
@@ -117,6 +118,11 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
     // The status the remote answered with, as git says it: `The requested URL returned error: 502`, or `HTTP 502`.
     [GeneratedRegex(@"(?:returned error:|\bHTTP) ([1-5][0-9]{2})\b")]
     private static partial Regex HttpStatus();
+
+    // A text between quotes, as `'https://github.com/acme/rocket/'`; the apostrophe of a word, as of `couldn't`, opens
+    // none.
+    [GeneratedRegex(@"(?<!\w)'[^'\n]*'|""[^""\n]*""")]
+    private static partial Regex Quotation();
 
     // Ahead and Behind are null where the branch has no upstream to count against.
     sealed record Status(int Files, string? Branch, string? Upstream, int? Ahead, int? Behind);

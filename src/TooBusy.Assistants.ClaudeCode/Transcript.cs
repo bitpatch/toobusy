@@ -111,37 +111,37 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
                 return;
 
             var blocks = message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array ? content.EnumerateArray().ToList() : [];
-            if (Text(entry, "type") == "user")
+            if (JsonFields.Text(entry, "type") == "user")
             {
                 Planned(entry, blocks);
                 return;
             }
 
-            if (Text(entry, "type") != "assistant")
+            if (JsonFields.Text(entry, "type") != "assistant")
                 return;
 
             // A call that keeps the plan is waited for whenever it was made: what Claude Code answers says what
             // became of the plan.
             foreach (var block in blocks)
             {
-                if (Text(block, "type") == "tool_use" && Text(block, "name") is Adding or Marking && Text(block, "id") is { } call)
-                    planning[call] = Text(block, "name")!;
+                if (JsonFields.Text(block, "type") == "tool_use" && JsonFields.Text(block, "name") is Adding or Marking && JsonFields.Text(block, "id") is { } call)
+                    planning[call] = JsonFields.Text(block, "name")!;
             }
 
-            if (Text(entry, "timestamp") is not { } written
+            if (JsonFields.Text(entry, "timestamp") is not { } written
                 || !DateTimeOffset.TryParse(written, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) || at < since)
                 return;
 
             if (Flag(entry, "isApiErrorMessage"))
             {
                 // Claude Code writes what the service refused with as a message of the assistant.
-                if (ClaudeCodeProtocol.Limited(Text(entry, "error")))
-                    Limit = string.Join('\n', blocks.Select(block => Text(block, "text")).OfType<string>()) is { Length: > 0 } refusal ? refusal : "the usage limit is reached";
+                if (ClaudeCodeProtocol.Limited(JsonFields.Text(entry, "error")))
+                    Limit = string.Join('\n', blocks.Select(block => JsonFields.Text(block, "text")).OfType<string>()) is { Length: > 0 } refusal ? refusal : "the usage limit is reached";
                 return;
             }
 
             // What Claude Code puts into the conversation in the name of the assistant is not said by the session.
-            if (Text(message, "model") == ClaudeCodeProtocol.Synthetic)
+            if (JsonFields.Text(message, "model") == ClaudeCodeProtocol.Synthetic)
                 return;
 
             Limit = null;
@@ -154,7 +154,7 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
 
             foreach (var block in blocks)
             {
-                if (Text(block, "type") == "tool_use" && Text(block, "name") is { } tool)
+                if (JsonFields.Text(block, "type") == "tool_use" && JsonFields.Text(block, "name") is { } tool)
                 {
                     // Keeping the plan is a step, but not what the session is doing: the bar of the plan tells of it.
                     if (tool is not (Adding or Marking))
@@ -163,7 +163,7 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
                         Steps++;
                     Reported = false;
                 }
-                else if (Text(block, "type") == "text" && Text(block, "text") is { } said && said.Trim().Length > 0)
+                else if (JsonFields.Text(block, "type") == "text" && JsonFields.Text(block, "text") is { } said && said.Trim().Length > 0)
                 {
                     Reply = said;
                     Reported = Outcome.Ends(said);
@@ -185,7 +185,7 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
 
         foreach (var block in blocks)
         {
-            if (Text(block, "type") != "tool_result" || Text(block, "tool_use_id") is not { } call || !planning.Remove(call, out var tool))
+            if (JsonFields.Text(block, "type") != "tool_result" || JsonFields.Text(block, "tool_use_id") is not { } call || !planning.Remove(call, out var tool))
                 continue;
 
             if (tool == Adding)
@@ -213,10 +213,10 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
     {
         var on = tool switch
         {
-            "Bash" => Text(input, "command")?.Split('\n')[0],
-            "Read" or "Edit" or "Write" or "NotebookEdit" => Text(input, "file_path") is { } file ? Relative(file) : null,
-            "Grep" or "Glob" => Text(input, "pattern"),
-            _ => Text(input, "description"),
+            "Bash" => JsonFields.Text(input, "command")?.Split('\n')[0],
+            "Read" or "Edit" or "Write" or "NotebookEdit" => JsonFields.Text(input, "file_path") is { } file ? Relative(file) : null,
+            "Grep" or "Glob" => JsonFields.Text(input, "pattern"),
+            _ => JsonFields.Text(input, "description"),
         };
         var step = on is null ? tool : tool == "Bash" ? $"Bash: {on.Trim()}" : $"{tool} {on.Trim()}";
         return step.Length <= Longest ? step : step[..(Longest - 1)] + "…";
@@ -224,9 +224,6 @@ public sealed class Transcript(Func<Stream> open, DateTimeOffset since, string r
 
     // A file of the project is named from its root.
     string Relative(string file) => file.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? file[(root.Length + 1)..] : file;
-
-    static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     static bool Flag(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;

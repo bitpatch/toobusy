@@ -175,12 +175,12 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             return
             [
                 .. document.RootElement.EnumerateArray().Where(entry => entry.ValueKind == JsonValueKind.Object).Select(entry => new Listed(
-                    Text(entry, "id") ?? "",
-                    Text(entry, "sessionId"),
-                    Text(entry, "state"),
-                    Text(entry, "waitingFor"),
-                    entry.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number || Text(entry, "status") is not null,
-                    Text(entry, "name"),
+                    JsonFields.Text(entry, "id") ?? "",
+                    JsonFields.Text(entry, "sessionId"),
+                    JsonFields.Text(entry, "state"),
+                    JsonFields.Text(entry, "waitingFor"),
+                    entry.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number || JsonFields.Text(entry, "status") is not null,
+                    JsonFields.Text(entry, "name"),
                     entry.TryGetProperty("startedAt", out var started) && started.ValueKind == JsonValueKind.Number && started.TryGetInt64(out var at) ? at : null)),
             ];
         }
@@ -191,9 +191,6 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
     }
 
     Task<ProcessResult> AskAsync(string[] arguments, CancellationToken cancellationToken) => processes.RunAsync("claude", arguments, Patience, cancellationToken);
-
-    static string? Text(JsonElement element, string name) =>
-        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     static string First(string said) =>
         said.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "it said nothing";
@@ -387,27 +384,33 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             return Task.CompletedTask;
         }
 
+        // A session that the list still has as working after it was stopped and waited for is said: something may
+        // work on in the working copy with nobody watching.
         public async Task StopAsync(CancellationToken cancellationToken)
         {
             claude.Forget();
             claude.cached = null;
-            if (id is not null)
-                await claude.AskAsync(["stop", id], cancellationToken);
+            if (id is { } running && !await StopAndWaitAsync(running, cancellationToken))
+                throw new AssistantException($"Claude Code still lists the session {running} as working {Spoken.Time(StopPause * StopLooks)} after it was stopped");
         }
 
         public static Listed? Find(List<Listed> listed, string? id, string? conversation) =>
             listed.FirstOrDefault(entry => id is not null && entry.Id == id) ?? listed.LastOrDefault(entry => conversation is not null && entry.Conversation == conversation);
 
-        async Task StopAndWaitAsync(string running, CancellationToken cancellationToken)
+        // Stops the session and waits until nothing has it: false when the list has it as working all the while. A
+        // list that cannot be read does not say that something still has the session.
+        async Task<bool> StopAndWaitAsync(string running, CancellationToken cancellationToken)
         {
             await claude.AskAsync(["stop", running], cancellationToken);
             for (var look = 0; look < StopLooks; look++)
             {
                 if (await claude.ListAsync(cancellationToken) is not { } listed || listed.FirstOrDefault(entry => entry.Id == running) is not { Alive: true })
-                    return;
+                    return true;
 
                 await claude.clock.DelayAsync(StopPause, cancellationToken);
             }
+
+            return false;
         }
     }
 }

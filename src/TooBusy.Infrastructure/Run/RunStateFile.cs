@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using TooBusy.Core.Run;
 
@@ -23,14 +22,14 @@ public sealed class RunStateFile(string folder) : IRunState
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("task", out var task) || !task.TryGetInt32(out var number))
                 return null;
 
-            var since = DateTimeOffset.TryParse(Text(root, "since"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var written) ? written : DateTimeOffset.MinValue;
-            var state = Text(root, "state") switch
+            var since = JsonFields.Time(root, "since") ?? DateTimeOffset.MinValue;
+            var state = JsonFields.Text(root, "state") switch
             {
                 "paused" => RecordState.Paused,
                 "wrapped-up" => RecordState.WrappedUp,
                 _ => RecordState.Working,
             };
-            return new TaskRecord(number, new SessionTrace(Text(root, "session"), Text(root, "conversation"), since), state);
+            return new TaskRecord(number, new SessionTrace(JsonFields.Text(root, "session"), JsonFields.Text(root, "conversation"), since), state);
         }
         catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
@@ -54,7 +53,7 @@ public sealed class RunStateFile(string folder) : IRunState
                     writer.WriteString("session", id);
                 if (record.Session.Conversation is { } conversation)
                     writer.WriteString("conversation", conversation);
-                writer.WriteString("since", record.Session.Since.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
+                writer.WriteString("since", JsonFields.Stamped(record.Session.Since));
                 writer.WriteString("state", record.State switch
                 {
                     RecordState.Paused => "paused",
@@ -83,7 +82,4 @@ public sealed class RunStateFile(string folder) : IRunState
             throw new LocalStateException($"the record of the run cannot be taken away: {kept.Message}", kept);
         }
     }
-
-    static string? Text(JsonElement element, string name) =>
-        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text ? text : null;
 }

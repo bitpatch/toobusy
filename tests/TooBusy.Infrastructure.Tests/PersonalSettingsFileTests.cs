@@ -152,6 +152,42 @@ public sealed class PersonalSettingsFileTests : IDisposable
         Assert.True(File.Exists(Path.Combine(deep, "projects.toml")));
     }
 
+    // The file is put in place whole, and nothing is left beside it but its lock.
+    [Fact]
+    public void AChoiceIsSavedWhole()
+    {
+        Of("/work/rocket").SaveMilestone(new MilestoneChoice("v1"));
+        Of("/work/moon").SaveModel(new ModelChoice("opus"));
+
+        Assert.Equal(["projects.lock", "projects.toml"], folder.GetFiles().Select(file => file.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("v1", Of("/work/rocket").LoadMilestone()?.Title);
+    }
+
+    // Another toobusy that saves a choice holds the lock of the file: this one waits, and keeps what the other saved.
+    [Fact]
+    public async Task AChoiceWaitsForTheLockOfAnotherToobusyAndKeepsWhatItSaved()
+    {
+        Of("/work/moon").SaveMilestone(new MilestoneChoice("v1"));
+        var held = new FileStream(Path.Combine(folder.FullName, "projects.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Task saving;
+        try
+        {
+            saving = Task.Run(() => Of("/work/rocket").SaveMilestone(new MilestoneChoice("v2")), TestContext.Current.CancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+
+            Assert.False(saving.IsCompleted);
+            File.WriteAllText(Of("/work/moon").Path, "[\"/work/moon\"]\nmilestone = \"v3\"\n");
+        }
+        finally
+        {
+            held.Dispose();
+        }
+
+        await saving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal("v2", Of("/work/rocket").LoadMilestone()?.Title);
+        Assert.Equal("v3", Of("/work/moon").LoadMilestone()?.Title);
+    }
+
     [Fact]
     public void AFileThatIsNotTomlSaysNothingAndIsReplaced()
     {

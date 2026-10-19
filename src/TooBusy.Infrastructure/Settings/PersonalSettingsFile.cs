@@ -19,6 +19,11 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
     // The choices a table holds, in the order they are written.
     static readonly string[] Keys = [Milestone, Model, Effort];
 
+    // A toobusy that another one holds the lock of the file against waits a moment, as many times as this, two seconds
+    // in all: saving a choice takes a few milliseconds.
+    const int Waits = 100;
+    static readonly TimeSpan Moment = TimeSpan.FromMilliseconds(20);
+
     public string Path { get; } = System.IO.Path.Combine(folder, "projects.toml");
 
     // The folder of the user's own settings: `$XDG_CONFIG_HOME/toobusy`, and `~/.config/toobusy` otherwise. Null when
@@ -46,8 +51,12 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
 
     string? Load(string key) => Read().TryGetValue(projectRoot, out var choices) ? choices.GetValueOrDefault(key) : null;
 
+    // The file is read and written anew while its lock is held, and put in place whole, never half written: it keeps
+    // the choices of every project, and a toobusy may be stopped at any moment.
     void Save(string key, string value)
     {
+        Directory.CreateDirectory(folder);
+        using var held = Hold();
         var projects = Read();
         if (!projects.TryGetValue(projectRoot, out var choices))
             projects[projectRoot] = choices = [];
@@ -62,8 +71,28 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
                 text.Append(name).Append(" = ").Append(SettingsToml.Quoted(chosen[name])).Append('\n');
         }
 
-        Directory.CreateDirectory(folder);
-        File.WriteAllText(Path, text.ToString());
+        var written = Path + ".tmp";
+        File.WriteAllText(written, text.ToString());
+        File.Move(written, Path, overwrite: true);
+    }
+
+    // The lock of the file, `projects.lock` beside it, which one process holds at a time and which the operating system
+    // takes back from a process that ended: two toobusy that save a choice at once do it one after the other, and the
+    // second keeps what the first saved. The file is never taken down, as one that is taken down and made anew can be
+    // held by two processes at once.
+    FileStream Hold()
+    {
+        for (var waited = 0; ; waited++)
+        {
+            try
+            {
+                return new FileStream(System.IO.Path.Combine(folder, "projects.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (waited < Waits)
+            {
+                Thread.Sleep(Moment);
+            }
+        }
     }
 
     // What is chosen for every project the file knows: the texts of the choices under their keys. A project with no

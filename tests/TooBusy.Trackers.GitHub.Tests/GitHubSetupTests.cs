@@ -165,6 +165,17 @@ public class GitHubSetupTests
         Assert.Equal("That is not the address of a project.", await Setup().RefuseBoardAsync("https://github.com/acme/rocket", TestContext.Current.CancellationToken));
     }
 
+    // A `gh` that is not there or cannot be started is not a GitHub that did not answer.
+    [Fact]
+    public async Task ABoardThatCannotBeCheckedSaysWhyGitHubGaveNoAnswer()
+    {
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotFound, 0, "", ""));
+        processes.Answers.Enqueue(new ProcessResult(ProcessStatus.NotStarted, 0, "", "Permission denied"));
+
+        Assert.Equal("The project could not be checked. The GitHub command-line tool `gh` is not installed.", await Setup().RefuseBoardAsync(Rocket, TestContext.Current.CancellationToken));
+        Assert.Equal("The project could not be checked. The GitHub command-line tool `gh` could not be started: Permission denied.", await Setup().RefuseBoardAsync(Rocket, TestContext.Current.CancellationToken));
+    }
+
     // A board is what the settings take as one, so a number with a sign is not asked for as a board.
     [Fact]
     public async Task AnAddressTheSettingsRefuseIsNotAskedFor()

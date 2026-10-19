@@ -26,6 +26,14 @@ public sealed class ShellCommandsTests : IDisposable
     }
 
     [Fact]
+    public async Task WhatACommandPrintsIsReadAsUtf8()
+    {
+        var end = await shell.RunAsync("printf 'port 3000 — “занят” ✖'", Nothing, Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new CommandEnd(CommandStatus.Exited, 0, "port 3000 — “занят” ✖"), end);
+    }
+
+    [Fact]
     public async Task ACommandThatFailsGivesItsExitCodeAndWhatItPrintedToBothStreams()
     {
         var end = await shell.RunAsync("echo out; echo err >&2; exit 3", Nothing, Long, TestContext.Current.CancellationToken);

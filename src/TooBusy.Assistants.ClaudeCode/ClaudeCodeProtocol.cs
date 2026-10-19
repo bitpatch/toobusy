@@ -78,12 +78,12 @@ public static partial class ClaudeCodeProtocol
 
     // The step that a call adding one added, by what Claude Code answered to it: the name the step is known by.
     public static string? Added(JsonElement result) =>
-        result.ValueKind == JsonValueKind.Object && result.TryGetProperty("task", out var task) ? Text(task, "id") : null;
+        result.ValueKind == JsonValueKind.Object && result.TryGetProperty("task", out var task) ? JsonFields.Text(task, "id") : null;
 
     // The step that a call marking one marked, by what Claude Code answered to it: its name, and how far it is from
     // then on; null as how far for a step that was deleted, which is no step any more.
     public static (string Step, PlanStep? State)? Marked(JsonElement result) =>
-        Text(result, "taskId") is { } step && result.TryGetProperty("statusChange", out var change) && Text(change, "to") is { } status
+        JsonFields.Text(result, "taskId") is { } step && result.TryGetProperty("statusChange", out var change) && JsonFields.Text(change, "to") is { } status
             ? (step, status switch
             {
                 "deleted" => null,
@@ -92,9 +92,6 @@ public static partial class ClaudeCodeProtocol
                 _ => PlanStep.Pending,
             })
             : null;
-
-    static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     [GeneratedRegex(@"\d+(?:\.\d+){1,3}")]
     private static partial Regex Numbered();

@@ -35,6 +35,19 @@ public sealed class SettingsFileTests : IDisposable
         Assert.Equal(Settings.Tracker, file.Load()!.Settings!.Tracker);
     }
 
+    // The file is put in place whole: nothing is left beside it.
+    [Fact]
+    public void SavingLeavesNothingBesideTheFile()
+    {
+        var file = new SettingsFile(folder.FullName);
+
+        file.Save(Settings);
+        file.Save(Settings with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } });
+
+        Assert.Equal(["settings.toml"], new DirectoryInfo(Path.GetDirectoryName(file.Path)!).GetFiles().Select(found => found.Name));
+        Assert.Equal("dontAsk", file.Load()!.Settings!.Assistant.PermissionMode);
+    }
+
     [Fact]
     public void SavingAgainKeepsWhatTheOwnerWrote()
     {

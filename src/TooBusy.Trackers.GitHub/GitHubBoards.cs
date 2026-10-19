@@ -41,7 +41,7 @@ public sealed class GitHubBoards(IProcessRunner processes) : ISetupBoards
             return SetupBoards.NoAnswer;
 
         // A tool that is missing or fails gives none.
-        var lines = answer is { Status: ProcessStatus.Exited, ExitCode: 0 } ? answer.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) : [];
+        string[] lines = answer is { Status: ProcessStatus.Exited, ExitCode: 0 } ? [.. Tsv.Lines(answer.Output)] : [];
 
         var linked = Fields(lines, "linked", SettingsValidator.IsBoard).Select(fields => new SetupBoard(fields[1], fields[2], Linked: true)).ToList();
         var others = Fields(lines, "board", SettingsValidator.IsBoard)
@@ -55,6 +55,6 @@ public sealed class GitHubBoards(IProcessRunner processes) : ISetupBoards
         processes.RunAsync("gh", ["api", "graphql", .. request, "--jq", Lines.Trim()], Patience, cancellationToken);
 
     static IEnumerable<string[]> Fields(string[] lines, string kind, Func<string, bool> accept) => lines
-        .Select(line => line.TrimEnd('\r').Split('\t', 3))
+        .Select(line => line.Split('\t', 3))
         .Where(fields => fields.Length == 3 && fields[0] == kind && accept(fields[1]));
 }

@@ -213,10 +213,15 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
         AskAsync(["issue", "edit", Text(number), "--repo", repository, "--add-assignee", "@me"], $"#{number} could not be assigned to the current user.", cancellationToken);
 
     public Task AddLabelAsync(int number, string label, CancellationToken cancellationToken) =>
-        AskAsync(["issue", "edit", Text(number), "--repo", repository, "--add-label", label], $"The label {label} could not be put on #{number}.", cancellationToken);
+        AskAsync(["issue", "edit", Text(number), "--repo", repository, "--add-label", Listed(label)], $"The label {label} could not be put on #{number}.", cancellationToken);
 
     public Task RemoveLabelAsync(int number, string label, CancellationToken cancellationToken) =>
-        AskAsync(["issue", "edit", Text(number), "--repo", repository, "--remove-label", label], $"The label {label} could not be taken off #{number}.", cancellationToken);
+        AskAsync(["issue", "edit", Text(number), "--repo", repository, "--remove-label", Listed(label)], $"The label {label} could not be taken off #{number}.", cancellationToken);
+
+    // A label as the tool reads it among the labels of an option, which it takes as a line of comma-separated values:
+    // a name with a comma or a quote is quoted as such a value is, so that it stays one name.
+    static string Listed(string label) =>
+        label.Contains(',', StringComparison.Ordinal) || label.Contains('"', StringComparison.Ordinal) ? "\"" + label.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : label;
 
     // A long comment, as the report of a session may be, goes to the tool in a file: the system limits an argument, as
     // Linux does to 128 KiB. The file is made as the system makes its temporary files, for the user alone, and is
@@ -273,9 +278,11 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
     // Whether what the tool said of a failure tells one that may pass. GitHub answered with a status of the 500s, a
     // 429, or a 403 that names a rate limit; a rate limit of a query has no status. Or the tool did not reach GitHub.
     // Every other status, as of a task that does not exist or a token without the scope, stays, and so does an error
-    // of a query, as of a label the repository does not have, and a login that is missing.
-    static bool Passing(string error)
+    // of a query, as of a label the repository does not have, and a login that is missing. What the tool quotes is
+    // what it was given, as the name of a label, and is not read: a label called `timeout` is no timeout.
+    static bool Passing(string said)
     {
+        var error = Quotation().Replace(said, "");
         var limited = error.Contains("rate limit", StringComparison.OrdinalIgnoreCase);
         if (HttpStatus().Match(error) is { Success: true } status)
             return int.Parse(status.Groups[1].ValueSpan, CultureInfo.InvariantCulture) switch
@@ -299,6 +306,11 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
     // The status GitHub answered with, as the tool says it: `(HTTP 502)`, or `HTTP 502: Bad Gateway`.
     [GeneratedRegex(@"\bHTTP ([1-5][0-9]{2})\b")]
     private static partial Regex HttpStatus();
+
+    // A text between quotes, as `'needs owner'` or `"https://api.github.com/graphql"`; the apostrophe of a word, as of
+    // `couldn't`, opens none.
+    [GeneratedRegex(@"(?<!\w)'[^'\n]*'|""[^""\n]*""")]
+    private static partial Regex Quotation();
 
     (string Owner, string Name) Parts() =>
         repository.Split('/') is [var owner, var name] ? (owner, name) : throw new TrackerException($"{repository} is not a GitHub repository.");

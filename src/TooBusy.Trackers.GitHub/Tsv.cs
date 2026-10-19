@@ -2,10 +2,10 @@ using System.Text;
 
 namespace TooBusy.Trackers.GitHub;
 
-// What the tool prints when its filter writes lines of tab-separated fields with `@tsv`.
+// What the tool prints: lines, and in them the tab-separated fields that its filter writes with `@tsv`.
 static class Tsv
 {
-    // The lines of what the tool printed, without the empty ones.
+    // The lines of what the tool printed, without the empty ones: every answer of the tool is read by them.
     public static IEnumerable<string> Lines(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).Where(line => line.Length > 0);
 

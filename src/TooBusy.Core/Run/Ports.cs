@@ -51,7 +51,8 @@ public interface IAssistantSession
     // the session reads it, a file of the machine, throws LocalStateException.
     Task AskAsync(string message, CancellationToken cancellationToken);
 
-    // Stops the session; its conversation is kept.
+    // Stops the session; its conversation is kept. A session that the assistant still has as working after it was
+    // stopped throws AssistantException, which says so.
     Task StopAsync(CancellationToken cancellationToken);
 }
 

@@ -26,6 +26,22 @@ public sealed partial class SupervisorTests
         Assert.Null(sign.Written[^1]);
     }
 
+    // A session that the assistant still has as working after it was stopped is said, for the owner to stop by hand,
+    // and the task ends as it would.
+    [Fact]
+    public async Task ASessionThatDoesNotStopIsSaidAndTheTaskEndsAsItWould()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Unstoppable = "the assistant still has it as working";
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Contains("▲ The session of #3 did not stop: the assistant still has it as working · stop it by hand · fake attach 3", log.Lines);
+        Assert.Equal([(3, RunMark.Done)], Ended);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
+    }
+
     [Fact]
     public async Task ARunWhoseSignCannotBePutUpStartsNothing()
     {

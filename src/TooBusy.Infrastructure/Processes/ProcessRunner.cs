@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using TooBusy.Core.Processes;
 
 namespace TooBusy.Infrastructure.Processes;
 
 // Commands are started directly, without a shell, in the folder the runner is of, or where the tool was started.
 // Their input is closed at once and git's prompts are off, as `Unattended` has them, so that none of them waits for
-// an answer.
+// an answer. What they print is read as UTF-8, as git, gh and claude write it.
 public sealed class ProcessRunner(string? folder = null) : IProcessRunner
 {
     public IProcessRunner Inside(string folder) => new ProcessRunner(folder);
@@ -20,6 +21,8 @@ public sealed class ProcessRunner(string? folder = null) : IProcessRunner
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = folder ?? "",
@@ -39,19 +42,47 @@ public sealed class ProcessRunner(string? folder = null) : IProcessRunner
 
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         limit.CancelAfter(timeout);
+        process.StandardInput.Close();
+        var output = process.StandardOutput.ReadToEndAsync(limit.Token);
+        var error = process.StandardError.ReadToEndAsync(limit.Token);
         try
         {
-            process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync(limit.Token);
-            var error = process.StandardError.ReadToEndAsync(limit.Token);
             await process.WaitForExitAsync(limit.Token);
             return new ProcessResult(ProcessStatus.Exited, process.ExitCode, await output, await error);
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            // The reads are given up with the command, and are over before the process and its streams are let go,
+            // so that nothing reads a stream that is gone.
+            Kill(process);
+            await Over(Task.WhenAll(output, error));
             cancellationToken.ThrowIfCancellationRequested();
             return new ProcessResult(ProcessStatus.TimedOut, 0, "", "");
+        }
+    }
+
+    // Stops a command with everything it started. A command that ended by itself between the cancellation and the kill
+    // has nothing left to stop, and what of its tree cannot be stopped is left: neither is a failure of the command.
+    internal static void Kill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception gone) when (gone is InvalidOperationException or Win32Exception or AggregateException)
+        {
+        }
+    }
+
+    // Waits for reads that were given up, whatever they ended with.
+    static async Task Over(Task reads)
+    {
+        try
+        {
+            await reads;
+        }
+        catch (Exception given) when (given is OperationCanceledException or IOException or ObjectDisposedException)
+        {
         }
     }
 

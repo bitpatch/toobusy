@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.Text.Json;
 using TooBusy.Core.Run;
 
@@ -14,8 +13,6 @@ namespace TooBusy.Infrastructure.Run;
 // `pause` waits while another run holds the sign. A sign that cannot be written or taken down is a LocalStateException.
 public sealed class RunSignFile(string folder, int process, Func<int, ProcessStart?> startOf, Func<DateTimeOffset> now, Action<TimeSpan> pause) : IRunSign
 {
-    const string Stamp = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
-
     // Two readings of the start of one process differ by less than this.
     static readonly TimeSpan Slack = TimeSpan.FromSeconds(2);
 
@@ -51,10 +48,10 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
                 return null;
             if (id <= 0 || startOf(id) is not { } living)
                 return null;
-            if (living.At is { } started && Time(root, "processStarted") is { } written && (started - written).Duration() > Slack)
+            if (living.At is { } started && JsonFields.Time(root, "processStarted") is { } written && (started - written).Duration() > Slack)
                 return null;
 
-            var phase = Text(root, "phase") switch
+            var phase = JsonFields.Text(root, "phase") switch
             {
                 "working" => RunPhase.Working,
                 "waiting-for-owner" => RunPhase.WaitingForOwner,
@@ -62,13 +59,13 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
                 _ => RunPhase.Preparing,
             };
             var task = root.TryGetProperty("task", out var worked) && worked.TryGetInt32(out var taken) ? taken : (int?)null;
-            return new GoingRun(id, Time(root, "since") ?? DateTimeOffset.MinValue, new RunSign(phase)
+            return new GoingRun(id, JsonFields.Time(root, "since") ?? DateTimeOffset.MinValue, new RunSign(phase)
             {
                 Task = task,
-                Title = Text(root, "title"),
-                Url = Text(root, "url"),
-                Open = Text(root, "open"),
-                Until = Time(root, "until"),
+                Title = JsonFields.Text(root, "title"),
+                Url = JsonFields.Text(root, "url"),
+                Open = JsonFields.Text(root, "open"),
+                Until = JsonFields.Time(root, "until"),
             });
         }
         catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
@@ -146,8 +143,8 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
                 writer.WriteStartObject();
                 writer.WriteNumber("process", process);
                 if (processStarted is { } started)
-                    writer.WriteString("processStarted", started.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
-                writer.WriteString("since", since.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
+                    writer.WriteString("processStarted", JsonFields.Stamped(started));
+                writer.WriteString("since", JsonFields.Stamped(since));
                 writer.WriteString("phase", Name(sign.Phase));
                 if (sign.Task is { } task)
                     writer.WriteNumber("task", task);
@@ -158,7 +155,7 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
                 if (sign.Open is { } open)
                     writer.WriteString("open", open);
                 if (sign.Until is { } until)
-                    writer.WriteString("until", until.UtcDateTime.ToString(Stamp, CultureInfo.InvariantCulture));
+                    writer.WriteString("until", JsonFields.Stamped(until));
                 writer.WriteEndObject();
             }
 
@@ -200,12 +197,6 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
             return null;
         }
     }
-
-    static DateTimeOffset? Time(JsonElement element, string name) =>
-        DateTimeOffset.TryParse(Text(element, name), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var written) ? written : null;
-
-    static string? Text(JsonElement element, string name) =>
-        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text ? text : null;
 }
 
 // A process that lives, and when it started; null when that cannot be read.
