@@ -201,6 +201,20 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal("Claude Code did not start a session for #12 Export the data: it did not answer", silent.Message);
     }
 
+    // An answer without the line of a session in the background started none, though Claude Code exited without an
+    // error.
+    [Theory]
+    [InlineData("Usage: claude [options] [command] [prompt]\n", "Usage: claude [options] [command] [prompt]")]
+    [InlineData("", "it said nothing")]
+    public async Task AStartThatClaudeCodeAnswersWithoutASessionStartedNone(string said, string why)
+    {
+        claude.Answer = _ => Exited(said);
+
+        var refused = await Assert.ThrowsAsync<AssistantException>(() => Assistant().StartAsync(Start, TestContext.Current.CancellationToken));
+
+        Assert.Equal($"Claude Code did not start a session for #12 Export the data: {why}", refused.Message);
+    }
+
     [Theory]
     [InlineData("working", "busy", null, SessionPhase.Working, null)]
     [InlineData("starting", "busy", null, SessionPhase.Working, null)]
@@ -599,6 +613,23 @@ public sealed class ClaudeCodeTests : IDisposable
 
         Assert.Equal("claude attach 15555bc6", session.Open);
         Assert.Equal(new SessionTrace(Id, Conversation, clock.Now - clock.Passed), session.Trace);
+    }
+
+    // A session that the list still has as working after it was stopped is waited for twenty seconds, and is gone on
+    // with after that all the same: where something still has it, Claude Code says so with a copy.
+    [Fact]
+    public async Task ASessionThatDoesNotStopIsWaitedForAWhileAndGoneOnWithAllTheSame()
+    {
+        var session = await Assistant().StartAsync(Start, TestContext.Current.CancellationToken);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"));
+        claude.Answer = arguments => Exited(arguments[0] == "stop" ? "" : Backgrounded);
+
+        var told = await session.TellAsync("Go on alone.", TestContext.Current.CancellationToken);
+
+        Assert.Equal(Telling.WentOn, told);
+        Assert.Equal(TimeSpan.FromSeconds(20), clock.Passed);
+        Assert.Equal([["stop", Id]], claude.Asked.Where(arguments => arguments[0] == "stop"));
+        Assert.Equal(["--bg", "--resume", Conversation, "Go on alone."], claude.Asked[^1]);
     }
 
     // A list that cannot be read does not say that nothing has the session: the copy is not taken on its word.

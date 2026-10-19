@@ -218,6 +218,18 @@ public class TaskLineupTests
         Assert.Equal([(3, "it waits for #40 (not among these tasks)")], Held(lineup));
     }
 
+    // Tasks that wait for each other, as GitHub lets two issues block one another, and a task that waits for itself
+    // never open: each is held with the task it waits for, so that the queue names every task of the circle.
+    [Fact]
+    public void TasksThatWaitForEachOtherOrForThemselvesAreHeld()
+    {
+        var lineup = TaskLineup.Arrange([Task(3, blockedBy: [5]), Task(5, blockedBy: [3]), Task(7, blockedBy: [7]), Task(9), Task(11, blockedBy: [5])], Rules);
+
+        Assert.Equal([9], lineup.Ready.Select(task => task.Number));
+        Assert.Empty(lineup.Later);
+        Assert.Equal([(3, "it waits for #5"), (5, "it waits for #3"), (7, "it waits for #7"), (11, "it waits for #5")], Held(lineup));
+    }
+
     [Fact]
     public void ALineupSaysWhyARunDoesNotTakeATaskNow()
     {

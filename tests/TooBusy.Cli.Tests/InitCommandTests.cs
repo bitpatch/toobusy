@@ -330,6 +330,25 @@ public sealed class InitCommandTests : CliAppTests
         Assert.Contains("[tracker.statuses]\nin-progress = \"Doing\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
     }
 
+    // Each of the options of a status names its own: the one a task is taken from and the one it is moved to when it
+    // is done, as the board writes them, and the status between them is the one GitHub names.
+    [Fact]
+    public async Task WithYesTheOptionsOfTheStatusesNameTheStatusOfATaskToDoAndOfADoneOne()
+    {
+        GitRepository();
+        var processes = GitHubWithProjects(Labels, statuses: "board\nstatus\tBacklog\nstatus\tReady\nstatus\tIn Progress\nstatus\tShipped\n");
+
+        var (exit, output, error) = await RunAsync(
+            Context(processes),
+            ["init", "--yes", "--board", "https://github.com/orgs/acme/projects/3", "--todo-status", "ready", "--done-status", "Shipped", "--manual-label", "manual", "--no-skill"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.DoesNotContain("The board has no status", output, StringComparison.Ordinal);
+        Assert.Contains("✔ Statuses         Ready, In Progress, Shipped", output, StringComparison.Ordinal);
+        Assert.Contains("[tracker.statuses]\ntodo = \"Ready\"\ndone = \"Shipped\"\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "settings.toml")), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task OnTheScreenABoardThatIsNotNamedAsGitHubNamesOneIsAskedWhichOfItsStatusesIsWhich()
     {

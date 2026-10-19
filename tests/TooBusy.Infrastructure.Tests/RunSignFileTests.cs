@@ -214,6 +214,20 @@ public sealed class RunSignFileTests : IDisposable
         Assert.Equal(Working, Sign(200).Read()?.Sign);
     }
 
+    // A sign is read as it stands in the file, whatever wrote it: a run of another version of toobusy, in the middle of
+    // an upgrade, for one. A start of the process that the system reads a little apart is the same start.
+    [Fact]
+    public void ASignWrittenByAnotherRunIsReadFromItsFile()
+    {
+        File.WriteAllText(
+            Path.Combine(root.FullName, "run.json"),
+            """{"process":100,"processStarted":"2030-01-01T09:00:01.0000000Z","since":"2030-01-01T09:30:00.0000000Z","phase":"waiting-for-owner","task":12,"title":"Export the orders as a file","url":"https://github.com/acme/rocket/issues/12","open":"claude attach 1a2b3c4d","until":"2030-01-01T09:45:00.0000000Z"}""");
+
+        Assert.Equal(
+            new GoingRun(100, Morning + TimeSpan.FromMinutes(30), Working with { Phase = RunPhase.WaitingForOwner, Until = Morning + TimeSpan.FromMinutes(45) }),
+            Sign(200).Read());
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not json")]

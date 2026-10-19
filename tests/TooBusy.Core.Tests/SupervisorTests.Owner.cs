@@ -129,6 +129,25 @@ public sealed partial class SupervisorTests
         Assert.Contains("‖ #3 gets no message and waits for the owner · /nudge tells it to go on alone · fake attach 3", log.Lines);
     }
 
+    // A session that is held has no countdown left to cancel.
+    [Fact]
+    public async Task HoldMeansNothingOnceTheSessionIsHeld()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Asks().Then().Works().Ends(Done);
+        clock.At(AfterLook(2), () => Run.Send(RunCommand.Hold));
+        clock.At(AfterLook(2) + policy.Tick, () => Run.Send(RunCommand.Hold));
+        clock.At(AfterLook(2) + 2 * policy.Tick, () => Run.Send(RunCommand.Nudge));
+
+        await RunAsync();
+
+        Assert.Single(session.Told);
+        Assert.Single(log.Lines, line => line.StartsWith("‖ #3 gets no message and waits for the owner", StringComparison.Ordinal));
+        Assert.Contains("  /hold means nothing now", log.Lines);
+        var held = log.Statuses.Last(status => status.Phase == RunPhase.WaitingForOwner);
+        Assert.Equal((null, RunCommands.Stop | RunCommands.Abort | RunCommands.Nudge), (held.Until, held.Available));
+    }
+
     [Fact]
     public async Task ASessionThatGoesBackToWorkIsNotTold()
     {

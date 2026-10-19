@@ -28,7 +28,7 @@ A test project is added together with the first code of the project it tests.
 - `TooBusy.Infrastructure` and every adapter reference `TooBusy.Core` only. Adapters do not reference each other.
 - `TooBusy.Cli` references everything and is the only place where implementations are chosen and wired together.
 
-`TooBusy.Architecture.Tests` reads the project files and fails when a project reference breaks these rules; the packages of a project are not checked there. A new project needs a rule there.
+`TooBusy.Architecture.Tests` reads the project files and fails when a project reference breaks these rules, when Core has a package that is not let in there by name, when a project of `src` compiles a file from outside its folder or references an assembly as a file, and when a test project references another project than the one it is named after. A new project needs a rule there.
 
 ## Core and its ports
 

@@ -409,6 +409,47 @@ public sealed class RunCommandTests : CliAppTests
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "local", ".gitignore")));
     }
 
+    // A run that stops over a problem fails the tool, and one that pauses its task for a usage limit does not: the
+    // limit is no fault of the project, and the next run goes on with the session.
+    [Fact]
+    public async Task ARunThatStopsOverAProblemExitsWithAFailure()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = SessionMachine("done", leaves: "src/export.cs");
+        var context = Context(processes) with { Home = personal.FullName };
+        Converse(context, SaysDone);
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(1, exit);
+        Assert.Contains("✖ Stopped: #12 left changes in the working tree · claude attach abc12345 · the next task did not start · 0 done", output, StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["issue", "edit", "12", "--repo", "acme/rocket", "--add-label", "manual"]));
+    }
+
+    [Fact]
+    public async Task ARunThatPausesItsTaskForAUsageLimitExitsAsOneThatEnded()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = SessionMachine("done");
+        var context = Context(processes) with { Home = personal.FullName };
+        Converse(context, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"You have hit your limit · resets 3pm"}]}}""");
+        var resets = InstantClock.Start.AddDays(2);
+        var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local")).FullName;
+        File.WriteAllText(Path.Combine(local, "usage.json"), $$"""{ "rate_limits": { "seven_day": { "used_percentage": 100, "resets_at": {{resets.ToUnixTimeSeconds()}} } } }""");
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"‖ #12 is paused: the weekly limit is spent, it resets {resets:yyyy-MM-dd HH:mm} UTC. Its changes stay in the working tree, and the next run goes on with its session · 0 done"), output, StringComparison.Ordinal);
+        Assert.Contains(processes.Asked, asked => asked.Command == "gh" && asked.Arguments.SequenceEqual(["issue", "edit", "12", "--repo", "acme/rocket", "--add-label", "interrupted"]));
+    }
+
     [Fact]
     public async Task ARunReadsTheConversationOfASessionWhereClaudeConfigDirPutsTheFolderOfClaudeCode()
     {
@@ -644,10 +685,12 @@ public sealed class RunCommandTests : CliAppTests
     // The machine of a run of one task, #12 Export the data, in a project cloned from acme/rocket whose working tree
     // is clean. `gh` lists the task and the labels of the settings, and takes the task out of the queue once it is
     // closed; Claude Code starts one session for it, abc12345, and lists that session in the state it is given.
-    // `running` sees every command as it is asked. What the session says is written by `Converse`.
-    static ScriptedProcesses SessionMachine(string state, Action<string, IReadOnlyList<string>>? running = null)
+    // `running` sees every command as it is asked, and `leaves` is a file that git tells of as changed once the
+    // session is started. What the session says is written by `Converse`.
+    static ScriptedProcesses SessionMachine(string state, Action<string, IReadOnlyList<string>>? running = null, string? leaves = null)
     {
         var closed = false;
+        var started = false;
         var status = state == "done" ? "idle" : "busy";
         return new ScriptedProcesses((command, arguments) =>
         {
@@ -655,11 +698,11 @@ public sealed class RunCommandTests : CliAppTests
             return new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
             {
                 ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-                ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+                ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n" + (started && leaves is not null ? $"1 .M N... 100644 100644 100644 1a2b 1a2b {leaves}\n" : ""),
                 ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
                 ("gh", "label") => Labels,
                 ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
-                ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+                ("claude", "--bg") => Do(() => started = true) + "backgrounded · abc12345 · #12 Export the data\n",
                 ("claude", "agents") => $$"""[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"{{state}}","status":"{{status}}","pid":1}]""",
                 _ => "",
             }, "");

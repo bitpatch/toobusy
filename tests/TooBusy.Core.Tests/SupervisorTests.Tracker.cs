@@ -234,6 +234,36 @@ public sealed partial class SupervisorTests
         Assert.Single(assistant.Started);
     }
 
+    // An interrupted task keeps its record while the tracker is told how it went, as its session goes on with the
+    // same conversation. A tracker that refuses the label stops the run with its words, before the comment and the
+    // move: the next run finds the task as the session left it, and goes on with the session after /abort.
+    [Fact]
+    public async Task AnInterruptedTaskWhoseLabelIsRefusedKeepsItsRecordAndTheNextRunGoesOnWithItsSession()
+    {
+        tracker.Add(3);
+        tracker.Refused.Add("label");
+        var session = assistant.Session(3).Works().Ends("Undone: a.cs.\nTOOBUSY: interrupted").Then().Works().Ends(Done);
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "The tracker refused: label 3 +interrupted."), result);
+        AssertDid("status 3 InProgress", "assign 3");
+        Assert.Empty(tracker.Comments);
+        Assert.Equal(Record(3, RecordState.WrappedUp), state.Record);
+        Assert.Contains(log.Lines, line => line.StartsWith("✖ Stopped: The tracker refused: label 3 +interrupted. · ", StringComparison.Ordinal));
+
+        tracker.Refused.Clear();
+        run = null;
+        result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Emptied, 1), result);
+        Assert.Single(assistant.Started);
+        Assert.Equal([Briefing.AfterAbort(3)], session.Told);
+        Assert.Contains("→ #3 Task 3 — taken again · its session goes on after /abort · fake attach 3", log.Lines);
+        AssertDid("status 3 InProgress", "assign 3", "status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
+        Assert.Null(state.Record);
+    }
+
     [Fact]
     public async Task ATaskThatComesUpAgainAfterItsSessionStopsTheRun()
     {

@@ -143,6 +143,69 @@ public sealed partial class SupervisorTests
     }
 
     [Fact]
+    public async Task ASessionThatDoesNotGoOnAfterTheResetPausesItsTaskForTheNextRun()
+    {
+        tracker.Add(3);
+        tracker.Add(5);
+        var session = assistant.Session(3)
+            .Works(and: () => assistant.Limits = new UsageLimits(new UsageWindow("5-hour", 100, FakeClock.Start + TimeSpan.FromHours(1)), null))
+            .Limit();
+        session.Deaf = "it is deaf";
+
+        var result = await RunAsync();
+
+        const string Why = "its session did not go on after the reset: it is deaf";
+        Assert.Equal(new RunResult(RunEnd.Limited, 0, $"#3 is paused: {Why}. Its changes stay in the working tree, and the next run goes on with its session"), result);
+        Assert.Equal([Briefing.AfterLimit(3)], session.Told);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +interrupted", "status 3 Todo", "comment 3");
+        Assert.StartsWith($"**Stopped by a usage limit** ({Why}).", tracker.Comments[0].Text, StringComparison.Ordinal);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("goes on after the reset", StringComparison.Ordinal));
+        Assert.Single(assistant.Started);
+    }
+
+    // A session that waits for a limit makes no step to read the request to wrap up in: it is paused at once, as by
+    // /stop, with its changes in the working tree.
+    [Fact]
+    public async Task AbortDuringTheWaitForALimitPausesTheTaskAtOnce()
+    {
+        tracker.Add(3);
+        var session = assistant.Session(3).Works().Limit();
+        clock.At(policy.UnknownLimitWait / 2, () => Run.Send(RunCommand.Abort));
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Limited, result.End);
+        Assert.StartsWith("#3 is paused: toobusy was stopped while it waited for the limit.", result.Why, StringComparison.Ordinal);
+        Assert.Empty(session.Asked);
+        Assert.Empty(session.Told);
+        Assert.Contains("■ #3 waits for a limit and cannot wrap up: it is paused with its changes in the working tree", log.Lines);
+        Assert.Equal(Record(3, RecordState.Paused), state.Record);
+        Assert.Equal([(3, RunMark.Paused)], Ended);
+    }
+
+    // While a task waits for a limit, /stop pauses it at once, and so it means something there even after a /stop
+    // that waited for the end of the task: a run that stops pauses the task as soon as the limit is met.
+    [Theory]
+    [InlineData(false, RunCommands.Stop | RunCommands.Abort)]
+    [InlineData(true, RunCommands.Stop | RunCommands.Continue | RunCommands.Abort)]
+    public async Task WhileATaskWaitsForALimitStopMeansSomething(bool stopped, RunCommands available)
+    {
+        tracker.Add(3);
+        assistant.Session(3).Works(2).Limit();
+        if (stopped)
+            clock.At(AfterLook(1), () => Run.Send(RunCommand.Stop));
+        else
+            clock.At(policy.UnknownLimitWait / 2, () => Run.Send(RunCommand.Stop));
+
+        var result = await RunAsync();
+
+        Assert.Equal(RunEnd.Limited, result.End);
+        Assert.Equal(available, log.Statuses.First(status => status.Phase == RunPhase.WaitingForLimit).Available);
+        Assert.Equal(!stopped, log.Lines.Contains("‖ #3 waits for a limit: it is paused now, and the next run goes on with its session"));
+    }
+
+    [Fact]
     public async Task KillDuringTheWaitForALimitPausesTheTaskToo()
     {
         tracker.Add(3);

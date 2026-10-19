@@ -141,6 +141,21 @@ public class ProcessRunnerTests
         Assert.Equal(ProcessStatus.TimedOut, result.Status);
     }
 
+    // A command may leave something running that keeps its output open, as a service it starts in the background. The
+    // runner reads the output to its end, so it waits for what was left for as long as that holds the output, and
+    // gives the command up as one that did not answer when that is longer than its time: what the command printed is
+    // lost, though it exited. ShellCommands reads on for a second only after the exit.
+    [Fact]
+    public async Task WhatACommandLeavesRunningKeepsItFromEndingUntilItsTimeIsOver()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await runner.RunAsync("sh", ["-c", "sleep 5 & echo started"], TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""), result);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(4), "The command was waited for after its time was over.");
+    }
+
     [Fact]
     public async Task ACancellationStopsTheCommandAndThrows()
     {

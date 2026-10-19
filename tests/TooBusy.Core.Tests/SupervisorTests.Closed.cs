@@ -43,6 +43,22 @@ public sealed partial class SupervisorTests
     }
 
     [Fact]
+    public async Task AClosedTaskThatIsRefusedTheCommentOfWhatWentWrongSaysSo()
+    {
+        tracker.Add(3);
+        tracker.Refused.Add("comment");
+        assistant.Session(3).Works(and: () => tracker.Shut(3)).Ends("I tried twice.\nTOOBUSY: failed the tests do not pass");
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "#3 failed · fake attach 3"), result);
+        AssertDid("status 3 InProgress", "assign 3");
+        Assert.Contains("▲ #3 is closed and did not get the comment that says what went wrong: The tracker refused: comment 3.", log.Lines);
+        Assert.DoesNotContain(log.Lines, line => line.Contains("is left closed, with a comment", StringComparison.Ordinal));
+        Assert.Null(state.Record);
+    }
+
+    [Fact]
     public async Task ATrackerThatDoesNotSayWhetherATaskIsClosedLeavesItAsOneThatIsOpen()
     {
         tracker.Add(3);

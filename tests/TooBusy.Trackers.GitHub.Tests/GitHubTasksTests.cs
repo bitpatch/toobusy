@@ -371,6 +371,33 @@ public class GitHubTasksTests
         Assert.Contains("item=PVTI_5", processes.Asked[2].Arguments);
     }
 
+    // GitHub answers nothing for an item it did not make, and the task is not moved then.
+    [Fact]
+    public async Task ATaskThatCannotBePutOnTheBoardIsNotMoved()
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_1\tTodo\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("\n"));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().SetStatusAsync(12, BoardStatus.Todo, TestContext.Current.CancellationToken));
+
+        Assert.Equal(("#12 could not be moved to Todo on the board.", false), (refused.Message, refused.MayPass));
+        Assert.Equal(2, processes.Asked.Count);
+    }
+
+    [Theory]
+    [InlineData("gh: Validation Failed (HTTP 422)", false)]
+    [InlineData("gh: Server Error (HTTP 500)", true)]
+    public async Task AMoveThatGitHubRefusesSaysSo(string error, bool mayPass)
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("issue\tI_1\nproject\tPVT_1\nfield\tF_1\noption\tO_2\tDone\nitem\tPVTI_1\tPVT_1\n"));
+        processes.Answers.Enqueue(ScriptedProcesses.Failed(error));
+
+        var refused = await Assert.ThrowsAsync<TrackerException>(() => Tasks().SetStatusAsync(12, BoardStatus.Done, TestContext.Current.CancellationToken));
+
+        Assert.Equal(($"#12 could not be moved to Done on the board. {error}", mayPass), (refused.Message, refused.MayPass));
+        Assert.Contains("updateProjectV2ItemFieldValue", processes.Asked[1].Arguments[11], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ABoardWithoutTheStatusSaysSo()
     {

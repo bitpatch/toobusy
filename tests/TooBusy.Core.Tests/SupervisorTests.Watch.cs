@@ -110,10 +110,29 @@ public sealed partial class SupervisorTests
         session.Deaf = "it is deaf";
         clock.At(AfterLook(2), () => Run.Send(RunCommand.Abort));
 
-        await RunAsync();
+        var result = await RunAsync();
 
         Assert.Equal([Briefing.WrapUp(3)], session.Told);
         Assert.Contains("✖ #3 did not go on with the request to wrap up: it is deaf", log.Lines);
+
+        // The session is lost without a line for toobusy, and its task is left to the owner.
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "the session of #3 did not say how the task went · fake attach 3"), result);
+        AssertDid("status 3 InProgress", "assign 3", "label 3 +needs-owner", "comment 3", "status 3 Todo");
+        Assert.Null(state.Record);
+    }
+
+    // What a session said goes into the log up to a number of lines; the rest is where the session is.
+    [Fact]
+    public async Task OnlyTheFirstLinesOfALongReplyAreQuotedAndTheSessionShowsTheWhole()
+    {
+        tracker.Add(3);
+        assistant.Session(3).Ends(string.Join('\n', Enumerable.Range(1, 15).Select(line => $"line {line}")) + "\nTOOBUSY: failed it broke");
+
+        await RunAsync();
+
+        Assert.Equal(
+            [.. Enumerable.Range(1, 12).Select(line => $"  │ line {line}"), "  │ … fake attach 3 shows the whole session"],
+            log.Lines.Where(line => line.StartsWith("  │ ", StringComparison.Ordinal)));
     }
 
     [Fact]

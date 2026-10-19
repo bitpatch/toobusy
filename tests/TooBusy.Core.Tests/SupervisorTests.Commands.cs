@@ -147,6 +147,29 @@ public sealed partial class SupervisorTests
         Assert.Contains("■ Killed the command before #3: scripts/dev.sh ports free", log.Lines);
     }
 
+    // A kill that comes while the command after a task runs cuts it, as it cuts the one before: the task was told
+    // how it went already, and the run ends as killed over the command.
+    [Fact]
+    public async Task AKillCutsTheCommandAfterATaskAndTheTaskStaysAsItEnded()
+    {
+        plan = plan with { Commands = Around };
+        tracker.Add(3);
+        tracker.Add(5);
+        shell.Running = command =>
+        {
+            if (command == Halt)
+                kill.Cancel();
+        };
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Killed, 1, "the command after #3 was cut by the kill"), result);
+        AssertDid("status 3 InProgress", "assign 3", "comment 3", "close 3", "status 3 Done");
+        Assert.Equal([(Free, "3", policy.CommandTime), (Halt, "3", policy.CommandTime)], shell.Ran);
+        Assert.Contains("■ Killed the command after #3: scripts/dev.sh server stop", log.Lines);
+        Assert.Single(assistant.Started);
+    }
+
     [Fact]
     public async Task ACommandAfterATaskThatFailsStopsTheRunAndTheTaskStaysAsItEnded()
     {
@@ -182,6 +205,29 @@ public sealed partial class SupervisorTests
 
         Assert.Equal("#3 failed · fake attach 3", result.Why);
         Assert.Contains("▲ the command after #3 exited with 1 · see to it by hand before the next run", log.Lines);
+    }
+
+    // A task that throws stops the run with what it threw, and a command after it that fails then is only said too.
+    [Fact]
+    public async Task ACommandAfterATaskThatFailsWhileTheTaskThrewIsOnlySaid()
+    {
+        plan = plan with { Commands = Around };
+        shell.Ends[Halt] = new CommandEnd(CommandStatus.Exited, 1, "the server does not stop\n");
+        tracker.Add(3);
+        assistant.RefuseToStart = "Claude Code does not trust the folder";
+
+        var result = await RunAsync();
+
+        Assert.Equal(new RunResult(RunEnd.Problem, 0, "Claude Code does not trust the folder"), result);
+        Assert.Equal([Free, Halt], shell.Ran.Select(ran => ran.Command));
+        Assert.Equal(
+            [
+                "✖ the command after #3 exited with 1: scripts/dev.sh server stop",
+                "  │ the server does not stop",
+                "▲ the command after #3 exited with 1 · see to it by hand before the next run",
+                "✖ Stopped: Claude Code does not trust the folder · the next task did not start · 0 done",
+            ],
+            log.Lines.SkipWhile(line => line[0] != '✖').Take(4));
     }
 
     [Fact]
