@@ -114,36 +114,16 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     SetupBoards known = SetupBoards.None;
     IReadOnlyList<string>? labels;
 
-    // What the options say, once it is checked against what was read: the board when the boards are known, the
-    // labels when the labels are.
-    BoardAnswer? offeredBoard;
-    List<string>? offeredBlocking;
-    List<string>? offeredTake;
+    // Whether what the options say of the blocking labels, and of the labels to take, was checked against the labels
+    // of the repository: it is the first time the question is asked where they are read, and what passes is proposed
+    // then, as the repository writes it.
+    bool blockingOffered;
+    bool takeOffered;
 
-    // The answers so far; null is a step that was not answered yet.
-    BoardAnswer? board;
-
-    // What the board that was answered calls the statuses a run knows, the board they were named for, and whether
-    // they were asked for: a board that was asked about is asked about again when the user comes back to it.
-    BoardStatuses statuses = BoardStatuses.Default;
-    string? named;
-    bool asked;
-    List<string>? blocking;
-    List<string>? take;
-    string? manual;
-    string? interrupted;
-
-    // The name of the skill; empty for a project that names none.
-    string? skill;
-
-    // The commands around a task, the branch and the permission mode: those of the settings, but for what the
-    // options say of them.
-    TaskCommands commands = TaskCommands.None;
-    string? branch;
-    string? permissionMode;
-
-    // What is said of a board that is chosen and lacks a status a run would know it by; empty when nothing is.
-    IReadOnlyList<SetupNote> lacking = [];
+    // The answers so far, and for a question that was not answered yet what it proposes: the walk proposes before
+    // its first question, and the menu takes the settings when it opens them. Before that they are what a first
+    // setup proposes by itself.
+    SetupAnswers answers = new(null, StatusesAnswer.None, [], [], ProposedManual, ProposedInterrupted, ProposedSkill, TaskCommands.None, null, null);
 
     // What is said of a skill that the settings will name and nobody has written yet; empty when nothing is.
     IReadOnlyList<SetupNote> unwritten = [];
@@ -166,15 +146,15 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         var step = 0;
         try
         {
-            commands = new TaskCommands(
+            var commands = new TaskCommands(
                 Offered(proposals.Before, current?.Commands.Before, "--before"),
                 Offered(proposals.After, current?.Commands.After, "--after"));
-            branch = OfferedBranch(proposals.Branch, current?.Branch);
-            permissionMode = OfferedPermissionMode(proposals.PermissionMode, current?.Assistant.PermissionMode);
+            var branch = OfferedBranch(proposals.Branch, current?.Branch);
+            var permissionMode = OfferedPermissionMode(proposals.PermissionMode, current?.Assistant.PermissionMode);
             if (!await ReadBoardsAsync(cancellationToken))
                 return new SetupResult(SetupOutcome.Left, []);
 
-            offeredBoard = OfferedBoard();
+            answers = Proposed(commands, branch, permissionMode);
             while (step >= 0)
             {
                 bool answered;
@@ -200,7 +180,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                         break;
                     default:
                         if (await ConcludeAsync(cancellationToken) is { } outcome)
-                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. lacking, .. unwritten], Done = done, Unasked = UnaskedChanges() };
+                            return new SetupResult(outcome, Answers(Steps.Length), failure, written) { Notes = [.. notes, .. answers.Statuses.Lacking, .. unwritten], Done = done, Unasked = UnaskedChanges() };
                         answered = false;
                         break;
                 }
@@ -242,7 +222,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     {
         get
         {
-            var settings = current!;
+            var settings = Opened;
             var labels = settings.Queue.Labels;
             static SetupValue Value(SetupSetting setting, string label, string? value, SetupLook look = SetupLook.Set) =>
                 value is null ? new(setting, label, "none", SetupLook.Unset) : new(setting, label, value, look);
@@ -274,7 +254,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     {
         Reset();
         var before = done.Count;
-        Answered? shown = null;
+        SetupAnswers? shown = null;
         while (true)
         {
             if (!await AskAsync(setting, cancellationToken))
@@ -285,20 +265,19 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                     return new SetupResult(SetupOutcome.Left, []);
                 }
 
-                Restore(shown);
+                answers = shown;
             }
 
-            var answered = Keep();
             if (await ConcludeAsync(cancellationToken) is not { } outcome)
             {
-                shown = answered;
+                shown = answers;
                 continue;
             }
 
             if (outcome == SetupOutcome.Written)
                 current = kept ?? current;
             var told = outcome == SetupOutcome.Written ? Values.Where(value => value.Setting == setting).Select(value => new SetupAnswer(value.Label, value.Value)).ToList() : [];
-            var result = new SetupResult(outcome, told, failure, written) { Notes = lacking, Done = done[before..] };
+            var result = new SetupResult(outcome, told, failure, written) { Notes = answers.Statuses.Lacking, Done = done[before..] };
             if (outcome is SetupOutcome.Written or SetupOutcome.Failed)
                 Remember(result);
             Reset();
@@ -315,8 +294,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         SetupSetting.Manual => AskManualAsync(cancellationToken),
         SetupSetting.Interrupted => AskInterruptedAsync(cancellationToken),
         SetupSetting.Skill => Task.FromResult(AskSkill()),
-        SetupSetting.Before => Task.FromResult(AskCommand(BeforeLabel, BeforeHint, commands.Before, line => commands = commands with { Before = line })),
-        SetupSetting.After => Task.FromResult(AskCommand(AfterLabel, AfterHint, commands.After, line => commands = commands with { After = line })),
+        SetupSetting.Before => Task.FromResult(AskCommand(BeforeLabel, BeforeHint, answers.Commands.Before, line => answers = answers with { Commands = answers.Commands with { Before = line } })),
+        SetupSetting.After => Task.FromResult(AskCommand(AfterLabel, AfterHint, answers.Commands.After, line => answers = answers with { Commands = answers.Commands with { After = line } })),
         SetupSetting.Branch => Task.FromResult(AskBranch()),
         _ => Task.FromResult(AskPermissionMode()),
     };
@@ -328,46 +307,17 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // Which status of the board of the settings is which, for the menu: the three questions are asked whatever the
     // board calls its statuses, under the board, which is not asked for again.
     async Task<bool> AskBoardStatusesAsync(CancellationToken cancellationToken) =>
-        board is BoardAnswer.Existing && await AskStatusesAsync(cancellationToken, always: true);
+        answers.Board is BoardAnswer.Existing && await AskStatusesAsync(cancellationToken, always: true);
 
     // The answers as the settings have them: the menu changes one of them at a time.
     void Reset()
     {
-        var settings = current!;
-        board = settings.Tracker.Board is { } address ? new BoardAnswer.Existing(address) : new BoardAnswer.None();
-        (statuses, named, asked) = (settings.Tracker.Statuses, settings.Tracker.Board, false);
-        blocking = [.. settings.Queue.Labels.Blocking];
-        take = [.. settings.Queue.Labels.Take];
-        manual = settings.Queue.Labels.Manual;
-        interrupted = settings.Queue.Labels.Interrupted;
-        skill = settings.Skill ?? "";
-        commands = settings.Commands;
-        branch = settings.Branch;
-        permissionMode = settings.Assistant.PermissionMode;
-        (lacking, unwritten, failure, written, kept) = ([], [], null, false, null);
+        answers = SetupAnswers.Of(Opened);
+        (unwritten, failure, written, kept) = ([], null, false, null);
     }
 
-    // What a setting of the menu is answered with, all of it, so that it can be taken up again.
-    sealed record Answered(
-        BoardAnswer? Board,
-        BoardStatuses Statuses,
-        string? Named,
-        bool Asked,
-        List<string>? Blocking,
-        List<string>? Take,
-        string? Manual,
-        string? Interrupted,
-        string? Skill,
-        TaskCommands Commands,
-        string? Branch,
-        string? PermissionMode,
-        IReadOnlyList<SetupNote> Lacking);
-
-    Answered Keep() => new(board, statuses, named, asked, blocking, take, manual, interrupted, skill, commands, branch, permissionMode, lacking);
-
-    void Restore(Answered answered) =>
-        (board, statuses, named, asked, blocking, take, manual, interrupted, skill, commands, branch, permissionMode, lacking) =
-        (answered.Board, answered.Statuses, answered.Named, answered.Asked, answered.Blocking, answered.Take, answered.Manual, answered.Interrupted, answered.Skill, answered.Commands, answered.Branch, answered.PermissionMode, answered.Lacking);
+    // The settings the menu of the settings opened, as they are saved now: it opens only over settings that validate.
+    ProjectSettings Opened => current ?? throw new InvalidOperationException("The settings are not open: OpenAsync opens them.");
 
     // Puts a change that was saved or refused among what the menu changed: a setting that was saved before stands
     // with its value of now, in the order of the menu.
@@ -431,6 +381,21 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         boardsRead = !read.Unanswered;
         return true;
     }
+
+    // What the walk proposes before its first question: what the options say, else what the settings say, else what
+    // a first setup proposes. Settings that name no board say that there is none: only a first setup takes the one
+    // linked to the repository. What the options say of the labels is checked when the labels are read.
+    SetupAnswers Proposed(TaskCommands commands, string? branch, string? permissionMode) => new(
+        OfferedBoard() ?? (current is { Tracker.Board: null } ? new BoardAnswer.None() : null),
+        StatusesAnswer.None,
+        proposals.Blocking ?? current?.Queue.Labels.Blocking ?? [],
+        proposals.Take ?? current?.Queue.Labels.Take ?? [],
+        proposals.Manual?.Trim() ?? current?.Queue.Labels.Manual ?? ProposedManual,
+        proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
+        proposals.Skill ?? (current is null ? ProposedSkill : current.Skill ?? ""),
+        commands,
+        branch,
+        permissionMode);
 
     // The board an option names, as an answer: an address is put the way the settings keep it, and a new board gets
     // the one it will belong to. Null when no option names a board, or when what it says cannot be.
@@ -546,9 +511,8 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         while (true)
         {
             // What the project has now: the board that was chosen a moment ago, the one of the settings,
-            // or one that is linked to the repository already. Settings that name no board say that there is
-            // none: only a first setup takes the linked one.
-            var proposed = board ?? offeredBoard ?? (current is { Tracker.Board: null } ? new BoardAnswer.None() : null);
+            // or one that is linked to the repository already.
+            var proposed = answers.Board;
             var address = proposed switch
             {
                 BoardAnswer.Existing existing => existing.Address,
@@ -584,7 +548,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             }
 
             // Nothing is made where nothing is verified, whatever the dialog answers.
-            board = answer is BoardAnswer.Created && !verified ? new BoardAnswer.None() : answer;
+            answers = answers with { Board = answer is BoardAnswer.Created && !verified ? new BoardAnswer.None() : answer };
             if (await AskStatusesAsync(cancellationToken))
                 return true;
 
@@ -599,33 +563,65 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // nothing is verified. A new board has the names of GitHub, and a project without a board has none to name.
     // A board that cannot be asked about, with fewer than three statuses or with nobody to ask, is taken all the
     // same, and it is said: a run would take no task of it. One whose statuses cannot be read is left to the
-    // doctor. False is going back from the first of the questions. `always` asks the three questions of a board
-    // that has the names of GitHub too, as the statuses of the menu do, and says so of one that cannot be read.
+    // doctor. False is going back from the first of the questions, which leaves the answers as they were. `always`
+    // asks the three questions of a board that has the names of GitHub too, as the statuses of the menu do, and says
+    // so of one that cannot be read.
     async Task<bool> AskStatusesAsync(CancellationToken cancellationToken, bool always = false)
     {
-        string?[] offered = [proposals.TodoStatus, proposals.InProgressStatus, proposals.DoneStatus];
-        var given = BoardStatuses.Default.Names;
-        lacking = [];
-        if (board is not BoardAnswer.Existing taken)
-        {
-            for (var index = 0; index < offered.Length; index++)
-            {
-                if (offered[index] is not { } name)
-                    continue;
-                if (board is not BoardAnswer.Created)
-                    Reject($"{StatusQuestions[index].Label}: A status is named for a project, and there is none.");
-                else if (!BoardStatuses.Same(name, given[index]))
-                    Reject($"{StatusQuestions[index].Label}: A new project has the statuses GitHub gives it: {string.Join(", ", given)}.");
-            }
+        var told = answers.Board is BoardAnswer.Existing taken ? await AskStatusesOfAsync(taken.Address, always, cancellationToken) : Unboarded();
+        if (told is null)
+            return false;
+        answers = answers with { Statuses = told };
+        return true;
+    }
 
-            (statuses, named, asked) = (BoardStatuses.Default, null, false);
-            return true;
+    // What the options say of the statuses, in the order of the questions.
+    string?[] OfferedStatuses => [proposals.TodoStatus, proposals.InProgressStatus, proposals.DoneStatus];
+
+    // The statuses of a project without a board, or with a new one: the names GitHub gives. An option that calls a
+    // status otherwise cannot be.
+    StatusesAnswer Unboarded()
+    {
+        var given = BoardStatuses.Default.Names;
+        var offered = OfferedStatuses;
+        for (var index = 0; index < offered.Length; index++)
+        {
+            if (offered[index] is not { } name)
+                continue;
+            if (answers.Board is not BoardAnswer.Created)
+                Reject($"{StatusQuestions[index].Label}: A status is named for a project, and there is none.");
+            else if (!BoardStatuses.Same(name, given[index]))
+                Reject($"{StatusQuestions[index].Label}: A new project has the statuses GitHub gives it: {string.Join(", ", given)}.");
         }
 
-        // What each question proposes: what was answered for this board before, else what the option says, else the
-        // name of the settings, else the name GitHub gives.
-        var again = taken.Address.Equals(named, StringComparison.OrdinalIgnoreCase);
-        var kept = again ? statuses : current is { Tracker.Board: not null } ? current.Tracker.Statuses : BoardStatuses.Default;
+        return StatusesAnswer.None;
+    }
+
+    // The statuses of a board that is there: typed where nothing is verified, left to the doctor where they cannot
+    // be read, and else taken as they are or chosen among those of the board. Null is going back.
+    async Task<StatusesAnswer?> AskStatusesOfAsync(string board, bool always, CancellationToken cancellationToken)
+    {
+        var again = board.Equals(answers.Statuses.Board, StringComparison.OrdinalIgnoreCase);
+        var (wanted, optioned) = Wanted(again);
+        if (!verified)
+            return TypedStatuses(board, wanted);
+
+        if (await tracker.ReadStatusesAsync(board, cancellationToken) is not { } has)
+            return new StatusesAnswer(wanted, board, false, always ? [new SetupNote(SetupTone.Warning, "The statuses of the board cannot be read: `toobusy doctor` says why.")] : []);
+
+        var statuses = Written(wanted, optioned, has);
+        var usual = !(answers.Statuses.Asked && again) && !optioned.Contains(true)
+            && statuses.Names.Zip(BoardStatuses.Default.Names).All(pair => BoardStatuses.Same(pair.First, pair.Second));
+        return Settled(board, statuses, has, usual, always) ?? ChosenStatuses(board, statuses, has);
+    }
+
+    // What the questions about the statuses of a board propose, and which of them an option says: what was answered
+    // for this board before, else what the option says, else the name of the settings, else the name GitHub gives.
+    // Two of the three must not be one status: what the options say is left out then, all of it.
+    (BoardStatuses Wanted, bool[] Optioned) Wanted(bool again)
+    {
+        var kept = again ? answers.Statuses.Called : current is { Tracker.Board: not null } ? current.Tracker.Statuses : BoardStatuses.Default;
+        var offered = OfferedStatuses;
         var wanted = kept.Names.ToArray();
         var optioned = new bool[wanted.Length];
         for (var index = 0; index < wanted.Length && !again; index++)
@@ -638,120 +634,118 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 (wanted[index], optioned[index]) = (name.Trim(), true);
         }
 
-        // Two of the three must not be one status. What the options say is left out then, all of it.
         for (var index = 1; index < wanted.Length; index++)
         {
             if (Enumerable.Range(0, index).FirstOrDefault(before => BoardStatuses.Same(wanted[before], wanted[index]), -1) is >= 0 and var same)
             {
                 Reject($"{StatusQuestions[index].Label}: {wanted[index]} is the {StatusQuestions[same].Label} too.");
-                (wanted, optioned) = (kept.Names.ToArray(), new bool[wanted.Length]);
-                break;
+                return (kept, new bool[wanted.Length]);
             }
         }
 
-        var was = asked && again;
-        (named, asked) = (taken.Address, false);
-        if (!verified)
-        {
-            // Nothing is read, so nothing is chosen among: the names are typed, as the board calls them.
-            var typed = wanted.ToArray();
-            for (var at = 0; at < typed.Length;)
-            {
-                var index = at;
-                Show(0, chosen: true);
-                var answer = dialog.Ask(StatusQuestions[at].Label, $"{StatusQuestions[at].Hint} Type what the board calls it.", typed[at], text =>
-                    string.IsNullOrWhiteSpace(text) ? "A status needs a name."
-                    : Enumerable.Range(0, index).FirstOrDefault(before => BoardStatuses.Same(typed[before], text), -1) is >= 0 and var same ? $"{text.Trim()} is the {StatusQuestions[same].Label} too."
-                    : null);
-                if (answer is null && at == 0)
-                    return false;
-                if (answer is null)
-                    at--;
-                else
-                    typed[at++] = answer.Trim();
-            }
+        return (StatusesOf(wanted), optioned);
+    }
 
-            (statuses, asked) = (new BoardStatuses(typed[0], typed[1], typed[2]), true);
-            return true;
-        }
-
-        if (await tracker.ReadStatusesAsync(taken.Address, cancellationToken) is not { } has)
-        {
-            statuses = new BoardStatuses(wanted[0], wanted[1], wanted[2]);
-            if (always)
-                lacking = [new SetupNote(SetupTone.Warning, "The statuses of the board cannot be read: `toobusy doctor` says why.")];
-            return true;
-        }
-
-        // A status of an option is one of the board, and is kept as the board writes it.
+    // The statuses as the board writes them: a status of an option is one of the board, and one that the board does
+    // not have cannot be.
+    BoardStatuses Written(BoardStatuses wanted, bool[] optioned, IReadOnlyList<string> has)
+    {
         var listed = has.Count == 0 ? "it has no statuses" : $"it has {string.Join(", ", has)}";
-        for (var index = 0; index < wanted.Length; index++)
+        var names = wanted.Names.ToArray();
+        for (var index = 0; index < names.Length; index++)
         {
             if (!optioned[index])
                 continue;
-            if (has.FirstOrDefault(one => BoardStatuses.Same(one, wanted[index])) is { } written)
-                wanted[index] = written;
+            if (has.FirstOrDefault(one => BoardStatuses.Same(one, names[index])) is { } written)
+                names[index] = written;
             else
-                Reject($"{StatusQuestions[index].Label}: The board has no status “{wanted[index]}”: {listed}.");
+                Reject($"{StatusQuestions[index].Label}: The board has no status “{names[index]}”: {listed}.");
         }
 
-        statuses = new BoardStatuses(wanted[0], wanted[1], wanted[2]);
-        var lack = statuses.Lack(has);
-        var usual = !was && !optioned.Contains(true) && wanted.Zip(given).All(pair => BoardStatuses.Same(pair.First, pair.Second));
-        if (lack is null && (unasked || (usual && !always)))
-            return true;
+        return StatusesOf(names);
+    }
 
-        if (has.Count < wanted.Length)
+    // Where nothing is verified nothing is read, so nothing is chosen among: the names are typed, as the board calls
+    // them. Null is going back from the first of them.
+    StatusesAnswer? TypedStatuses(string board, BoardStatuses wanted)
+    {
+        var typed = wanted.Names.ToArray();
+        for (var at = 0; at < typed.Length;)
         {
-            lacking =
-            [
-                new SetupNote(SetupTone.Warning, lack!),
-                new SetupNote(SetupTone.Muted, "A run needs three statuses of a board: add them on GitHub and run `toobusy init` again. `toobusy doctor` fails until then."),
-            ];
-            return true;
+            var index = at;
+            Show(0, chosen: true);
+            var answer = dialog.Ask(StatusQuestions[at].Label, $"{StatusQuestions[at].Hint} Type what the board calls it.", typed[at], text =>
+                string.IsNullOrWhiteSpace(text) ? "A status needs a name."
+                : Enumerable.Range(0, index).FirstOrDefault(before => BoardStatuses.Same(typed[before], text), -1) is >= 0 and var same ? $"{text.Trim()} is the {StatusQuestions[same].Label} too."
+                : null);
+            if (answer is null && at == 0)
+                return null;
+            if (answer is null)
+                at--;
+            else
+                typed[at++] = answer.Trim();
         }
 
-        if (unasked)
-        {
-            lacking =
-            [
-                new SetupNote(SetupTone.Warning, lack!),
-                new SetupNote(SetupTone.Muted, "Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`, or with `toobusy init`: `toobusy doctor` fails until then."),
-            ];
-            return true;
-        }
+        return new StatusesAnswer(StatusesOf(typed), board, true, []);
+    }
 
+    // The statuses of a board that was read, taken as they are, with what is said of them; null when they are asked
+    // about. A board that has the three is asked nothing where nobody is asked, nor where they have the names of
+    // GitHub and nothing called them otherwise, unless they are asked about whatever they are called. A board that
+    // lacks one is taken where it cannot be asked about, with fewer than three statuses or with nobody to ask, and
+    // it is said what to do: a run would take no task of it.
+    StatusesAnswer? Settled(string board, BoardStatuses statuses, IReadOnlyList<string> has, bool usual, bool always)
+    {
+        if (statuses.Lack(has) is not { } lack)
+            return unasked || (usual && !always) ? new StatusesAnswer(statuses, board, false, []) : null;
+
+        var fix = has.Count < statuses.Names.Count ? "A run needs three statuses of a board: add them on GitHub and run `toobusy init` again. `toobusy doctor` fails until then."
+            : unasked ? "Say which of its statuses is which with `--todo-status`, `--in-progress-status` and `--done-status`, or with `toobusy init`: `toobusy doctor` fails until then."
+            : null;
+        return fix is null ? null : new StatusesAnswer(statuses, board, false, [new SetupNote(SetupTone.Warning, lack), new SetupNote(SetupTone.Muted, fix)]);
+    }
+
+    // Which status of the board is which, each chosen among them; the names that are wanted are proposed. Null is
+    // going back from the first question.
+    StatusesAnswer? ChosenStatuses(string board, BoardStatuses wanted, IReadOnlyList<string> has)
+    {
         // The statuses the settings name are those of their board: of another board none is the one of now.
-        var saved = current is { Tracker.Board: { } ofSettings } && ofSettings.Equals(taken.Address, StringComparison.OrdinalIgnoreCase) ? current.Tracker.Statuses.Names : null;
-        var picked = wanted.ToArray();
+        var saved = current is { Tracker.Board: { } ofSettings } && ofSettings.Equals(board, StringComparison.OrdinalIgnoreCase) ? current.Tracker.Statuses.Names : null;
+        var picked = wanted.Names.ToArray();
         for (var at = 0; at < picked.Length;)
         {
-            // A status that is one of the three already is not among the choices of the next. A board lists its
-            // statuses in the order a task goes through them, so where it has no status of the name, what is
-            // proposed is the first one for a task to do, the one after that for a task in progress, and the last
-            // one for a task that is done.
-            var rest = has.Where(one => !picked.Take(at).Any(before => BoardStatuses.Same(before, one))).ToList();
-            var proposed = rest.FindIndex(one => BoardStatuses.Same(one, picked[at]));
-            if (proposed < 0)
-            {
-                var after = at == 0 ? -1 : has.ToList().FindIndex(one => BoardStatuses.Same(one, picked[at - 1]));
-                proposed = at == picked.Length - 1 ? rest.Count - 1 : Math.Max(0, rest.FindIndex(one => has.ToList().IndexOf(one) > after));
-            }
-
+            var (rest, proposed) = Choices(has, picked, at);
             Show(0, chosen: true);
             var now = saved?[at];
             var choice = dialog.Choose(StatusQuestions[at].Label, StatusQuestions[at].Hint, [.. rest.Select(one => new SetupOption(one, "", now is not null && BoardStatuses.Same(one, now)))], proposed);
             if (choice is null && at == 0)
-                return false;
+                return null;
             if (choice is null)
                 at--;
             else
                 picked[at++] = rest[choice.Value];
         }
 
-        (statuses, asked) = (new BoardStatuses(picked[0], picked[1], picked[2]), true);
-        return true;
+        return new StatusesAnswer(StatusesOf(picked), board, true, []);
     }
+
+    // What the question about a status at `at` chooses among, and which of it is proposed. A status that is one of
+    // the three already is not among the choices of the next. A board lists its statuses in the order a task goes
+    // through them, so where it has no status of the name that is wanted, what is proposed is the first one for a
+    // task to do, the one after that for a task in progress, and the last one for a task that is done.
+    static (List<string> Left, int Proposed) Choices(IReadOnlyList<string> has, string[] picked, int at)
+    {
+        var rest = has.Where(one => !picked.Take(at).Any(before => BoardStatuses.Same(before, one))).ToList();
+        var named = rest.FindIndex(one => BoardStatuses.Same(one, picked[at]));
+        if (named >= 0)
+            return (rest, named);
+
+        var order = has.ToList();
+        var after = at == 0 ? -1 : order.FindIndex(one => BoardStatuses.Same(one, picked[at - 1]));
+        return (rest, at == picked.Length - 1 ? rest.Count - 1 : Math.Max(0, rest.FindIndex(one => order.IndexOf(one) > after)));
+    }
+
+    static BoardStatuses StatusesOf(string[] names) => new(names[0], names[1], names[2]);
 
     // The roles a label can have in the settings, as the lists of the labels name them, each with the step that asks
     // for it and how a refusal says it.
@@ -775,10 +769,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
     bool Plays(string name, int step) => step switch
     {
-        1 => blocking is not null && Has(blocking, name),
-        2 => take is not null && Has(take, name),
-        3 => name.Equals(manual, StringComparison.OrdinalIgnoreCase),
-        _ => name.Equals(interrupted, StringComparison.OrdinalIgnoreCase),
+        1 => Has(answers.Blocking, name),
+        2 => Has(answers.Take, name),
+        3 => name.Equals(answers.Manual, StringComparison.OrdinalIgnoreCase),
+        _ => name.Equals(answers.Interrupted, StringComparison.OrdinalIgnoreCase),
     };
 
     // Why a label cannot be the answer of a step, as a question where it is typed refuses it; null when it can.
@@ -800,23 +794,27 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (!verified)
         {
             Show(1);
-            var names = blocking ?? proposals.Blocking ?? current?.Queue.Labels.Blocking ?? [];
-            var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", names), text =>
+            var typed = dialog.Ask("Blocking labels", "Names separated by commas. A task with any of them is never taken.", string.Join(", ", answers.Blocking), text =>
                 Names(text).Select(name => Refusal(name, 1)).FirstOrDefault(reason => reason is not null));
             if (typed is not null)
-                blocking = Names(typed);
+                answers = answers with { Blocking = Names(typed) };
             return typed is not null;
         }
 
         if (await AllLabelsAsync(1, BlockingLabel, BlockingHint, cancellationToken) is not { } all)
             return false;
-        offeredBlocking ??= Among(all, proposals.Blocking, BlockingLabel);
-        var proposed = blocking ?? offeredBlocking ?? current?.Queue.Labels.Blocking ?? [];
+        if (!blockingOffered)
+        {
+            blockingOffered = true;
+            if (Among(all, proposals.Blocking, BlockingLabel) is { } offered)
+                answers = answers with { Blocking = offered };
+        }
+
         var options = Options(all, 1, name => current is not null && Has(current.Queue.Labels.Blocking, name));
         Show(1);
-        var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, options, Indexes(all, proposed, options));
+        var picked = dialog.ChooseMany(BlockingLabel, BlockingHint, options, Indexes(all, answers.Blocking, options));
         if (picked is not null)
-            blocking = [.. picked.Where(index => !options[index].Off).Select(index => all[index])];
+            answers = answers with { Blocking = [.. picked.Where(index => !options[index].Off).Select(index => all[index])] };
         return picked is not null;
     }
 
@@ -825,28 +823,31 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (!verified)
         {
             Show(2);
-            var names = take ?? proposals.Take ?? current?.Queue.Labels.Take ?? [];
-            var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", names), text =>
+            var typed = dialog.Ask("Labels to take", "Names separated by commas. Leave empty to take any task.", string.Join(", ", answers.Take), text =>
                 Names(text).Select(name => Refusal(name, 2)).FirstOrDefault(reason => reason is not null));
             if (typed is not null)
-                take = Names(typed);
+                answers = answers with { Take = Names(typed) };
             return typed is not null;
         }
 
         if (await AllLabelsAsync(2, TakeLabel, TakeHint, cancellationToken) is not { } all)
             return false;
-        offeredTake ??= Among(all, proposals.Take, TakeLabel);
-        var proposed = take ?? offeredTake ?? current?.Queue.Labels.Take ?? [];
+        if (!takeOffered)
+        {
+            takeOffered = true;
+            if (Among(all, proposals.Take, TakeLabel) is { } offered)
+                answers = answers with { Take = offered };
+        }
 
         // A blocking label cannot be chosen. Where nobody chooses, a proposed one would be dropped without a word.
-        if (unasked && proposed.FirstOrDefault(name => Has(blocking!, name)) is { } shared)
+        if (unasked && answers.Take.FirstOrDefault(name => Has(answers.Blocking, name)) is { } shared)
             throw new Refused($"{TakeLabel}: {shared} is a blocking label.");
 
         var options = Options(all, 2, name => current is not null && Has(current.Queue.Labels.Take, name));
         Show(2);
-        var picked = dialog.ChooseMany(TakeLabel, TakeHint, options, Indexes(all, proposed, options));
+        var picked = dialog.ChooseMany(TakeLabel, TakeHint, options, Indexes(all, answers.Take, options));
         if (picked is not null)
-            take = [.. picked.Where(index => !options[index].Off).Select(index => all[index])];
+            answers = answers with { Take = [.. picked.Where(index => !options[index].Off).Select(index => all[index])] };
         return picked is not null;
     }
 
@@ -856,13 +857,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         3,
         ManualLabel,
         "A task that cannot go on without you gets this label, and is not taken while it has it.",
-        manual ?? proposals.Manual?.Trim() ?? current?.Queue.Labels.Manual ?? ProposedManual,
+        answers.Manual,
         current?.Queue.Labels.Manual,
-        answer =>
+        answer => answers = answers with
         {
-            manual = answer;
-            if (menu)
-                blocking = [.. blocking!.Where(name => !name.Equals(answer, StringComparison.OrdinalIgnoreCase))];
+            Manual = answer,
+            Blocking = menu ? [.. answers.Blocking.Where(name => !name.Equals(answer, StringComparison.OrdinalIgnoreCase))] : answers.Blocking,
         },
         cancellationToken);
 
@@ -870,9 +870,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         4,
         InterruptLabel,
         "A task that a run had to stop gets this label, and the next run takes it first.",
-        interrupted ?? proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
+        answers.Interrupted,
         current?.Queue.Labels.Interrupted,
-        answer => interrupted = answer,
+        answer => answers = answers with { Interrupted = answer },
         cancellationToken);
 
     // The skill of the project a session starts with, by its name, or none: an empty answer. A first setup proposes
@@ -883,11 +883,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         static string Named(string text) => text.Trim().TrimStart('/');
 
         Show(5);
-        var proposed = skill ?? proposals.Skill ?? (current is null ? ProposedSkill : current.Skill ?? "");
-        var typed = dialog.Ask(SkillLabel, SkillHint, Named(proposed), text =>
+        var typed = dialog.Ask(SkillLabel, SkillHint, Named(answers.Skill), text =>
             Named(text) is { Length: > 0 } name && SettingsValidator.RefuseSkill(name) is not null ? $"{name} is not the name of a skill: it is letters, digits and dashes, as {ProposedSkill}." : null);
         if (typed is not null)
-            skill = Named(typed);
+            answers = answers with { Skill = Named(typed) };
         return typed is not null;
     }
 
@@ -906,11 +905,11 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     bool AskBranch()
     {
         Show(0);
-        var typed = dialog.Ask(BranchLabel, BranchHint, branch ?? "", text =>
+        var typed = dialog.Ask(BranchLabel, BranchHint, answers.Branch ?? "", text =>
             text.Trim() is { Length: > 0 } name && SettingsValidator.RefuseBranch(name) is { } reason ? $"“{name}” {reason}." : null);
         if (typed is null)
             return false;
-        branch = typed.Trim() is { Length: > 0 } named ? named : null;
+        answers = answers with { Branch = typed.Trim() is { Length: > 0 } named ? named : null };
         return true;
     }
 
@@ -919,12 +918,12 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     bool AskPermissionMode()
     {
         var modes = ClaudeCodeOptions.PermissionModes;
-        var at = Math.Max(0, modes.ToList().IndexOf(permissionMode ?? ClaudeCodeOptions.DefaultPermissionMode));
+        var at = Math.Max(0, modes.ToList().IndexOf(answers.PermissionMode ?? ClaudeCodeOptions.DefaultPermissionMode));
         Show(0);
-        var now = current!.Assistant.PermissionMode ?? ClaudeCodeOptions.DefaultPermissionMode;
+        var now = Opened.Assistant.SessionMode;
         if (dialog.Choose(PermissionModeLabel, PermissionModeHint, [.. modes.Select(mode => new SetupOption(mode, ClaudeCodeOptions.Checks(mode), mode == now))], at) is not { } picked)
             return false;
-        permissionMode = permissionMode is null && modes[picked] == ClaudeCodeOptions.DefaultPermissionMode ? null : modes[picked];
+        answers = answers with { PermissionMode = answers.PermissionMode is null && modes[picked] == ClaudeCodeOptions.DefaultPermissionMode ? null : modes[picked] };
         return true;
     }
 
@@ -995,30 +994,33 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     async Task<SetupOutcome?> ConcludeAsync(CancellationToken cancellationToken)
     {
         // The address of a board that is not made yet stands for it in the file that is shown.
-        var made = board as BoardAnswer.Created;
+        var made = answers.Board as BoardAnswer.Created;
         var unmade = made is null ? null : $"https://github.com/{(made.Owner.Organisation ? "orgs" : "users")}/{made.Owner.Login}/projects/0";
-        var address = board is BoardAnswer.Existing existing ? existing.Address : unmade;
+        var address = answers.Board is BoardAnswer.Existing existing ? existing.Address : unmade;
+
         // The menu changes one setting, and does on GitHub only what that one needs: a board that is chosen there is
         // linked, and a label of a run that is named there is made.
+        var changing = menu ? Opened : null;
         var linking = verified && address is not null && Known(address) is not { Linked: true }
-            && !(menu && address.Equals(current!.Tracker.Board, StringComparison.OrdinalIgnoreCase));
+            && !address.Equals(changing?.Tracker.Board, StringComparison.OrdinalIgnoreCase);
 
         // A label of the two that the repository does not have is made: a run could not put it on a task otherwise.
-        IEnumerable<string> ofRun = menu ? new[] { (manual!, current!.Queue.Labels.Manual), (interrupted!, current.Queue.Labels.Interrupted) }.Where(pair => pair.Item1 != pair.Item2).Select(pair => pair.Item1) : [manual!, interrupted!];
-        List<string> missing = verified
-            ? [.. ofRun.Where(name => !Has(labels!, name)).Distinct(StringComparer.OrdinalIgnoreCase)]
+        // Where something is verified, the labels were read by the question of the label.
+        IEnumerable<string> ofRun = changing is null ? [answers.Manual, answers.Interrupted] : new[] { (answers.Manual, changing.Queue.Labels.Manual), (answers.Interrupted, changing.Queue.Labels.Interrupted) }.Where(pair => pair.Item1 != pair.Item2).Select(pair => pair.Item1);
+        List<string> missing = verified && labels is { } read
+            ? [.. ofRun.Where(name => !Has(read, name)).Distinct(StringComparer.OrdinalIgnoreCase)]
             : [];
 
         // A skill that is named and not written yet is to be written before a run: a session that starts with a
         // skill the assistant does not have does nothing. The menu says so where the skill is changed.
-        unwritten = skill is { Length: > 0 } && !(menu && skill == current!.Skill) && environment.FindSkill(skill) is { Found: false } look
+        unwritten = answers.Skill is { Length: > 0 } skill && skill != changing?.Skill && environment.FindSkill(skill) is { Found: false } look
             ? [new SetupNote(SetupTone.Warning, $"There is no skill “{skill}” yet: write {look.Place} before a run."), new SetupNote(SetupTone.Muted, "`toobusy about` tells what the skill is to say.")]
             : [];
 
         // What changes is told by the settings themselves in the menu, which has some that validate: a file that
         // would only be written otherwise, as one that names a key as it was named before, is not a change.
         var changes = current is null ? [] : Changes(current, address, made);
-        var preview = store.Preview(Settings(address));
+        var preview = store.Preview(answers.Settings(address));
         var writing = menu ? changes.Count > 0 : preview.Before != preview.After;
         if (!writing && !linking && missing.Count == 0)
             return SetupOutcome.NothingToChange;
@@ -1044,7 +1046,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         if (linking)
             coming.Add(new SetupNote(SetupTone.Plain, $"The project will be linked to {repository}."));
         coming.AddRange(missing.Select(name => new SetupNote(SetupTone.Plain, $"The label “{name}” will be made in {repository}.")));
-        coming.AddRange(lacking);
+        coming.AddRange(answers.Statuses.Lacking);
         coming.AddRange(unwritten);
 
         Show(Steps.Length, coming);
@@ -1067,9 +1069,9 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 done.Add($"The project “{made.Title}” was made for {made.Owner.Login}: {address}");
             }
 
-            if (linking)
+            if (linking && address is { } linked)
             {
-                await tracker.LinkBoardAsync(address!, repository, cancellationToken);
+                await tracker.LinkBoardAsync(linked, repository, cancellationToken);
                 done.Add($"The project was linked to {repository}.");
             }
 
@@ -1086,7 +1088,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         }
 
         if (writing)
-            store.Save(kept = Settings(address));
+            store.Save(kept = answers.Settings(address));
         written = writing;
         return SetupOutcome.Written;
     }
@@ -1099,14 +1101,14 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         (string Name, string Before, string After)[] settings =
         [
             ("Project", Board(before.Tracker.Board), made is null ? Board(address) : $"new: {made.Title} ({made.Owner.Login})"),
-            ("Blocking labels", Labels(before.Queue.Labels.Blocking, "none"), Labels(blocking!, "none")),
-            ("Labels to take", Labels(before.Queue.Labels.Take, "any task"), Labels(take!, "any task")),
+            ("Blocking labels", Labels(before.Queue.Labels.Blocking, "none"), Labels(answers.Blocking, "none")),
+            ("Labels to take", Labels(before.Queue.Labels.Take, "any task"), Labels(answers.Take, "any task")),
 
             // The statuses are those of a board: a project that leaves its board says so in the line above.
-            (StatusesLabel, Listed(before.Tracker.Statuses), Listed(address is null ? before.Tracker.Statuses : made is null ? statuses : BoardStatuses.Default)),
-            (ManualLabel, before.Queue.Labels.Manual, manual!),
-            (InterruptLabel, before.Queue.Labels.Interrupted, interrupted!),
-            (SkillLabel, before.Skill ?? "none", skill is { Length: > 0 } ? skill : "none"),
+            (StatusesLabel, Listed(before.Tracker.Statuses), Listed(address is null ? before.Tracker.Statuses : made is null ? answers.Statuses.Called : BoardStatuses.Default)),
+            (ManualLabel, before.Queue.Labels.Manual, answers.Manual),
+            (InterruptLabel, before.Queue.Labels.Interrupted, answers.Interrupted),
+            (SkillLabel, before.Skill ?? "none", answers.Skill is { Length: > 0 } skill ? skill : "none"),
         ];
         return
         [
@@ -1122,10 +1124,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         var before = current?.Commands ?? TaskCommands.None;
         (string Name, string? Before, string? After, string None)[] unasked =
         [
-            (BeforeLabel, before.Before, commands.Before, "none"),
-            (AfterLabel, before.After, commands.After, "none"),
-            (BranchLabel, current?.Branch, branch, "none"),
-            (PermissionModeLabel, current?.Assistant.PermissionMode, permissionMode, UnnamedMode),
+            (BeforeLabel, before.Before, answers.Commands.Before, "none"),
+            (AfterLabel, before.After, answers.Commands.After, "none"),
+            (BranchLabel, current?.Branch, answers.Branch, "none"),
+            (PermissionModeLabel, current?.Assistant.PermissionMode, answers.PermissionMode, UnnamedMode),
         ];
         return [.. unasked.Where(setting => setting.Before != setting.After).Select(setting => new SetupAnswer(setting.Name, $"{setting.Before ?? setting.None} → {setting.After ?? setting.None}"))];
     }
@@ -1135,19 +1137,6 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         address is null ? "none" : Known(address) is { Title.Length: > 0 } named ? $"{named.Title}  {named.Address}" : address;
 
     static string Listed(BoardStatuses statuses) => string.Join(", ", statuses.Names);
-
-    ProjectSettings Settings(string? address) => new(
-        new TrackerSettings(SettingsKeys.GitHubTracker, address) { Statuses = board is BoardAnswer.Existing ? statuses : BoardStatuses.Default },
-        new QueueSettings(new LabelSettings(blocking!, take!, manual!, interrupted!)),
-        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant) { PermissionMode = permissionMode })
-    {
-        Skill = skill is { Length: > 0 } ? skill : null,
-
-        // The commands around a task, the branch and the permission mode are not asked for: they are those of the
-        // file, but for what the options say.
-        Commands = commands,
-        Branch = branch,
-    };
 
     // `later` is a question of the step that is not its first one. In the menu there are no steps, and the answers
     // are in its list: only a board that is chosen stands over the questions about its statuses.
@@ -1161,31 +1150,31 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
     // when the board does not call them as GitHub does.
     List<SetupAnswer> Answers(int step, bool chosen = false)
     {
-        var answers = new List<SetupAnswer> { new("Tracker", "GitHub") };
+        var told = new List<SetupAnswer> { new("Tracker", "GitHub") };
         if (step > 0 || chosen)
-            answers.Add(ProjectAnswer());
+            told.Add(ProjectAnswer());
 
-        if (step > 0 && board is BoardAnswer.Existing && statuses != BoardStatuses.Default)
-            answers.Add(new SetupAnswer(StatusesLabel, Listed(statuses)));
+        if (step > 0 && answers.Board is BoardAnswer.Existing && answers.Statuses.Called != BoardStatuses.Default)
+            told.Add(new SetupAnswer(StatusesLabel, Listed(answers.Statuses.Called)));
 
         if (step > 1)
-            answers.Add(new SetupAnswer("Blocking labels", blocking!.Count == 0 ? "none" : string.Join(", ", blocking)));
+            told.Add(new SetupAnswer("Blocking labels", answers.Blocking.Count == 0 ? "none" : string.Join(", ", answers.Blocking)));
         if (step > 2)
-            answers.Add(new SetupAnswer("Labels to take", take!.Count == 0 ? "any task" : string.Join(", ", take)));
+            told.Add(new SetupAnswer("Labels to take", answers.Take.Count == 0 ? "any task" : string.Join(", ", answers.Take)));
         if (step > 3)
-            answers.Add(new SetupAnswer(ManualLabel, manual!));
+            told.Add(new SetupAnswer(ManualLabel, answers.Manual));
         if (step > 4)
-            answers.Add(new SetupAnswer(InterruptLabel, interrupted!));
+            told.Add(new SetupAnswer(InterruptLabel, answers.Interrupted));
         if (step > 5)
         {
-            answers.Add(new SetupAnswer(SkillLabel, skill is { Length: > 0 } ? skill : "none"));
-            answers.Add(new SetupAnswer("Assistant", "Claude Code"));
+            told.Add(new SetupAnswer(SkillLabel, answers.Skill is { Length: > 0 } skill ? skill : "none"));
+            told.Add(new SetupAnswer("Assistant", "Claude Code"));
         }
 
-        return answers;
+        return told;
     }
 
-    SetupAnswer ProjectAnswer() => new(ProjectLabel, board switch
+    SetupAnswer ProjectAnswer() => new(ProjectLabel, answers.Board switch
     {
         BoardAnswer.Existing existing => Board(existing.Address),
         BoardAnswer.Created made => $"new: {made.Title} ({made.Owner.Login})",

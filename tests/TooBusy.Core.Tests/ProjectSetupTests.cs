@@ -1277,6 +1277,24 @@ public class ProjectSetupTests
         Assert.Equal(new BoardStatuses("Ready", "Doing", "Shipped"), store.Saved!.Tracker.Statuses);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GoingBackFromTheStatusesLeavesWhatTheyProposeAsItWas(bool verified)
+    {
+        machine.TrackerReachable = verified;
+        store.Current = Existing with { Tracker = Existing.Tracker with { Statuses = new BoardStatuses("Ready", "Doing", "Shipped") } };
+        boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
+        tracker.Statuses = ["Backlog", "Ready", "Doing", "Shipped"];
+        dialog.Back(TodoStatus);
+
+        var result = await RunAsync();
+
+        // The board that is chosen again proposes the statuses of the settings again, so accepting them changes nothing.
+        Assert.Equal(["Project", TodoStatus, "Project", TodoStatus, InProgressStatus, DoneStatus], dialog.Asked.Take(6));
+        Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
+    }
+
     [Fact]
     public async Task ABoardThatWasAskedAboutIsAskedAboutAgainWithWhatWasAnswered()
     {
