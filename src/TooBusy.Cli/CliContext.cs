@@ -9,8 +9,8 @@ using TooBusy.Infrastructure.Settings;
 namespace TooBusy.Cli;
 
 // Where the tool runs: the folder it is started in and the streams it talks through.
-// The defaults are those of a run without a terminal and without the machine around it: no colour, nobody to ask
-// and no commands to run.
+// The defaults are those of a run without a terminal and without the machine around it: no colour, nobody to ask,
+// no commands to run and no variables of the environment.
 public sealed record CliContext(string Folder, TextWriter Output, TextWriter Error)
 {
     public Palette OutputPalette { get; init; } = Palette.None;
@@ -31,6 +31,10 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
 
     // The time a run goes by; a test gives one that does not make it wait.
     public IClock Clock { get; init; } = new SystemClock();
+
+    // The variables of the environment by their names, such as `CLAUDE_CONFIG_DIR`, where Claude Code keeps its
+    // folder; null for one that is not set.
+    public Func<string, string?> Variables { get; init; } = _ => null;
 
     // Whether an error the tool did not foresee is printed with where it happened, for a report of the bug:
     // `TOOBUSY_TRACE=1` asks for it.
@@ -55,6 +59,7 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
         Processes = new ProcessRunner(),
         PersonalFolder = PersonalSettingsFile.FindFolder(
             Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+        Variables = Environment.GetEnvironmentVariable,
         Trace = Environment.GetEnvironmentVariable("TOOBUSY_TRACE") == "1",
     };
 

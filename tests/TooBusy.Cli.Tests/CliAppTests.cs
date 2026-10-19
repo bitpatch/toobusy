@@ -472,7 +472,7 @@ public sealed class CliAppTests : IDisposable
         // The clock is the real one here: with a clock that makes nobody wait, a session that never ends would be
         // looked at without end while the keys are waited for.
         var context = Context(processes) with { Home = personal.FullName, Clock = new TooBusy.Infrastructure.Machine.SystemClock() };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = Transcript(context, "abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2099-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"tool_use","name":"Bash","input":{"command":"dotnet test"}}]}}""" + "\n");
         var keys = new Keys()
@@ -1007,6 +1007,27 @@ public sealed class CliAppTests : IDisposable
     }
 
     [Fact]
+    public async Task DoctorLooksForTheSkillOfTheSettingsAmongTheSkillsOfTheUserWhereClaudeConfigDirPutsThem()
+    {
+        GitRepository();
+        WriteSettings(Settings + SkillOfTheProject);
+        var processes = GitHub(milestones: "", Labels);
+        var elsewhere = personal.CreateSubdirectory("elsewhere");
+        var place = Path.Combine(elsewhere.CreateSubdirectory(Path.Combine("skills", "task-auto")).FullName, "SKILL.md");
+        File.WriteAllText(place, "---\nname: task-auto\n---\n");
+
+        var (exit, output, _) = await RunAsync(Context(processes), ["doctor"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("✘ skill              There is no skill “task-auto”", output, StringComparison.Ordinal);
+
+        (exit, output, _) = await RunAsync(Context(processes) with { Variables = name => name == "CLAUDE_CONFIG_DIR" ? elsewhere.FullName : null }, ["doctor"]);
+
+        Assert.Equal(0, exit);
+        Assert.EndsWith($"✔ skill              {place}" + Environment.NewLine, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ASessionIsStartedInThePermissionModeOfTheSettingsAndTheLogSaysIt()
     {
         GitRepository();
@@ -1026,7 +1047,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = Transcript(context, "abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 
@@ -1061,7 +1082,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = Transcript(context, "abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 
@@ -1183,7 +1204,7 @@ public sealed class CliAppTests : IDisposable
             _ => "",
         }, ""));
         var context = Context(processes) with { Home = personal.FullName };
-        var transcript = TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, personal.FullName, Environment.GetEnvironmentVariable).Transcript("abc12345-0000");
+        var transcript = Transcript(context, "abc12345-0000");
         Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
         File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
 
@@ -1224,6 +1245,42 @@ public sealed class CliAppTests : IDisposable
 
         // What a run leaves on the machine lies in a folder that keeps itself out of git.
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(folder.FullName, ".toobusy", "local", ".gitignore")));
+    }
+
+    [Fact]
+    public async Task ARunReadsTheConversationOfASessionWhereClaudeConfigDirPutsTheFolderOfClaudeCode()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+
+        var closed = false;
+        var processes = new FakeProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, (command, arguments[0]) switch
+        {
+            ("git", _) when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+            ("git", _) => "# branch.oid 1a2b\n# branch.ab +0 -0\n",
+            ("gh", "api") => closed ? "total\t0\n" : "total\t1\n12\tExport the data\thttps://github.com/acme/rocket/issues/12\t\t\t\t\tfeature\n",
+            ("gh", "label") => Labels,
+            ("gh", "issue") => Do(() => closed |= arguments[1] == "close"),
+            ("claude", "--bg") => "backgrounded · abc12345 · #12 Export the data\n",
+            ("claude", "agents") => """[{"id":"abc12345","sessionId":"abc12345-0000","kind":"background","state":"done","status":"idle","pid":1}]""",
+            _ => "",
+        }, ""));
+
+        // Claude Code keeps its folder where `CLAUDE_CONFIG_DIR` says, not under the home folder, and writes the
+        // conversation of the session there.
+        var elsewhere = personal.CreateSubdirectory("elsewhere").FullName;
+        var context = Context(processes) with { Home = personal.FullName, Variables = name => name == "CLAUDE_CONFIG_DIR" ? elsewhere : null };
+        var transcript = Transcript(context, "abc12345-0000");
+        Assert.StartsWith(Path.Combine(elsewhere, "projects") + Path.DirectorySeparatorChar, transcript, StringComparison.Ordinal);
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, """{"type":"assistant","timestamp":"2030-01-01T09:00:00Z","message":{"model":"claude","content":[{"type":"text","text":"The export is written.\nTOOBUSY: done"}]}}""" + "\n");
+
+        var (exit, output, error) = await RunAsync(context, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(0, exit);
+        Assert.Contains("✔ #12 Export the data — done in 0 s", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3635,6 +3692,11 @@ public sealed class CliAppTests : IDisposable
         PersonalFolder = personal.FullName,
         Clock = new InstantClock(),
     };
+
+    // Where Claude Code keeps a conversation of the project for a run in this context: under its home folder, or
+    // where its `CLAUDE_CONFIG_DIR` says.
+    string Transcript(CliContext context, string conversation) =>
+        TooBusy.Assistants.ClaudeCode.ClaudeFolders.Of(folder.FullName, "", () => { }, context.Home, context.Variables).Transcript(conversation);
 
     // Chooses everything a run needs: no milestone, the assistant's own model and the proposed effort.
     async Task ChooseAllAsync()

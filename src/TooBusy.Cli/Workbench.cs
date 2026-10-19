@@ -19,8 +19,8 @@ namespace TooBusy.Cli;
 // Everything the commands work with in one project: its root, its settings, the tracker and the choice of the user.
 // It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the tasks
 // are read from; null when the `origin` remote is not a GitHub repository. Processes runs the commands of the
-// machine, Home is the home folder of the user, where Claude Code keeps its conversations, and Machine is what
-// the checks of `doctor` ask.
+// machine, Home is the home folder of the user, where Claude Code keeps its conversations unless `CLAUDE_CONFIG_DIR`
+// among the Variables of the environment puts them elsewhere, and Machine is what the checks of `doctor` ask.
 public sealed record Workbench(
     string Root,
     bool Demo,
@@ -34,6 +34,7 @@ public sealed record Workbench(
     IClock Clock,
     IProcessRunner Processes,
     string Home,
+    Func<string, string?> Variables,
     ICheckupMachine Machine)
 {
     // The made-up tasks of a demo and the record of its runs: the menu and the next run see a task that an abort
@@ -46,7 +47,7 @@ public sealed record Workbench(
     // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,
     // whatever the project is: where there are no settings they are made up, the first milestone is the chosen one,
     // the model is the assistant's own and the effort is the proposed one.
-    public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, IClock clock, string home, CancellationToken cancellationToken)
+    public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, IClock clock, string home, Func<string, string?> variables, CancellationToken cancellationToken)
     {
         if (demo)
         {
@@ -72,12 +73,13 @@ public sealed record Workbench(
                 clock,
                 processes ?? new NoProcesses(),
                 home,
+                variables,
                 new ImitatedCheckup(clock, unwritten));
         }
 
         processes ??= new NoProcesses();
         var origin = await new GitOrigin(processes).ReadAsync(root, cancellationToken);
-        var machine = new MachineCheckup(processes, MachineCheckup.Here, root, ClaudeFolders.Configuration(home, System.Environment.GetEnvironmentVariable));
+        var machine = new MachineCheckup(processes, MachineCheckup.Here, root, ClaudeFolders.Configuration(home, variables));
         return new Workbench(
             root,
             demo,
@@ -91,6 +93,7 @@ public sealed record Workbench(
             clock,
             processes,
             home,
+            variables,
             machine);
     }
 
@@ -121,7 +124,7 @@ public sealed record Workbench(
         return new LoggedRun(
             new Supervisor(
                 new GitHubTasks(processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
-                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, () => LocalFolder.Make(local), Home, System.Environment.GetEnvironmentVariable), Root, plan.PermissionMode),
+                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, () => LocalFolder.Make(local), Home, Variables), Root, plan.PermissionMode),
                 new GitWorkspace(processes, Root),
                 new RunStateFile(local),
                 new RunSignFile(local),

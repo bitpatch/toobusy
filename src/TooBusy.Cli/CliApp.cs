@@ -914,7 +914,7 @@ public static class CliApp
             return null;
         }
 
-        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, context.Clock, context.Home, cancellationToken);
+        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, context.Clock, context.Home, context.Variables, cancellationToken);
     }
 
     // The root of the project around the folder; without a project it says so and gives null.
