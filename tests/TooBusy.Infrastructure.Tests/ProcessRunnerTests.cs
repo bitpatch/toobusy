@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using TooBusy.Core.Processes;
 using TooBusy.Infrastructure.Processes;
 
@@ -151,18 +153,45 @@ public class ProcessRunnerTests
     }
 
     // A command may leave something running that keeps its output open, as a service it starts in the background. The
-    // runner reads the output to its end, so it waits for what was left for as long as that holds the output, and
-    // gives the command up as one that did not answer when that is longer than its time: what the command printed is
-    // lost, though it exited. ShellCommands reads on for a second only after the exit.
+    // command is over when it exits, with what it printed, however long what it left holds the output.
     [Fact]
-    public async Task WhatACommandLeavesRunningKeepsItFromEndingUntilItsTimeIsOver()
+    public async Task WhatACommandLeavesRunningDoesNotKeepItFromEnding()
     {
-        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var watch = Stopwatch.StartNew();
 
-        var result = await runner.RunAsync("sh", ["-c", "sleep 5 & echo started"], TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        var result = await runner.RunAsync("sh", ["-c", "sleep 20 & echo started"], Long, TestContext.Current.CancellationToken);
 
-        Assert.Equal(new ProcessResult(ProcessStatus.TimedOut, 0, "", ""), result);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(4), "The command was waited for after its time was over.");
+        Assert.Equal(new ProcessResult(ProcessStatus.Exited, 0, "started\n", ""), result);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), "The command was waited for as long as what it left running.");
+    }
+
+    // What is still in the pipes when such a command exits, as the end of a long answer, is read whole all the same.
+    [Fact]
+    public async Task ALongAnswerOfACommandThatLeavesSomethingRunningIsReadWhole()
+    {
+        const int Size = 1024 * 1024;
+        var answer = $"sleep 20 & head -c {Size} /dev/zero | tr '\\0' o; head -c {Size} /dev/zero | tr '\\0' e >&2";
+
+        var result = await runner.RunAsync("sh", ["-c", answer], Long, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new ProcessResult(ProcessStatus.Exited, 0, new string('o', Size), new string('e', Size)), result);
+    }
+
+    // What a command left running is not stopped with it: a service of Claude Code is meant to stay.
+    [Fact]
+    public async Task WhatACommandLeavesRunningGoesOn()
+    {
+        var result = await runner.RunAsync("sh", ["-c", "sleep 20 & echo $!"], Long, TestContext.Current.CancellationToken);
+
+        using var left = Process.GetProcessById(int.Parse(result.Output, CultureInfo.InvariantCulture));
+        try
+        {
+            Assert.False(left.HasExited, "What the command left running was stopped.");
+        }
+        finally
+        {
+            left.Kill();
+        }
     }
 
     [Fact]
