@@ -10,7 +10,7 @@ public class CheckupTests
     const string Rocket = "https://github.com/orgs/acme/projects/7";
 
     readonly FakeCheckupMachine machine = new();
-    readonly Store store = new() { Current = Project(Rocket) };
+    readonly FakeSettingsStore store = new() { Current = Project(Rocket) };
     readonly Watched view = new();
 
     [Fact]
@@ -459,22 +459,6 @@ public class CheckupTests
         public HashSet<string>? Skills { get; set; } = [];
 
         public SkillLook FindSkill(string name) => new(Skills?.Contains(name), $".claude/skills/{name}/SKILL.md");
-    }
-
-    sealed class Store : ISettingsStore
-    {
-        public ProjectSettings? Current { get; set; }
-
-        public IReadOnlyList<SettingsError>? Errors { get; set; }
-
-        public string DisplayPath => ".toobusy/settings.toml";
-
-        public SettingsValidation? Load() =>
-            Errors is not null ? new SettingsValidation(null, Errors) : Current is null ? null : new SettingsValidation(Current, []);
-
-        public SettingsPreview Preview(ProjectSettings settings) => new("", "");
-
-        public void Save(ProjectSettings settings) => Current = settings;
     }
 
     sealed class Watched : ICheckupView

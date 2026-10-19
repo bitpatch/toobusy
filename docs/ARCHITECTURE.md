@@ -47,7 +47,7 @@ A test project is added together with the first code of the project it tests.
 | `IRunSign` | the sign a run puts up in the working copy for as long as it goes on: putting it up, which gives the sign of another run that goes on there instead, saying anew what the run does, and taking it down. Each of these throws `LocalStateException` when the sign cannot be written or taken down | `RunSignFile` in `TooBusy.Infrastructure`; in a demo one that puts nothing up, inside `ImitatedRun` |
 | `IRunView` | where a run tells what happens: the lines of its log, every task that is over, what it is doing now, and, as `Trace`, what only the log on disk keeps, how the run sees its session as that changes; a view without such a log leaves it, by default | `RunFeed` and `PlainRun` in `TooBusy.Cli`; in a run `LoggedView` of `TooBusy.Infrastructure` around either, which writes the lines into the log of the run |
 
-Core is tested with hand-written fakes of these ports. A demo is such a fake offered to the user: imitated tracker and sessions behind the same ports.
+Core is tested with hand-written fakes of these ports: those of the run are in `RunFakes.cs` of `TooBusy.Core.Tests`, and those of the setup, with the settings that the setup and the doctor share, in `SetupFakes.cs`. A demo is such a fake offered to the user: imitated tracker and sessions behind the same ports.
 
 Sessions are identified by the task they belong to, and the ports of the tracker and of the assistant do not assume that only one runs at a time. `IRunState`, `IRunSign` and `IWorkspace` do, as they are now: the first keeps the record of a single task, the second is the sign of the one run of a working copy, the third reads a single working copy. The first version runs one session; parallel sessions in git worktrees must fit the same ports, with a record and a working copy for each.
 
@@ -173,4 +173,4 @@ A dependency is added only after checking that it publishes without AOT warnings
 
 - .NET 10, C# latest, nullable enabled, warnings as errors.
 - Package versions live in `Directory.Packages.props`.
-- Tests use xUnit v3.
+- Tests use xUnit v3. A test class that grows large is split by what its tests are about. The tests of `Supervisor` are one partial class over the fixture in `SupervisorTests.cs`, with a file for each concern, as `SupervisorTests.Branch.cs` and `SupervisorTests.Stop.cs`. The tests of the commands of the CLI are a class for each command, as `RunCommandTests` and `MenuTests`, over `CliAppTests`, which holds the project, the machines and the runs of the tool that they share; xUnit runs the classes in parallel.
