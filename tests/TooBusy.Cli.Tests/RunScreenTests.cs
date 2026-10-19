@@ -77,7 +77,7 @@ public sealed class RunScreenTests : IDisposable
         var bar = "  toobusy · ~/rocket" + new string(' ', 61) + "Running the queue";
         terminal.AssertTaped(bar + "\n ✔ #2 Show the total  1:24\n ● #3 Export the data\n   1:24 · Edit src/Export.cs\n"
             + " ❯ press / to show the menu" + new string(' ', 36) + "limits used: 5-hour 41% · weekly 12%\n"
-            + " ctrl+c stop the session and exit" + new string(' ', 55) + "task 2 of 4");
+            + " / menu · ctrl+c stop the session and exit" + new string(' ', 46) + "task 2 of 4");
 
         // Nothing is said of a task that starts, and the page is left with how the run went under its tasks.
         Assert.DoesNotContain("started", terminal.Output.ToString(), StringComparison.Ordinal);
@@ -318,8 +318,52 @@ public sealed class RunScreenTests : IDisposable
         using var page = terminal.Open();
         await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
 
-        const string Hints = " ctrl+c stop the session and exit";
-        Assert.Equal([Hints, Hints + new string(' ', 55) + "task 2 of 4", Hints + new string(' ', 55) + "task 2 of 4", Hints + new string(' ', 55) + "task 3 of 6"], edges);
+        const string Hints = " / menu · ctrl+c stop the session and exit";
+        Assert.Equal([Hints, Hints + new string(' ', 46) + "task 2 of 4", Hints + new string(' ', 46) + "task 2 of 4", Hints + new string(' ', 46) + "task 3 of 6"], edges);
+    }
+
+    [Fact]
+    public async Task TheKeysNameTheSlashWhileNoMenuIsOpenAlsoWhenTheRunStopsOrAborts()
+    {
+        var keys = new List<string>();
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working);
+            await SeenAsync("press / to show the menu");
+            keys.Add(Under());
+
+            // The menu that `/` opens has keys of its own, and the first Ctrl+C asks what it asks.
+            await SeenAsync("❯ stop");
+            keys.Add(Under());
+            await SeenAsync("press / to show the menu");
+            keys.Add(Under());
+            await SeenAsync("press ctrl+c again");
+            keys.Add(Under());
+            await GoneAsync("press ctrl+c again");
+
+            // Once the line of the commands says that the run stops or aborts, the keys still say where the menu opens.
+            view.Show(Working with { Stopping = true });
+            await SeenAsync("stopping after this task");
+            keys.Add(Under());
+            view.Show(Working with { Aborting = true });
+            await SeenAsync("aborting: the session is wrapping up");
+            keys.Add(Under());
+            view.Show(new RunStatus(RunPhase.Preparing, "Reading the queue…") { Stopping = true });
+            await SeenAsync("stopping before the next task");
+            keys.Add(Under());
+            return new RunResult(RunEnd.Stopped, 0);
+        });
+        terminal.Keys
+            .Hold(() => keys.Count == 1).Type("/")
+            .Hold(() => keys.Count == 2).Press(Keys.Escape)
+            .Hold(() => keys.Count == 3).Press(Keys.ControlC)
+            .Hold(() => keys.Count == 4).Type("#");
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        const string Hints = " / menu · ctrl+c stop the session and exit";
+        Assert.Equal([Hints, " ↑↓ move · enter run · esc close", Hints, " press ctrl+c again to stop the session and exit", Hints, Hints, Hints], keys);
     }
 
     // Waits until the terminal's own screen shows the text.
@@ -340,6 +384,9 @@ public sealed class RunScreenTests : IDisposable
             await System.Threading.Tasks.Task.Delay(5, TestContext.Current.CancellationToken);
         }
     }
+
+    // The line under the second rule, without what stands at its right edge.
+    string Under() => terminal.Tape.Text.Split('\n')[^1].Split("  ")[0];
 
     // The line of the commands, with the pointer that shows where the menu opens.
     string Pointer(string text = "press / to show the menu") => terminal.Tape.Text.Split('\n').First(row => row.Contains(text, StringComparison.Ordinal));

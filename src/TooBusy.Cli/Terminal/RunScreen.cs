@@ -17,8 +17,9 @@ namespace TooBusy.Cli.Terminal;
 // move in it, Enter runs one and Escape closes the menu. A session that waits for the owner brings the two commands
 // that are for it without being asked. Once the run was told to stop or to abort, the line of the pointer says that it does instead
 // of where the menu opens. At its right edge stands how much of the usage limits is used, `limits used: 5-hour 41% ·
-// weekly 12%`, and nothing while the menu is open. Under the second rule stand the keys and, at their right, the place of the task among the tasks
-// of the run: `task 4 of 9`, as the queue was read before the task.
+// weekly 12%`, and nothing while the menu is open. Under the second rule stand the keys, `/` among them while no menu
+// is open, so that the way to the menu is on the screen while the run stops or aborts too, and, at their right, the
+// place of the task among the tasks of the run: `task 4 of 9`, as the queue was read before the task.
 //
 // The run goes on by itself while the page waits for a key: the page looks for one again and again and draws what
 // has changed. When the run is over the page writes how it went, rolls the tape up and gives the result: it does
@@ -307,10 +308,11 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         !status.Stopping && !status.Aborting ? new Part(" press / to show the menu", Tone.Muted)
         : new Part(status.Task is null ? " stopping before the next task" : status.Aborting ? " aborting: the session is wrapping up" : " stopping after this task", Tone.Warning);
 
-    // The keys under the second rule or, when a key that leaves was pressed once, what is asked.
+    // The keys under the second rule or, when a key that leaves was pressed once, what is asked. While no menu is
+    // open they name `/`, which the line of the commands does not once the run stops or aborts.
     Line Keys(bool menu) =>
         page.Asking is { } asking ? Line.Of(asking, Tone.Warning)
-        : Page.Hints(menu ? "↑↓ move · enter run · esc close" : $"ctrl+c {page.Leaving}");
+        : Page.Hints(menu ? "↑↓ move · enter run · esc close" : $"/ menu · ctrl+c {page.Leaving}");
 
     // How much of the usage limits is used, of the windows that are known: with the words that say what the figures
     // are, and the figures alone for a line that has no room for the words.
