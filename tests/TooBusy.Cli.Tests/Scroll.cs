@@ -13,6 +13,9 @@ namespace TooBusy.Cli.Tests;
 public sealed partial class Scroll(int width = 120, int height = 30)
 {
     readonly List<StringBuilder> rows = [new()];
+
+    // A page writes from threads of its own while a test reads what it wrote: one at a time.
+    readonly Lock gate = new();
     int width = width;
     int height = height;
 
@@ -31,10 +34,24 @@ public sealed partial class Scroll(int width = 120, int height = 30)
 
     public (int Row, int Column) Cursor => (row, column);
 
-    public IReadOnlyList<string> Rows => [.. rows.Select(line => line.ToString().TrimEnd())];
+    public IReadOnlyList<string> Rows
+    {
+        get
+        {
+            lock (gate)
+                return [.. rows.Select(line => line.ToString().TrimEnd())];
+        }
+    }
 
     // The rows down to the last one that has something: under it are only those a foot has stood on.
-    public IReadOnlyList<string> Written => [.. Rows.Take(Rows.ToList().FindLastIndex(line => line.Length > 0) + 1)];
+    public IReadOnlyList<string> Written
+    {
+        get
+        {
+            var all = Rows;
+            return [.. all.Take(all.ToList().FindLastIndex(line => line.Length > 0) + 1)];
+        }
+    }
 
     // The rows without the empty ones and the rules, as one text.
     public string Text => string.Join('\n', Rows.Where(line => line.Trim(' ', '─').Length > 0));
@@ -44,25 +61,28 @@ public sealed partial class Scroll(int width = 120, int height = 30)
     // where it is, so that what is above it goes into the history.
     public void Resize(int columns, int lines)
     {
-        var bottom = Math.Min(top + height - 1, rows.Count - 1);
-        var folded = new List<StringBuilder>();
-        var (cursor, end) = (row, bottom);
-        for (var at = 0; at < rows.Count; at++)
+        lock (gate)
         {
-            var text = rows[at].ToString();
-            var pieces = Math.Max(1, (text.Length + columns - 1) / columns);
-            if (at == row)
-                (cursor, column) = (folded.Count + column / columns, column % columns);
-            if (at == bottom)
-                end = folded.Count + pieces - 1;
-            for (var piece = 0; piece < pieces; piece++)
-                folded.Add(new StringBuilder(text.Substring(piece * columns, Math.Min(columns, text.Length - piece * columns))));
-        }
+            var bottom = Math.Min(top + height - 1, rows.Count - 1);
+            var folded = new List<StringBuilder>();
+            var (cursor, end) = (row, bottom);
+            for (var at = 0; at < rows.Count; at++)
+            {
+                var text = rows[at].ToString();
+                var pieces = Math.Max(1, (text.Length + columns - 1) / columns);
+                if (at == row)
+                    (cursor, column) = (folded.Count + column / columns, column % columns);
+                if (at == bottom)
+                    end = folded.Count + pieces - 1;
+                for (var piece = 0; piece < pieces; piece++)
+                    folded.Add(new StringBuilder(text.Substring(piece * columns, Math.Min(columns, text.Length - piece * columns))));
+            }
 
-        rows.Clear();
-        rows.AddRange(folded);
-        (width, height, row) = (columns, lines, cursor);
-        top = Math.Max(0, Math.Max(end, row) - lines + 1);
+            rows.Clear();
+            rows.AddRange(folded);
+            (width, height, row) = (columns, lines, cursor);
+            top = Math.Max(0, Math.Max(end, row) - lines + 1);
+        }
     }
 
     public static Scroll Read(string output, int width = 120, int height = 30)
@@ -74,20 +94,23 @@ public sealed partial class Scroll(int width = 120, int height = 30)
 
     public void Write(string text)
     {
-        for (var at = 0; at < text.Length; at++)
+        lock (gate)
         {
-            if (text[at] == '\u001b')
+            for (var at = 0; at < text.Length; at++)
             {
-                var sequence = Sequence().Match(text, at);
-                if (!sequence.Success)
-                    throw new InvalidOperationException($"The terminal was written a sequence the tape does not know: {Shown(text, at)}");
+                if (text[at] == '\u001b')
+                {
+                    var sequence = Sequence().Match(text, at);
+                    if (!sequence.Success)
+                        throw new InvalidOperationException($"The terminal was written a sequence the tape does not know: {Shown(text, at)}");
 
-                at += sequence.Length - 1;
-                Do(sequence.Groups[1].Value + sequence.Groups[4].Value, sequence.Groups[2].Value, text, at);
-            }
-            else if (!Alternate)
-            {
-                Put(text[at]);
+                    at += sequence.Length - 1;
+                    Do(sequence.Groups[1].Value + sequence.Groups[4].Value, sequence.Groups[2].Value, text, at);
+                }
+                else if (!Alternate)
+                {
+                    Put(text[at]);
+                }
             }
         }
     }

@@ -34,25 +34,4 @@ public sealed partial class SupervisorTests
 
         Assert.Contains(sign.Written, written => written is { Phase: RunPhase.WaitingForOwner, Task: 3, Open: "fake attach 3", Until: null });
     }
-
-    [Theory]
-    [InlineData(RunPhase.Preparing, null, null, false, "between tasks")]
-    [InlineData(RunPhase.WaitingForLimit, null, null, false, "it waits for a usage limit")]
-    [InlineData(RunPhase.Preparing, 12, null, false, "#12 Export the orders as a file")]
-    [InlineData(RunPhase.Working, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · claude attach 1a2b3c4d")]
-    [InlineData(RunPhase.WaitingForOwner, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · its session waits for the owner · claude attach 1a2b3c4d")]
-    [InlineData(RunPhase.WaitingForLimit, 12, "claude attach 1a2b3c4d", false, "#12 Export the orders as a file · waits for a usage limit · claude attach 1a2b3c4d")]
-    [InlineData(RunPhase.WaitingForLimit, 12, "claude attach 1a2b3c4d", true, "#12 Export the orders as a file · waits for a usage limit until 2030-01-01 10:01 UTC · claude attach 1a2b3c4d")]
-    public void TheSignOfARunSaysInAFewWordsWhatTheRunDoes(RunPhase phase, int? task, string? open, bool until, string told)
-    {
-        var said = new RunSign(phase)
-        {
-            Task = task,
-            Title = task is null ? null : "Export the orders as a file",
-            Open = open,
-            Until = until ? FakeClock.Start + TimeSpan.FromMinutes(61) : null,
-        };
-
-        Assert.Equal(told, said.Told);
-    }
 }

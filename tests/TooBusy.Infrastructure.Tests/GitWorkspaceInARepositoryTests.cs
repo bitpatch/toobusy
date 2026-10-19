@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using TooBusy.Core.Processes;
 using TooBusy.Core.Run;
 using TooBusy.Infrastructure.Git;
 using TooBusy.Infrastructure.Processes;
@@ -6,10 +8,16 @@ using TooBusy.Infrastructure.Processes;
 namespace TooBusy.Infrastructure.Tests;
 
 // The working copy through the real `git`: a remote that is a bare repository of the test, the working copy of a
-// run cloned from it, and another clone that pushes to it meanwhile.
+// run cloned from it, and another clone that pushes to it meanwhile. Neither git of the test nor that of the tool
+// reads the configuration of the machine, so that a global `url.<base>.insteadOf`, `fetch.*`, `core.fsmonitor` or
+// `init.templateDir` changes nothing here. A machine without git skips these tests and says why.
 public sealed class GitWorkspaceInARepositoryTests : IDisposable
 {
-    readonly DirectoryInfo folder = Directory.CreateTempSubdirectory("toobusy-git-");
+    static readonly (string Name, string Value)[] Unconfigured = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1")];
+
+    static readonly bool Installed = CanStart();
+
+    readonly DirectoryInfo folder;
     readonly string remote;
     readonly string work;
     readonly string other;
@@ -17,6 +25,9 @@ public sealed class GitWorkspaceInARepositoryTests : IDisposable
 
     public GitWorkspaceInARepositoryTests()
     {
+        Assert.SkipUnless(Installed, "git cannot be started, and these tests run the real one.");
+
+        folder = Directory.CreateTempSubdirectory("toobusy-git-");
         remote = Path.Combine(folder.FullName, "remote.git");
         work = Path.Combine(folder.FullName, "work");
         other = Path.Combine(folder.FullName, "other");
@@ -29,7 +40,7 @@ public sealed class GitWorkspaceInARepositoryTests : IDisposable
         Git(other, "push", "--quiet", "--set-upstream", "origin", "develop");
         Git(folder.FullName, "clone", "--quiet", remote, work);
         Configure(work);
-        workspace = new GitWorkspace(new ProcessRunner(), work);
+        workspace = new GitWorkspace(new UnconfiguredProcesses(new ProcessRunner()), work);
     }
 
     public void Dispose() => folder.Delete(recursive: true);
@@ -129,11 +140,39 @@ public sealed class GitWorkspaceInARepositoryTests : IDisposable
         var start = new ProcessStartInfo("git") { WorkingDirectory = repository, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
+        foreach (var (name, value) in Unconfigured)
+            start.Environment[name] = value;
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEnd();
         process.WaitForExit();
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
         return output.Result.TrimEnd('\n');
+    }
+
+    // Whether git can be started on this machine at all.
+    static bool CanStart()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("git", "--version") { RedirectStandardOutput = true, UseShellExecute = false })!;
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return true;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    // The commands of the tool, each started by `env` with the variables that keep git from the configuration of the
+    // machine.
+    sealed class UnconfiguredProcesses(IProcessRunner processes) : IProcessRunner
+    {
+        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken) =>
+            processes.RunAsync("env", [.. Unconfigured.Select(variable => $"{variable.Name}={variable.Value}"), command, .. arguments], timeout, cancellationToken);
+
+        public IProcessRunner Inside(string folder) => new UnconfiguredProcesses(processes.Inside(folder));
     }
 }

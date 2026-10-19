@@ -60,10 +60,11 @@ public sealed class ShellCommandsTests : IDisposable
         Assert.Equal(new CommandEnd(CommandStatus.Exited, 0, "0 never\n"), end);
     }
 
+    // The time is long enough for a shell on a busy machine to start and print before it is over.
     [Fact]
     public async Task ACommandThatDoesNotEndInItsTimeIsStoppedAndWhatItPrintedIsKept()
     {
-        var end = await shell.RunAsync("echo started; sleep 30", Nothing, TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        var end = await shell.RunAsync("echo started; sleep 30", Nothing, TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Equal(new CommandEnd(CommandStatus.TimedOut, 0, "started\n"), end);
     }

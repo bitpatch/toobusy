@@ -20,6 +20,21 @@ public sealed class InstantClock : IClock
     }
 }
 
+// A clock whose time passes as the run asks for it but twenty times faster than the real one: a demo is over in
+// seconds, and a key that is held back for a moment of it still finds the run where it waits for it.
+public sealed class PacedClock : IClock
+{
+    long ticks = InstantClock.Start.UtcTicks;
+
+    public DateTimeOffset Now => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+
+    public async Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
+    {
+        await Task.Delay(time / 20, cancellationToken);
+        Interlocked.Add(ref ticks, time.Ticks);
+    }
+}
+
 // A run that does what the test wrote: it says and shows what it is told to, waits for the commands the page sends,
 // and ends when its play does. Being killed ends it too.
 public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> play) : IQueueRun
@@ -27,12 +42,8 @@ public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> pla
     readonly Channel<RunCommand> commands = Channel.CreateUnbounded<RunCommand>();
     CancellationToken kill;
     volatile bool killed;
-    volatile bool over;
 
     public bool Killed => killed;
-
-    // Whether the play has ended.
-    public bool Over => over;
 
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
     {
@@ -46,10 +57,6 @@ public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> pla
             killed = true;
             view.Say(new RunLine(RunMark.Interrupted, "Killed the session of #3"));
             return new RunResult(RunEnd.Killed, 0);
-        }
-        finally
-        {
-            over = true;
         }
     }
 

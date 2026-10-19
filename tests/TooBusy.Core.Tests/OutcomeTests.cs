@@ -1,4 +1,3 @@
-using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 
 namespace TooBusy.Core.Tests;
@@ -95,34 +94,5 @@ public class OutcomeTests
         var outcome = Outcome.Read($"{report}\nTOOBUSY: partial");
 
         Assert.Equal(names, outcome!.Names(12));
-    }
-
-    [Theory]
-    [InlineData(0, "0 s")]
-    [InlineData(45, "45 s")]
-    [InlineData(90, "90 s")]
-    [InlineData(120, "2 min")]
-    [InlineData(725, "12 min")]
-    [InlineData(3900, "1 h 05 min")]
-    [InlineData(-5, "0 s")]
-    public void ATimeIsSaidInTheUnitsThatMatter(int seconds, string said)
-    {
-        Assert.Equal(said, Spoken.Time(TimeSpan.FromSeconds(seconds)));
-    }
-
-    [Fact]
-    public void CountsAndSharesAreSaidPlainly()
-    {
-        Assert.Equal("1 task", Spoken.Tasks(1));
-        Assert.Equal("12 tasks", Spoken.Tasks(12));
-        Assert.Equal("96%", Spoken.Percent(96.7));
-    }
-
-    [Fact]
-    public void ATaskIsNamedByItsNumberAndItsTitle()
-    {
-        var task = new QueueTask(71, "Paint the windows yellow", "https://github.com/acme/rocket/issues/71", [], BoardStatus.Todo, "Todo", [], []);
-
-        Assert.Equal("#71 Paint the windows yellow", Spoken.Task(task));
     }
 }

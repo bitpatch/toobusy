@@ -94,7 +94,7 @@ sealed class FakeTracker : ITaskTracker
 
     public QueueTask Add(int number, string[]? labels = null, BoardStatus status = BoardStatus.Todo, int[]? blockedBy = null, string? title = null, string? milestone = null)
     {
-        var task = new QueueTask(number, title ?? $"Task {number}", $"https://example.com/{number}", labels ?? ["feature"], status, status.ToString(), blockedBy ?? [], [], milestone);
+        var task = new QueueTask(number, title ?? $"Task {number}", $"https://example.com/{number}", labels ?? ["feature"], status, NameOf(status), blockedBy ?? [], [], milestone);
         Open.Add(task);
         return task;
     }
@@ -127,7 +127,7 @@ sealed class FakeTracker : ITaskTracker
     public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
     {
         Do($"status {number} {status}", cancellationToken);
-        Change(number, task => task with { Status = status, StatusName = status.ToString() });
+        Change(number, task => task with { Status = status, StatusName = NameOf(status) });
         return Task.CompletedTask;
     }
 
@@ -158,6 +158,8 @@ sealed class FakeTracker : ITaskTracker
         return Task.CompletedTask;
     }
 
+    // A closed task blocks no other one any more, as GitHubTasks reads only the open tasks that block a task, and the
+    // test of the filter in GitHubTasksTests pins.
     public Task CloseAsync(int number, CancellationToken cancellationToken)
     {
         Do($"close {number}", cancellationToken);
@@ -169,6 +171,15 @@ sealed class FakeTracker : ITaskTracker
             Change(task.Number, waiting => waiting with { BlockedBy = [.. waiting.BlockedBy.Where(blocker => blocker != number)] });
         return Task.CompletedTask;
     }
+
+    // What a board that GitHub made calls the status, as the tracker reads it: a task that is not on the board has no
+    // status, and one that is in none of the three a run knows is in the backlog.
+    static string NameOf(BoardStatus status) => status switch
+    {
+        BoardStatus.Missing => "",
+        BoardStatus.Other => "Backlog",
+        _ => BoardStatuses.Default.NameOf(status),
+    };
 
     void Do(string what, CancellationToken cancellationToken)
     {

@@ -133,7 +133,9 @@ public sealed partial class SupervisorTests
         Assert.Equal(2, result.Done);
         Assert.Equal([3, 5], assistant.Started.Select(start => start.Task));
         Assert.Equal(["v0.2.0", "v0.2.0", "v0.2.0"], tracker.Read);
-        Assert.Equal(3, workspace.Read - 2);
+
+        // The working tree is read before each reading of the queue, and after each of the two sessions.
+        Assert.Equal(tracker.Read.Count + 2, workspace.Read);
     }
 
     [Theory]

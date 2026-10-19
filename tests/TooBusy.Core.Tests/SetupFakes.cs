@@ -43,6 +43,20 @@ sealed class ScriptedDialog : ISetupDialog
 
     public Action? BeforeConfirm { get; set; }
 
+    // Forgets what was asked and shown, and keeps what is left of the script: what the next setup asks is seen alone.
+    public void Reset()
+    {
+        Asked.Clear();
+        Seen.Clear();
+        Waited.Clear();
+        Refused.Clear();
+        Offered.Clear();
+        Current.Clear();
+        Saved.Clear();
+        Held.Clear();
+        Question = null;
+    }
+
     public void Answer(string label, params string[] answer) => Script(label).Enqueue(answer);
 
     public void Back(string label) => Script(label).Enqueue(null);
@@ -187,8 +201,6 @@ sealed class FakeSetupTracker : ISetupTracker
 
     public List<(string Board, string Repository)> Linked { get; } = [];
 
-    public Action? OnConfirm { get; set; }
-
     public string? RefuseToMake { get; set; }
 
     public string? RefuseToLink { get; set; }
@@ -196,6 +208,16 @@ sealed class FakeSetupTracker : ISetupTracker
     public List<(string Repository, string Name)> Labelled { get; } = [];
 
     public string? RefuseToLabel { get; set; }
+
+    // Forgets what was asked for and made, and keeps what it answers.
+    public void Reset()
+    {
+        Calls = 0;
+        Made.Clear();
+        Linked.Clear();
+        Labelled.Clear();
+        StatusesOf.Clear();
+    }
 
     public Task<string?> RefuseBoardAsync(string board, CancellationToken cancellationToken)
     {
@@ -268,6 +290,9 @@ sealed class FakeSettingsStore : ISettingsStore
     public SettingsPreview Preview(ProjectSettings settings) => new(Current is null ? "" : Render(Current), Render(settings));
 
     public void Save(ProjectSettings settings) => Saved = settings;
+
+    // Forgets what was saved, and keeps the settings there are.
+    public void Reset() => Saved = null;
 
     public static string Render(ProjectSettings settings) => string.Join('\n',
         $"board = {settings.Tracker.Board}",

@@ -6,16 +6,22 @@ namespace TooBusy.Cli.Tests;
 // of the lambda it was made with. A command it has no answer for fails the test with the command named, so that a
 // test that scripts too little fails there, and not on an answer nobody wrote. It remembers every command it was
 // asked, with its arguments and its timeout, in their order. `hangs` tells the commands that go on until they are
-// told to stop, as one that GitHub does not answer.
+// told to stop, as one that GitHub does not answer. An answer that has to wait for something, as another command of
+// the tool, is given as a task, so that it is awaited and not waited for on the thread of the command.
 public sealed class ScriptedProcesses : IProcessRunner
 {
-    readonly Func<string, IReadOnlyList<string>, ProcessResult>? answer;
+    readonly Func<string, IReadOnlyList<string>, Task<ProcessResult>>? answer;
     readonly Func<string, IReadOnlyList<string>, bool>? hangs;
     readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public ScriptedProcesses(params ProcessResult[] answers) => Answers = new(answers);
 
-    public ScriptedProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer, Func<string, IReadOnlyList<string>, bool>? hangs = null) =>
+    public ScriptedProcesses(Func<string, IReadOnlyList<string>, ProcessResult> answer, Func<string, IReadOnlyList<string>, bool>? hangs = null)
+        : this((command, arguments) => Task.FromResult(answer(command, arguments)), hangs)
+    {
+    }
+
+    public ScriptedProcesses(Func<string, IReadOnlyList<string>, Task<ProcessResult>> answer, Func<string, IReadOnlyList<string>, bool>? hangs = null) =>
         (this.answer, this.hangs, Answers) = (answer, hangs, new());
 
     public ScriptedProcesses(Func<string, ProcessResult> answer)
@@ -45,8 +51,12 @@ public sealed class ScriptedProcesses : IProcessRunner
             }
         }
 
-        return Answers.TryDequeue(out var queued) ? queued
-            : answer?.Invoke(command, arguments) ?? throw new InvalidOperationException($"The test has no answer for command {Asked.Count}: {string.Join(' ', [command, .. arguments])}");
+        if (Answers.TryDequeue(out var queued))
+            return queued;
+
+        return answer is null
+            ? throw new InvalidOperationException($"The test has no answer for command {Asked.Count}: {string.Join(' ', [command, .. arguments])}")
+            : await answer(command, arguments);
     }
 
     public IProcessRunner Inside(string folder) => this;

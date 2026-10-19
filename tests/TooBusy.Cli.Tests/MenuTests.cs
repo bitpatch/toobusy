@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Processes;
-using TooBusy.Core.Run;
 
 namespace TooBusy.Cli.Tests;
 
@@ -717,20 +716,5 @@ public sealed class MenuTests : CliAppTests
     {
         var title = $"  toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}";
         return title + new string(' ', width - 2 - title.Length - status.Length) + status;
-    }
-
-    // A clock whose time passes as the run asks for it but twenty times faster than the real one: a demo is over in
-    // seconds, and a key that is held back for a moment of it still finds the run where it waits for it.
-    sealed class PacedClock : IClock
-    {
-        long ticks = InstantClock.Start.UtcTicks;
-
-        public DateTimeOffset Now => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
-
-        public async Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
-        {
-            await Task.Delay(time / 20, cancellationToken);
-            Interlocked.Add(ref ticks, time.Ticks);
-        }
     }
 }

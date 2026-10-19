@@ -81,11 +81,11 @@ public sealed partial class TestTerminal : IDisposable
     // moment.
     public bool Saw(string text) =>
         Output.ToString().Split("\u001b[H").Skip(1).Any(frame => Told(Lines(frame)).Contains(text, StringComparison.Ordinal))
-        || ((Recorded)Output).Seen.Any(seen => seen.Contains(text, StringComparison.Ordinal));
+        || ((Recorded)Output).Had(text);
 
     // Fails unless the terminal's own screen had the text at some moment.
     public void AssertTaped(string text) =>
-        Assert.True(((Recorded)Output).Seen.Any(seen => seen.Contains(text, StringComparison.Ordinal)), $"The tape never had:\n{text}\n\nIt has:\n{Tape.Text}");
+        Assert.True(((Recorded)Output).Had(text), $"The tape never had:\n{text}\n\nIt has:\n{Tape.Text}");
 
     // The line and the column the cursor was put at, counted from one; null when it is hidden.
     public (int Line, int Column)? Caret =>
@@ -103,15 +103,29 @@ public sealed partial class TestTerminal : IDisposable
     private static partial Regex Escape();
 
     // What is written, kept as text and read by the terminal's own screen as it comes. Every text that screen has
-    // had is remembered, so that a test can ask for what stood there a moment ago.
+    // had is remembered, so that a test can ask for what stood there a moment ago. A page writes from threads of its
+    // own while a test reads what it wrote: one at a time.
     sealed class Recorded(Scroll scroll) : StringWriter
     {
+        readonly Lock gate = new();
+        readonly List<string> seen = [];
         int read;
 
         // How deep the writing is: a text may be written piece by piece, and is read when it is whole.
         int writing;
 
-        public List<string> Seen { get; } = [];
+        // Whether the terminal's own screen had the text at some moment.
+        public bool Had(string text)
+        {
+            lock (gate)
+                return seen.Any(screen => screen.Contains(text, StringComparison.Ordinal));
+        }
+
+        public override string ToString()
+        {
+            lock (gate)
+                return base.ToString();
+        }
 
         public override void Write(char value) => Whole(() => base.Write(value));
 
@@ -123,18 +137,24 @@ public sealed partial class TestTerminal : IDisposable
 
         public override void Write(ReadOnlySpan<char> buffer)
         {
-            writing++;
-            base.Write(buffer);
-            writing--;
-            Read();
+            lock (gate)
+            {
+                writing++;
+                base.Write(buffer);
+                writing--;
+                Read();
+            }
         }
 
         void Whole(Action write)
         {
-            writing++;
-            write();
-            writing--;
-            Read();
+            lock (gate)
+            {
+                writing++;
+                write();
+                writing--;
+                Read();
+            }
         }
 
         void Read()
@@ -145,8 +165,8 @@ public sealed partial class TestTerminal : IDisposable
 
             scroll.Write(written.ToString(read, written.Length - read));
             read = written.Length;
-            if (!scroll.Alternate && scroll.Text is var text && (Seen.Count == 0 || Seen[^1] != text))
-                Seen.Add(text);
+            if (!scroll.Alternate && scroll.Text is var text && (seen.Count == 0 || seen[^1] != text))
+                seen.Add(text);
         }
     }
 

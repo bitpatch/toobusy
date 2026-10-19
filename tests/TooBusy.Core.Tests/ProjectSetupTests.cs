@@ -15,7 +15,13 @@ public class ProjectSetupTests
     const string TodoStatus = "Todo status";
     const string InProgressStatus = "In Progress status";
     const string DoneStatus = "Done status";
+    const string WriteSettings = "Write the settings?";
+    const string SaveChange = "Save the change?";
+    const string ReadingBoards = "Reading your projects from GitHub";
     const string BoardsUnanswered = "GitHub did not answer, so your projects cannot be listed.";
+
+    // The labels of the answers of a setup whose statuses are those a run knows, in their order.
+    static readonly string[] Answered = ["Tracker", "Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill", "Assistant"];
 
     static readonly ProjectSettings Existing = new(
         new TrackerSettings("github", Rocket),
@@ -45,7 +51,7 @@ public class ProjectSetupTests
         Assert.Equal(new AssistantSettings("claude-code"), store.Saved.Assistant);
 
         // The manual label is one of the repository, so the list points at it.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill", WriteSettings], dialog.Asked);
         Assert.Equal("task-auto", store.Saved.Session.Skill);
         Assert.Single(dialog.Shown.Notes);
     }
@@ -63,10 +69,10 @@ public class ProjectSetupTests
                 new SetupNote(SetupTone.Plain, "The label “manual” will be made in acme/rocket."),
             ],
             dialog.Shown.Notes);
-        Assert.Equal(8, dialog.Shown.Answers.Count);
+        Assert.Equal(Answered, dialog.Shown.Answers.Select(answer => answer.Label));
 
         // The manual label is not one of the repository yet, so its name is asked for after the list.
-        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, ManualLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
+        Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, ManualLabel, InterruptLabel, "Skill", WriteSettings], dialog.Asked);
         Assert.Equal("manual", store.Saved!.Queue.Labels.Manual);
     }
 
@@ -167,8 +173,7 @@ public class ProjectSetupTests
     public async Task ANewBoardIsMadeAndLinkedOnlyWhenTheSetupIsConfirmed()
     {
         dialog.Board(new BoardAnswer.Created(new SetupOwner("acme", true), "Rocket"));
-        tracker.OnConfirm = () => Assert.Empty(tracker.Made);
-        dialog.BeforeConfirm = tracker.OnConfirm;
+        dialog.BeforeConfirm = () => Assert.Empty(tracker.Made);
 
         var result = await RunAsync();
 
@@ -336,7 +341,7 @@ public class ProjectSetupTests
         var result = await RunAsync();
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal(["Skill", "Write the settings?", "Skill", "Write the settings?"], dialog.Asked.Skip(5));
+        Assert.Equal(["Skill", WriteSettings, "Skill", WriteSettings], dialog.Asked.Skip(5));
     }
 
     [Fact]
@@ -347,7 +352,8 @@ public class ProjectSetupTests
 
         var result = await RunAsync();
 
-        Assert.Equal(new SetupResult(SetupOutcome.Left, []), result, (left, right) => left!.Outcome == right!.Outcome && left.Answers.Count == right.Answers.Count);
+        Assert.Equal(SetupOutcome.Left, result.Outcome);
+        Assert.Empty(result.Answers);
         Assert.Null(store.Saved);
     }
 
@@ -385,7 +391,7 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.NothingToChange, result.Outcome);
         Assert.Null(store.Saved);
-        Assert.DoesNotContain("Write the settings?", dialog.Asked);
+        Assert.DoesNotContain(WriteSettings, dialog.Asked);
 
         // Settings that name no skill propose none.
         Assert.Contains(new SetupAnswer("Skill", "none"), result.Answers);
@@ -591,13 +597,13 @@ public class ProjectSetupTests
     {
         await RunAsync();
 
-        Assert.Equal(["Reading your projects from GitHub", "Reading the labels"], dialog.Waited);
+        Assert.Equal([ReadingBoards, "Reading the labels"], dialog.Waited);
     }
 
     [Fact]
     public async Task GoingBackWhileTheProjectsAreReadLeavesTheSetup()
     {
-        dialog.Unwaited.Add("Reading your projects from GitHub");
+        dialog.Unwaited.Add(ReadingBoards);
 
         var result = await RunAsync();
 
@@ -614,7 +620,7 @@ public class ProjectSetupTests
         await RunAsync();
 
         // The labels are asked for again when the step comes back.
-        Assert.Equal(["Reading your projects from GitHub", "Reading the labels", "Reading the labels"], dialog.Waited);
+        Assert.Equal([ReadingBoards, "Reading the labels", "Reading the labels"], dialog.Waited);
         Assert.Equal([0, 0, 1, 0, 1], dialog.Places.Take(5));
         Assert.NotNull(store.Saved);
     }
@@ -710,7 +716,7 @@ public class ProjectSetupTests
         Assert.Empty(store.Saved.Queue.Labels.Take);
         Assert.Equal("manual", store.Saved.Queue.Labels.Manual);
         Assert.Equal("interrupted", store.Saved.Queue.Labels.Interrupted);
-        Assert.Equal(8, result.Answers.Count);
+        Assert.Equal(Answered, result.Answers.Select(answer => answer.Label));
         Assert.Equal(["The label “manual” was made in acme/rocket."], result.Done);
         Assert.Empty(result.Notes);
     }
@@ -760,6 +766,7 @@ public class ProjectSetupTests
         Assert.Equal(SetupOutcome.NothingToChange, (await RunUnaskedAsync(SetupProposals.None)).Outcome);
         Assert.Null(store.Saved);
 
+        Reset();
         var result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.None(), Take: []));
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
@@ -784,6 +791,7 @@ public class ProjectSetupTests
         Assert.Empty(tracker.Linked);
 
         // An option still names a board.
+        Reset();
         result = await RunUnaskedAsync(new SetupProposals(new BoardProposal.Existing(Rocket)));
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
@@ -1006,6 +1014,7 @@ public class ProjectSetupTests
         Assert.Equal(TaskCommands.None, store.Saved!.Commands);
         Assert.Empty(without.Unasked);
 
+        Reset();
         var result = await RunAsync(new SetupProposals(Before: new("scripts/dev.sh ports free"), After: new(" scripts/dev.sh server stop ")));
 
         Assert.Equal(new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop"), store.Saved!.Commands);
@@ -1038,6 +1047,7 @@ public class ProjectSetupTests
         Assert.Equal([new SetupAnswer("Before a task", "none → make free")], set.Unasked);
 
         // Changed and taken away, each as it was and as it will be; the one no option speaks of is kept.
+        Reset();
         store.Current = Existing with { Commands = new("make free", "make stop") };
         var changed = await RunAsync(new SetupProposals(Before: new("make ports"), After: new(null)));
 
@@ -1047,6 +1057,7 @@ public class ProjectSetupTests
             dialog.Shown.Notes.Skip(1));
         Assert.Equal([new SetupAnswer("Before a task", "make free → make ports"), new SetupAnswer("After a task", "make stop → none")], changed.Unasked);
 
+        Reset();
         var kept = await RunAsync(new SetupProposals(After: new(null)));
 
         Assert.Equal(new TaskCommands("make free", null), store.Saved!.Commands);
@@ -1076,7 +1087,10 @@ public class ProjectSetupTests
         Assert.Equal(SetupOutcome.Failed, before.Outcome);
         Assert.Equal("--before: A command must not be empty: give --no-before to run none.", before.Failure);
         Assert.Empty(before.Unasked);
+        Assert.Null(store.Saved);
+        Assert.Empty(tracker.Labelled);
 
+        Reset();
         var after = await RunUnaskedAsync(new SetupProposals(After: new(empty)));
 
         Assert.Equal("--after: A command must not be empty: give --no-after to run none.", after.Failure);
@@ -1105,6 +1119,7 @@ public class ProjectSetupTests
         Assert.Equal([new SetupAnswer("Branch", "none → develop")], first.Unasked);
         Assert.Contains(new SetupNote(SetupTone.Change, "Branch: none → develop"), dialog.Shown.Notes);
 
+        Reset();
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
         store.Current = Existing with { Workspace = new WorkspaceSettings("develop") };
         var changed = await RunAsync(new SetupProposals(Before: new("make free")) { Branch = new("main") });
@@ -1115,16 +1130,19 @@ public class ProjectSetupTests
             [new SetupNote(SetupTone.Change, "Before a task: none → make free"), new SetupNote(SetupTone.Change, "Branch: develop → main")],
             dialog.Shown.Notes.Skip(1));
 
+        Reset();
         var gone = await RunUnaskedAsync(new SetupProposals { Branch = new(null) });
 
         Assert.Equal(SetupOutcome.Written, gone.Outcome);
         Assert.Null(store.Saved!.Workspace.Branch);
         Assert.Equal([new SetupAnswer("Branch", "develop → none")], gone.Unasked);
 
+        Reset();
         var same = await RunUnaskedAsync(new SetupProposals { Branch = new("develop") });
 
         Assert.Equal(SetupOutcome.NothingToChange, same.Outcome);
         Assert.Empty(same.Unasked);
+        Assert.Null(store.Saved);
     }
 
     [Theory]
@@ -1138,6 +1156,7 @@ public class ProjectSetupTests
         Assert.Equal(said, unasked.Failure);
         Assert.Null(store.Saved);
 
+        Reset();
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
         store.Current = Existing with { Workspace = new WorkspaceSettings("develop") };
         var asked = await RunAsync(new SetupProposals { Branch = new(name) });
@@ -1156,6 +1175,7 @@ public class ProjectSetupTests
         Assert.Equal([new SetupAnswer("Permission mode", "auto by default → dontAsk")], first.Unasked);
         Assert.Contains(new SetupNote(SetupTone.Change, "Permission mode: auto by default → dontAsk"), dialog.Shown.Notes);
 
+        Reset();
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
         store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
         var changed = await RunUnaskedAsync(new SetupProposals { PermissionMode = "auto" });
@@ -1164,10 +1184,12 @@ public class ProjectSetupTests
         Assert.Equal("auto", store.Saved!.Assistant.PermissionMode);
         Assert.Equal([new SetupAnswer("Permission mode", "dontAsk → auto")], changed.Unasked);
 
+        Reset();
         var same = await RunUnaskedAsync(new SetupProposals { PermissionMode = "dontAsk" });
 
         Assert.Equal(SetupOutcome.NothingToChange, same.Outcome);
         Assert.Empty(same.Unasked);
+        Assert.Null(store.Saved);
     }
 
     [Theory]
@@ -1180,6 +1202,7 @@ public class ProjectSetupTests
         Assert.Equal(said, unasked.Failure);
         Assert.Null(store.Saved);
 
+        Reset();
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
         store.Current = Existing with { Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
         var asked = await RunAsync(new SetupProposals { PermissionMode = mode });
@@ -1440,7 +1463,9 @@ public class ProjectSetupTests
     {
         var none = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.None()) { TodoStatus = "Ready" });
         Assert.Equal("Todo status: A status is named for a project, and there is none.", none.Failure);
+        Assert.Null(store.Saved);
 
+        Reset();
         boards.Read = new SetupBoards([], [new SetupOwner("acme", true)]);
         var made = await RunUnaskedAsync(new SetupProposals(Board: new BoardProposal.Created("Rocket", null)) { TodoStatus = "Ready" });
         Assert.Equal("Todo status: A new project has the statuses GitHub gives it: Todo, In Progress, Done.", made.Failure);
@@ -1510,7 +1535,7 @@ public class ProjectSetupTests
 
         await RunAsync();
 
-        Assert.Equal([InterruptLabel, "Skill", InterruptLabel, "Skill", "Write the settings?"], dialog.Asked.Skip(4));
+        Assert.Equal([InterruptLabel, "Skill", InterruptLabel, "Skill", WriteSettings], dialog.Asked.Skip(4));
     }
 
     [Fact]
@@ -1522,6 +1547,7 @@ public class ProjectSetupTests
         await RunAsync(new SetupProposals(Skill: "/task-auto"));
         Assert.Equal("task-auto", store.Saved!.Session.Skill);
 
+        Reset();
         await RunAsync(new SetupProposals(Skill: ""));
         Assert.Null(store.Saved!.Session.Skill);
         Assert.Contains(new SetupNote(SetupTone.Change, "Skill: night-shift → none"), dialog.Shown.Notes);
@@ -1594,7 +1620,7 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
         Assert.True(SameSettings(Kept with { Queue = new QueueSettings(Kept.Queue.Labels with { Blocking = ["draft", "feature"] }) }, store.Saved));
-        Assert.Equal(["Blocking labels", "Save the change?"], dialog.Asked);
+        Assert.Equal(["Blocking labels", SaveChange], dialog.Asked);
         Assert.Equal(["Blocking labels: draft → draft, feature"], dialog.Shown.Notes.Where(note => note.Tone == SetupTone.Change).Select(note => note.Text));
         Assert.True(dialog.Shown.Menu);
         Assert.Empty(dialog.Shown.Steps);
@@ -1661,7 +1687,7 @@ public class ProjectSetupTests
         var result = await setup.ChangeAsync(SetupSetting.Skill, TestContext.Current.CancellationToken);
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal(["Skill", "Save the change?", "Skill", "Save the change?"], dialog.Asked);
+        Assert.Equal(["Skill", SaveChange, "Skill", SaveChange], dialog.Asked);
         Assert.Equal("night-shift", store.Saved!.Session.Skill);
     }
 
@@ -1677,7 +1703,7 @@ public class ProjectSetupTests
         var result = await setup.ChangeAsync(SetupSetting.PermissionMode, TestContext.Current.CancellationToken);
 
         Assert.Equal(SetupOutcome.Declined, result.Outcome);
-        Assert.Equal(["Permission mode", "Save the change?", "Permission mode", "Save the change?"], dialog.Asked);
+        Assert.Equal(["Permission mode", SaveChange, "Permission mode", SaveChange], dialog.Asked);
         Assert.Contains(new SetupNote(SetupTone.Change, "Permission mode: auto by default → dontAsk"), dialog.Shown.Notes);
         Assert.Null(store.Saved);
     }
@@ -1784,7 +1810,7 @@ public class ProjectSetupTests
         Assert.Equal([(Moon, "acme/rocket")], tracker.Linked);
         Assert.Equal([new SetupAnswer("Project", $"Moon base  {Moon}")], result.Answers);
         Assert.Equal(SetupOutcome.NothingToChange, again.Outcome);
-        Assert.Equal(["Reading your projects from GitHub"], dialog.Waited);
+        Assert.Equal([ReadingBoards], dialog.Waited);
         Assert.Single(tracker.Linked);
     }
 
@@ -1805,7 +1831,7 @@ public class ProjectSetupTests
 
         Assert.Null(dialog.Question.Unread);
         Assert.Equal(boards.Read.Boards, dialog.Question.Known);
-        Assert.Equal(["Reading your projects from GitHub", "Reading your projects from GitHub"], dialog.Waited);
+        Assert.Equal([ReadingBoards, ReadingBoards], dialog.Waited);
     }
 
     [Fact]
@@ -1949,7 +1975,7 @@ public class ProjectSetupTests
         var result = await setup.ChangeAsync(SetupSetting.Statuses, TestContext.Current.CancellationToken);
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal([TodoStatus, InProgressStatus, DoneStatus, "Save the change?"], dialog.Asked);
+        Assert.Equal([TodoStatus, InProgressStatus, DoneStatus, SaveChange], dialog.Asked);
         Assert.Equal(new BoardStatuses("Ready", "In Progress", "Done"), store.Saved!.Tracker.Statuses);
         Assert.Equal(Rocket, store.Saved.Tracker.Board);
         Assert.Equal([new SetupAnswer("Statuses", "Todo: Ready · In Progress: In Progress · Done: Done")], result.Answers);
@@ -2041,6 +2067,15 @@ public class ProjectSetupTests
     }
 
     static SetupValue Value(IReadOnlyList<SetupValue> values, SetupSetting setting) => values.Single(value => value.Setting == setting);
+
+    // Forgets what the fakes saw and did, and keeps what the test set them to: what the next setup of the same test
+    // does is seen alone.
+    void Reset()
+    {
+        dialog.Reset();
+        tracker.Reset();
+        store.Reset();
+    }
 
     Task<SetupResult> RunAsync(SetupProposals? proposals = null) => new ProjectSetup(dialog, machine, tracker, boards, store, proposals).RunAsync(TestContext.Current.CancellationToken);
 

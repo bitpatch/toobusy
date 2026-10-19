@@ -379,14 +379,13 @@ public sealed class PageTests : IDisposable
         var waiting = page.WaitAsync("Reading the milestones", _ => never.Task, TestContext.Current.CancellationToken);
         Assert.DoesNotContain(" ❯ Back  esc", terminal.Frame);
 
-        // Enter is not a way back here, and one Escape only asks.
-        terminal.Keys.Press(Keys.Enter, Keys.Escape);
-        await Task.Delay(200, TestContext.Current.CancellationToken);
-        Assert.False(waiting.IsCompleted);
-        Assert.Equal(" press esc again to exit", terminal.Frame[^1]);
+        // Enter is not a way back here, and one Escape only asks: the second is held back until the page asks for it,
+        // and the page that still waits for a key then is the one that takes it.
+        var asked = false;
+        terminal.Keys.Press(Keys.Enter, Keys.Escape).Hold(() => asked = terminal.Frame[^1] == " press esc again to exit").Press(Keys.Escape);
 
-        terminal.Keys.Press(Keys.Escape);
         Assert.False((await waiting).Done);
+        Assert.True(asked);
     }
 
     [Fact]

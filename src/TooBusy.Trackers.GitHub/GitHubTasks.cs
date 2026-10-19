@@ -45,8 +45,10 @@ public sealed partial class GitHubTasks(IProcessRunner processes, string reposit
 
         // The milestone of the queue comes first, by its number: its state and its title, both empty when GitHub has
         // no milestone of that number any more. A task is on the board when one of its project items is of that
-        // board; what the board calls its status is the fourth field, empty for a task that is not there. The seventh
-        // is the title of its milestone, empty for a task without one, and the labels follow it.
+        // board; what the board calls its status is the fourth field, empty for a task that is not there. The fifth
+        // and the sixth are the open tasks that block it and its open parts: a closed one holds nothing back any more,
+        // as the FakeTracker of the tests of Core has it when a task is closed. The seventh is the title of its
+        // milestone, empty for a task without one, and the labels follow it.
         var lines = ".data.repository | "
             + (milestone is null ? "" : "([\"milestone\", .milestone.state // \"\", .milestone.title // \"\"] | @tsv), ")
             + $"(.issues | \"total\\t\\(.totalCount)\", (.nodes[] | [.number, .title, .url, {Status()}, "

@@ -222,9 +222,9 @@ public sealed class RunCommandTests : CliAppTests
                 outside.Cancel();
         });
 
-        // The clock is the real one here: with a clock that makes nobody wait, a session that never ends would be
-        // looked at without end while the keys are waited for.
-        var context = Context(processes) with { Home = personal.FullName, Clock = new TooBusy.Infrastructure.Machine.SystemClock() };
+        // The clock takes time here: with a clock that makes nobody wait, a session that never ends would be looked at
+        // without end while the keys are waited for.
+        var context = Context(processes) with { Home = personal.FullName, Clock = new PacedClock() };
         Converse(context, RunsTheTests);
         var keys = new Keys()
             .Hold(() => Shown("Bash: dotnet test")).Press(Keys.ControlC)
@@ -542,10 +542,11 @@ public sealed class RunCommandTests : CliAppTests
         // The whole of a demo: a task whose session a kill stopped and which goes on with it, a task that is done, a
         // session that asks and is told to go on alone, a task done in part whose session made a task of what is left
         // and was marked as waiting after its report, a usage limit that is waited out, a task that opened after
-        // another one, and the tasks that are held.
+        // another one, and the tasks that are held. The messages the sessions are sent are those of Briefing, whose
+        // tests pin their words.
         Assert.Equal(0, exit);
         Assert.Equal(
-            """
+            $"""
             Demo: nothing is changed.
             ✻ v0.1.0 (made up) · 6 tasks in the queue · the assistant's own model · high effort · auto mode
               Opens later: #105 after #102
@@ -563,7 +564,7 @@ public sealed class RunCommandTests : CliAppTests
             ‖ #102 waits for the owner: input needed · it is told to go on alone in 10 s: /nudge does it now, /hold never · claude attach 4f2a102 (made up)
               │ The task does not say what kind of file the export is. Should it be CSV or JSON?
             ▶ #102 is told to go on without the owner: its turn is cut, and this is the next message of its conversation · claude attach 4f2a102 (made up)
-              “The owner is away: no answer to your question and no approval will come. Decide yourself and go on with task #102 from where you stopped. What cannot be decided without the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `manual` on it, so that no run takes it before the owner answers. End your reply with a `TOOBUSY:` line.”
+              “{Briefing.Alone(102, "manual")}”
             ✔ #102 Export the orders as a file — done in 21 s
               #102 is closed, with the report of the session as its comment
             → #103 Fix the rounding of a discount — started · a new session with the skill task-auto · claude attach 4f2a103 (made up)
@@ -573,7 +574,7 @@ public sealed class RunCommandTests : CliAppTests
               │ - Checked with the tests of the prices: 31 pass.
               │ - Commit c3d4e5f.
               │ Left for the owner: a discount may be larger than the price it is taken from, and the price becomes negative. What such a discount does is theirs to say. I made #108 “Decide what a discount of more than the price does” of it, with the manual label and the two answers I see: the price is zero, or the discount is refused when it is entered.
-              “No answer will come: the owner is away, and nobody reads your questions. Go on with task #103 from where you stopped. What still needs the owner, make a new task of it yourself: describe there what is left and your questions for the owner, and put the label `manual` on it, so that no run takes it before the owner answers. When everything that can be done is done, say so: end your reply with a `TOOBUSY:` line, and ask nothing after it.”
+              “{Briefing.NoAnswer(103, "manual")}”
             ◐ #103 Fix the rounding of a discount — done in part in 11 s
               #103 is closed, with the report of the session as its comment; what is left is a task that the session made
             → #104 Update the dependencies — started · a new session with the skill task-auto · claude attach 4f2a104 (made up)
@@ -625,31 +626,35 @@ public sealed class RunCommandTests : CliAppTests
         WriteSettings(Settings);
         await ChooseAllAsync();
 
-        // What `status` says while the run reads its tasks.
+        // What `status` says while the run reads its tasks: it is asked as `gh` is, and awaited before `gh` answers.
         (int Exit, string Output, string Error)? meanwhile = null;
-        ScriptedProcesses? processes = null;
-        processes = new ScriptedProcesses((command, arguments) => new ProcessResult(ProcessStatus.Exited, 0, command switch
+        var processes = new ScriptedProcesses(async (command, arguments) =>
         {
-            "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
-            "gh" when arguments[0] == "label" => Labels,
-            "gh" when arguments is ["api", "graphql", ..] => Do(() => meanwhile = Look()) + "total\t0\n",
-            _ => "",
-        }, ""));
+            if (command == "gh" && arguments is ["api", "graphql", ..])
+                meanwhile = await LookAsync();
+            return new ProcessResult(ProcessStatus.Exited, 0, command switch
+            {
+                "git" when arguments.Contains("remote") => "https://github.com/acme/rocket.git\n",
+                "gh" when arguments[0] == "label" => Labels,
+                "gh" when arguments is ["api", "graphql", ..] => "total\t0\n",
+                _ => "",
+            }, "");
+        });
 
         var (exit, _, error) = await RunAsync(Context(processes), ["run"]);
 
         Assert.Equal("", error);
         Assert.Equal(0, exit);
         Assert.Equal((3, "A run is going on: between tasks" + Environment.NewLine, ""), meanwhile);
-        Assert.Equal((0, "No run is going on." + Environment.NewLine, ""), Look());
+        Assert.Equal((0, "No run is going on." + Environment.NewLine, ""), await LookAsync());
         // The lock that the sign was put up under stays.
         Assert.Equal([".gitignore", "run.lock"], new DirectoryInfo(Path.Combine(folder.FullName, ".toobusy", "local")).GetFiles().Select(file => file.Name).Order());
 
-        (int Exit, string Output, string Error) Look()
+        async Task<(int Exit, string Output, string Error)> LookAsync()
         {
             using var output = new StringWriter();
             using var failed = new StringWriter();
-            var code = CliApp.RunAsync(["status"], Context(null) with { Output = output, Error = failed }, TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var code = await CliApp.RunAsync(["status"], Context(null) with { Output = output, Error = failed }, TestContext.Current.CancellationToken);
             return (code, output.ToString(), failed.ToString());
         }
     }

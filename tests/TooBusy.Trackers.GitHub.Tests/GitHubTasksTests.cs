@@ -182,6 +182,19 @@ public class GitHubTasksTests
         Assert.DoesNotContain("projectItems", processes.Asked[1].Arguments[^1], StringComparison.Ordinal);
     }
 
+    // A task that is closed holds no other back: the FakeTracker of the tests of Core relies on it.
+    [Fact]
+    public async Task OnlyTheOpenTasksThatBlockATaskAndItsOpenPartsAreRead()
+    {
+        processes.Answers.Enqueue(ScriptedProcesses.Answered("total\t0\n"));
+
+        await Tasks().ReadOpenAsync(null, TestContext.Current.CancellationToken);
+
+        var lines = processes.Asked[0].Arguments[^1];
+        Assert.Contains("([.blockedBy.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\"))", lines, StringComparison.Ordinal);
+        Assert.Contains("([.subIssues.nodes[] | select(.state == \"OPEN\") | .number | tostring] | join(\",\"))", lines, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task TheBoardsOfATaskAreAskedForOnlyInAProjectWithABoard()
     {

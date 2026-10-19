@@ -30,7 +30,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal([5], assistant.Started.Select(start => start.Task));
-        Assert.Contains("  Held: #3 it has the manual label · #4 its status is InProgress", log.Lines);
+        Assert.Contains("  Held: #3 it has the manual label · #4 its status is In Progress", log.Lines);
         Assert.Equal(RunEnd.Emptied, result.End);
         Assert.Equal("✔ No task is left · 1 done", log.Lines[^2]);
     }
