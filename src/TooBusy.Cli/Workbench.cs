@@ -8,19 +8,16 @@ using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
 using TooBusy.Core.Setup;
 using TooBusy.Infrastructure.Git;
-using TooBusy.Infrastructure.Machine;
-using TooBusy.Infrastructure.Processes;
 using TooBusy.Infrastructure.Run;
 using TooBusy.Infrastructure.Settings;
 using TooBusy.Trackers.GitHub;
 
 namespace TooBusy.Cli;
 
-// Everything the commands work with in one project: its root, its settings, the tracker and the choice of the user.
-// It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the tasks
-// are read from; null when the `origin` remote is not a GitHub repository. Processes runs the commands of the
-// machine, Home is the home folder of the user, where Claude Code keeps its conversations unless `CLAUDE_CONFIG_DIR`
-// among the Variables of the environment puts them elsewhere, and Machine is what the checks of `doctor` ask.
+// Everything the commands work with in one project: its root, its settings, the tracker, the choice of the user and
+// its runs. It is put together in one place, real or, for a demo, imitated. Repository is where the milestones and the
+// tasks are read from; null when the `origin` remote is not a GitHub repository. Machine is what the checks of
+// `doctor` ask, and Runs is what a run is made of: the tasks it reads, the record it leaves and the sign it puts up.
 public sealed record Workbench(
     string Root,
     bool Demo,
@@ -32,22 +29,19 @@ public sealed record Workbench(
     IMilestones Milestones,
     IPersonalSettings Personal,
     IClock Clock,
-    IProcessRunner Processes,
-    string Home,
-    Func<string, string?> Variables,
-    ICheckupMachine Machine)
+    ICheckupMachine Machine,
+    IProjectRuns Runs)
 {
-    // The made-up tasks of a demo and the record of its runs: the menu and the next run see a task that an abort
-    // left interrupted. They are kept in memory for as long as the demo goes on, and nowhere else.
-    readonly UnwrittenState remembered = new();
-    ImitatedTasks? kept;
-
     // `personalFolder` is where the choices of the user are kept. A demo keeps nothing. What it reads is real where
     // reading changes nothing: the `origin` remote, the boards and the milestones; what it would make, link, write
     // and remember is imitated. A demo that is `ready` shows a project that is set up and has everything chosen,
     // whatever the project is: where there are no settings they are made up, the first milestone is the chosen one,
-    // the model is the assistant's own and the effort is the proposed one.
-    public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, IClock clock, string home, Func<string, string?> variables, CancellationToken cancellationToken)
+    // the model is the assistant's own and the effort is the proposed one. `watched` says whether a page shows what
+    // is read while it is read: a demo takes its time over the boards and the tasks only then, so that the wait for
+    // them can be looked at. `processes` runs the commands of the machine, and `home` is the home folder of the user,
+    // where Claude Code keeps its conversations unless `CLAUDE_CONFIG_DIR` among the `variables` of the environment
+    // puts them elsewhere.
+    public static async Task<Workbench> OpenAsync(string root, bool demo, IProcessRunner? processes, string personalFolder, bool ready, bool watched, IClock clock, string home, Func<string, string?> variables, CancellationToken cancellationToken)
     {
         if (demo)
         {
@@ -63,7 +57,7 @@ public sealed record Workbench(
                 repository,
                 imitated,
                 imitated,
-                new ImitatedBoards(processes is null ? null : new GitHubBoards(processes), clock),
+                new ImitatedBoards(processes is null ? null : new GitHubBoards(processes), clock, watched),
                 unwritten,
                 milestones,
                 new UnsavedChoice(
@@ -71,10 +65,8 @@ public sealed record Workbench(
                     ready ? ModelChoice.AssistantsOwn : null,
                     ready ? ClaudeCodeOptions.ProposedEffort : null),
                 clock,
-                processes ?? new NoProcesses(),
-                home,
-                variables,
-                new ImitatedCheckup(clock, unwritten));
+                new ImitatedCheckup(clock, unwritten),
+                new ImitatedRuns(clock, watched));
         }
 
         processes ??= new NoProcesses();
@@ -91,87 +83,31 @@ public sealed record Workbench(
             new GitHubMilestones(processes),
             new PersonalSettingsFile(personalFolder, root),
             clock,
-            processes,
-            home,
-            variables,
-            machine);
+            machine,
+            new ProjectRuns(root, origin, processes, clock, home, variables));
     }
 
     // The checks of everything a run needs, over the settings as they are now.
     public Checkup Checkup => new(Machine, Settings, Repository);
 
     // A run of the queue over the settings and the choices of the user as they are now; the milestone is null for
-    // tasks whatever their milestone. In a demo the run is an imitated one. Otherwise the tasks are the issues of
-    // the repository, Claude Code does them in the working copy, and what the run leaves on this machine is kept in
-    // the local folder of the project. Null when the project has no tasks to take: its `origin` remote is not a
-    // GitHub repository. `only` is the one task the run does and `most` how many it takes at most; without them it
-    // is a run of the whole queue. `skip` are the labels whose tasks the run leaves out. A demo of a run of one task
-    // has no task that a run was killed over, unless it is the one: the record of that task would keep the run from
-    // any other.
-    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null)
-    {
-        var plan = new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch, PermissionMode = settings.Assistant.SessionMode };
-        if (Demo)
-            return ImitatedRun.Open(plan, Clock, DemoTasks(plan.Rules, killed: only is null or ImitatedTasks.Killed), remembered);
-        if (Repository is null)
-            return null;
+    // tasks whatever their milestone. Null when the project has no tasks to take: its `origin` remote is not a GitHub
+    // repository. `only` is the one task the run does and `most` how many it takes at most; without them it is a run
+    // of the whole queue. `skip` are the labels whose tasks the run leaves out.
+    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null) =>
+        Runs.Open(settings, new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch, PermissionMode = settings.Assistant.SessionMode });
 
-        // The log of the run is written by everything around the run: the commands of the machine and of the
-        // project, and the view of the run itself.
-        var local = LocalFolder.Ensure(Root);
-        var log = new RunLogFile(local, Clock);
-        var processes = new LoggedProcesses(Processes, log);
-        return new LoggedRun(
-            new Supervisor(
-                new GitHubTasks(processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses),
-                new ClaudeCode(processes.Inside(Root), Clock, ClaudeFolders.Of(Root, local, () => LocalFolder.Make(local), Home, Variables), Root, plan.PermissionMode),
-                new GitWorkspace(processes, Root),
-                new RunStateFile(local),
-                new RunSignFile(local),
-                new LocalMachine(processes),
-                Clock,
-                new LoggedCommands(new ShellCommands(Root), log),
-                plan,
-                RunPolicy.Default),
-            log);
-    }
-
-    // The run that goes on in the working copy; null when none does. A demo looks at no sign, as it puts none up.
-    public GoingRun? Going() => Demo ? null : new RunSignFile(LocalFolder.Of(Root)).Read();
-
-    // The made-up tasks of a demo: those that were kept while one of them is interrupted or has a record, and
-    // otherwise tasks that are made up anew, so that a demo can be run again and again. The first of them have a
-    // task that a run was killed over, with its record, so that a demo starts by going on with a session.
-    ImitatedTasks DemoTasks(QueueRules rules, bool killed = true)
-    {
-        if (kept is null && !killed)
-        {
-            kept = new ImitatedTasks(rules, killed: false);
-        }
-        else if (kept is null)
-        {
-            kept = new ImitatedTasks(rules, killed: true);
-            remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, Clock.Now)));
-        }
-        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Interrupted))
-        {
-            kept = new ImitatedTasks(rules, killed: false);
-        }
-
-        return kept;
-    }
+    // The run that goes on in the working copy; null when none does.
+    public GoingRun? Going() => Runs.Going();
 
     // What a run over these settings and this milestone would take as things are: how many tasks, those that are
     // ready and those that open after them, and the one it goes on with first: the task of the record an earlier
     // run left, or one that was interrupted before. `skip` are the labels whose tasks the run leaves out. Null when
-    // the tasks cannot be read. A demo counts its made-up tasks, and takes a moment over it, as a tracker does.
+    // the tasks cannot be read.
     public async Task<QueueOutlook?> OutlookAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
     {
         try
         {
-            if (Demo)
-                await Clock.DelayAsync(TimeSpan.FromSeconds(1), cancellationToken);
-
             if (await ReadQueueAsync(settings, milestone, skip, cancellationToken) is not var (lineup, recorded))
                 return null;
 
@@ -186,19 +122,16 @@ public sealed record Workbench(
 
     // The queue as a run over these settings and this milestone reads it before a task, and nothing is changed by
     // it: the lineup, with the task an earlier run left with a session before the others, and that task, null when
-    // there is none or the run would not go on with it. `skip` are the labels whose tasks the run leaves out. In a
-    // demo the tasks are its made-up ones. Null when the project has no tasks to read: its `origin` remote is not a
-    // GitHub repository. Throws TrackerException when the tracker refuses.
+    // there is none or the run would not go on with it. `skip` are the labels whose tasks the run leaves out. Null
+    // when the project has no tasks to read: its `origin` remote is not a GitHub repository. Throws TrackerException
+    // when the tracker refuses.
     public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
     {
-        var rules = QueueRules.Of(settings) with { Skip = skip };
-        ITaskTracker? tasks = Demo ? DemoTasks(rules) : Repository is null ? null : new GitHubTasks(Processes, Repository, settings.Tracker.Board, settings.Tracker.Statuses);
-        if (tasks is null)
+        if (await Runs.ReadOpenAsync(settings, milestone, cancellationToken) is not { } open)
             return null;
 
-        var open = await tasks.ReadOpenAsync(milestone, cancellationToken);
-        IRunState state = Demo ? remembered : new RunStateFile(LocalFolder.Of(Root));
-        var recorded = state.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
+        var rules = QueueRules.Of(settings) with { Skip = skip };
+        var recorded = Runs.State.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
         var lineup = TaskLineup.Arrange(open, rules);
         return (recorded is null ? lineup : lineup.Taking(recorded), recorded);
     }

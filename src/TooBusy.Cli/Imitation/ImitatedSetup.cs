@@ -45,8 +45,9 @@ public sealed class ImitatedSetup(string? origin) : ISetupEnvironment, ISetupTra
 
 // The boards of a demo: the real ones of the user when they can be read, and made-up ones after them until
 // there are enough to try a list that scrolls. The owners a board can be made for are filled up the same way.
-// They take their time, so that the wait for them can be looked at, unless nobody watches.
-public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watched = true) : ISetupBoards
+// They take their time, so that the wait for them can be looked at, unless nobody watches: a setup without a screen
+// has no wait to look at.
+public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watched) : ISetupBoards
 {
     const int Enough = 10;
 
@@ -68,9 +69,6 @@ public sealed class ImitatedBoards(ISetupBoards? real, IClock clock, bool watche
     // other of them.
     public static bool NamesOtherwise(string board) =>
         board.StartsWith(MadeUp, StringComparison.OrdinalIgnoreCase) && int.TryParse(board[MadeUp.Length..], out var number) && number % 2 == 0;
-
-    // The same boards for a setup that has no screen: there is no wait to look at.
-    public ImitatedBoards Unwatched => new(real, clock, watched: false);
 
     public async Task<SetupBoards> ReadAsync(string? repository, CancellationToken cancellationToken)
     {

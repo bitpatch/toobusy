@@ -1,15 +1,19 @@
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
+using TooBusy.Infrastructure.Run;
 
 namespace TooBusy.Cli.Imitation;
 
-// A run of a demo: the real run over made-up tasks and made-up sessions, with a working tree that is always clean
-// and a machine that is left alone. It shows what a run meets: a task whose session a kill stopped and which goes on
-// with it, a task that is done, a session that stops with a question and is told to go on alone, a task done in part
-// whose session makes a task of what is left and is marked as waiting after its report, a usage limit that is waited
-// out, a task that opens after another, and tasks that are held. Nothing is changed anywhere.
-public static class ImitatedRun
+// The runs of a demo: the real run over made-up tasks and made-up sessions, with a working tree that is always clean
+// and a machine that is left alone. Each shows what a run meets: a task whose session a kill stopped and which goes
+// on with it, a task that is done, a session that stops with a question and is told to go on alone, a task done in
+// part whose session makes a task of what is left and is marked as waiting after its report, a usage limit that is
+// waited out, a task that opens after another, and tasks that are held. Nothing is changed anywhere. The made-up tasks
+// and the record are kept in memory for as long as the demo goes on, and nowhere else: the menu and the next run see
+// a task that an abort left interrupted. The menu counts the tasks and takes a moment over it, as a tracker does, so
+// that the count can be looked at, unless nobody watches.
+public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
 {
     // A demo does not make anybody wait as a run does.
     public static RunPolicy Pace { get; } = RunPolicy.Default with
@@ -22,11 +26,53 @@ public static class ImitatedRun
         UnknownLimitWait = TimeSpan.FromSeconds(5),
     };
 
-    // The tracker and the record are those the demo keeps for the menu and for the runs after this one.
+    static readonly TimeSpan Wait = TimeSpan.FromSeconds(1);
+
+    readonly UnwrittenState remembered = new();
+    ImitatedTasks? kept;
+
+    public IRunState State => remembered;
+
+    // A demo looks at no sign, as it puts none up.
+    public GoingRun? Going() => null;
+
+    public async Task<IReadOnlyList<QueueTask>?> ReadOpenAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken)
+    {
+        if (watched)
+            await clock.DelayAsync(Wait, cancellationToken);
+        return await Tasks(QueueRules.Of(settings)).ReadOpenAsync(milestone, cancellationToken);
+    }
+
     // A demo runs no command of the project and checks no branch, whatever the settings say, and puts up no sign: it
-    // works on nothing, so it goes on beside a run, and a run beside it.
-    public static IQueueRun Open(RunPlan plan, IClock clock, ImitatedTasks tasks, IRunState state) =>
-        new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), state, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None, Branch = null }, Pace);
+    // works on nothing, so it goes on beside a run, and a run beside it. A demo of a run of one task has no task that
+    // a run was killed over, unless it is the one: the record of that task would keep the run from any other.
+    public IQueueRun Open(ProjectSettings settings, RunPlan plan)
+    {
+        var tasks = Tasks(plan.Rules, killed: plan.Only is null or ImitatedTasks.Killed);
+        return new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), remembered, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None, Branch = null }, Pace);
+    }
+
+    // The made-up tasks: those that were kept while one of them is interrupted or has a record, and otherwise tasks
+    // that are made up anew, so that a demo can be run again and again. The first of them have a task that a run was
+    // killed over, with its record, so that a demo starts by going on with a session.
+    ImitatedTasks Tasks(QueueRules rules, bool killed = true)
+    {
+        if (kept is null && !killed)
+        {
+            kept = new ImitatedTasks(rules, killed: false);
+        }
+        else if (kept is null)
+        {
+            kept = new ImitatedTasks(rules, killed: true);
+            remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, clock.Now)));
+        }
+        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Interrupted))
+        {
+            kept = new ImitatedTasks(rules, killed: false);
+        }
+
+        return kept;
+    }
 
     sealed class NoCommands : IProjectCommands
     {

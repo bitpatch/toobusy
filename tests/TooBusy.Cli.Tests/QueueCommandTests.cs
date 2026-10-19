@@ -319,6 +319,20 @@ public sealed class QueueCommandTests : CliAppTests
         Assert.Equal("toobusy: the `origin` remote is not a GitHub repository, so there are no tasks to take" + Environment.NewLine, error);
     }
 
+    // The menu of a demo takes a moment over counting its made-up tasks, so that the count can be looked at; the
+    // queue has no page to look at a wait on, and prints them at once.
+    [Fact]
+    public async Task QueueOfADemoWaitsForNothing()
+    {
+        GitRepository();
+        var clock = new InstantClock();
+
+        var (exit, _, _) = await RunAsync(Context(null) with { Clock = clock }, ["queue", "--demo"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(InstantClock.Start, clock.Now);
+    }
+
     [Fact]
     public async Task QueueOfADemoShowsTheMadeUpTasksOfADemoOfARun()
     {

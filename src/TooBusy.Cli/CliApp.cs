@@ -3,7 +3,6 @@ using System.CommandLine.Help;
 using System.CommandLine.Invocation;
 using System.Globalization;
 using System.Reflection;
-using TooBusy.Cli.Imitation;
 using TooBusy.Cli.Terminal;
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Doctor;
@@ -70,7 +69,7 @@ public static class CliApp
         {
             if (context.Terminal is not { } terminal)
                 return FindSettings(context) is null ? ExitCode.NotReady : root.Parse(["--help"]).Invoke(result.InvocationConfiguration);
-            if (FindProject(context) is not { } folder || await OpenAsync(context, folder, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+            if (FindProject(context) is not { } folder || await OpenAsync(context, folder, result.GetValue(demo), ready: true, watched: true, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             return await OnPageAsync(context, terminal, bench, session => session.HomeAsync(cancellationToken), cancellationToken);
@@ -284,11 +283,10 @@ public static class CliApp
             // Without questions there is no screen: what was answered and done is printed as plain lines.
             if (result.GetValue(yes))
             {
-                if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } unasked)
+                if (await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: false, cancellationToken) is not { } unasked)
                     return ExitCode.NotReady;
 
-                var boards = unasked.Boards is ImitatedBoards imitated ? imitated.Unwatched : unasked.Boards;
-                var setup = await new ProjectSetup(null, unasked.Environment, unasked.Tracker, boards, unasked.Settings, proposals).RunAsync(cancellationToken);
+                var setup = await new ProjectSetup(null, unasked.Environment, unasked.Tracker, unasked.Boards, unasked.Settings, proposals).RunAsync(cancellationToken);
                 context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
                 foreach (var note in setup.Notes)
                 {
@@ -313,21 +311,10 @@ public static class CliApp
                 return ExitCode.Failed;
             }
 
-            if (await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+            if (await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: true, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
-            Session session;
-            using (var page = OpenPage(context, terminal, root))
-            {
-                session = new Session(page, bench);
-                try
-                {
-                    await session.SetupAsync(leavesPage: true, cancellationToken, proposals);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                }
-            }
+            var session = await WithPageAsync(context, terminal, bench, session => session.SetupAsync(leavesPage: true, cancellationToken, proposals), cancellationToken);
 
             // The screen is gone; what was answered and how it ended is left in the terminal.
             context.Output.WriteLine($"toobusy · Setting up this project · {context.Shorten(root)}");
@@ -362,7 +349,7 @@ public static class CliApp
             return ExitCode.Done;
         }
 
-        if (await OpenAsync(context, root, demo: false, ready: false, cancellationToken) is not { } bench)
+        if (await OpenAsync(context, root, demo: false, ready: false, watched: false, cancellationToken) is not { } bench)
             return ExitCode.NotReady;
 
         var ground = await bench.AssistAsync(number is null ? AssistReading.Nothing : Assist.Reads(step), cancellationToken);
@@ -387,7 +374,7 @@ public static class CliApp
                 return ExitCode.NotReady;
             }
 
-            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: context.Terminal is not null, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (result.GetValue(none))
@@ -452,7 +439,7 @@ public static class CliApp
                 return ExitCode.NotReady;
             }
 
-            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: context.Terminal is not null, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (result.GetValue(own))
@@ -498,7 +485,7 @@ public static class CliApp
         command.Arguments.Add(level);
         command.SetAction(async (result, cancellationToken) =>
         {
-            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, cancellationToken) is not { } bench)
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: false, watched: context.Terminal is not null, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (result.GetValue(level) is { } named)
@@ -533,19 +520,7 @@ public static class CliApp
     // or that nothing was.
     static async Task<int> ChooseOnPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task<bool>> ask, string left, CancellationToken cancellationToken)
     {
-        Session session;
-        using (var page = OpenPage(context, terminal, bench.Root))
-        {
-            session = new Session(page, bench);
-            try
-            {
-                await ask(session);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-            }
-        }
-
+        var session = await WithPageAsync(context, terminal, bench, ask, cancellationToken);
         context.Output.WriteLine($"toobusy · {context.Shorten(bench.Root)}");
         if (!ReportChoices(context, session, bench.Demo))
             context.Output.WriteLine(left);
@@ -578,7 +553,7 @@ public static class CliApp
                 return ExitCode.NotReady;
 
             var root = ProjectLocator.FindRoot(context.Folder)!;
-            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: context.Terminal is not null, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (ValidSettings(context, bench) is not { } settings)
@@ -650,7 +625,7 @@ public static class CliApp
                 return ExitCode.NotReady;
 
             var root = ProjectLocator.FindRoot(context.Folder)!;
-            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+            if (await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: false, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             if (ValidSettings(context, bench) is not { } settings)
@@ -711,9 +686,8 @@ public static class CliApp
                 return ExitCode.NotReady;
 
             // A demo shows a made-up run that goes on, whatever the project has.
-            var local = LocalFolder.Of(root);
-            var going = result.GetValue(demo) ? StatusLook.MadeUp : new RunSignFile(local).Read();
-            var left = going is null ? new RunStateFile(local).Load() : null;
+            var going = result.GetValue(demo) ? StatusLook.MadeUp : LocalFolder.Sign(root).Read();
+            var left = going is null ? LocalFolder.State(root).Load() : null;
             if (result.GetValue(json))
             {
                 context.Output.WriteLine(StatusLook.Json(going, left));
@@ -768,7 +742,7 @@ public static class CliApp
         var command = new Command("doctor", "Checks everything a run needs, and says how to fix what is missing.");
         command.SetAction(async (result, cancellationToken) =>
         {
-            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: true, cancellationToken) is not { } bench)
+            if (FindProject(context) is not { } root || await OpenAsync(context, root, result.GetValue(demo), ready: true, watched: false, cancellationToken) is not { } bench)
                 return ExitCode.NotReady;
 
             IReadOnlyList<CheckResult> checks;
@@ -809,21 +783,7 @@ public static class CliApp
     // page is reported under it.
     static async Task<int> OnPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task> open, CancellationToken cancellationToken)
     {
-        Session session;
-        using (var page = OpenPage(context, terminal, bench.Root))
-        {
-            session = new Session(page, bench);
-            try
-            {
-                await open(session);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested || session.Runs is [.., { End: RunEnd.Killed }])
-            {
-                // The page was left. A run that was killed on it is told as one, even where one more Ctrl+C stopped
-                // the tool from outside while the run did what the kill does not cut.
-            }
-        }
-
+        var session = await WithPageAsync(context, terminal, bench, open, cancellationToken);
         var failed = false;
         if (session.Runs.Count == 0 || session.Setup is not null || session.Chose)
         {
@@ -901,12 +861,30 @@ public static class CliApp
         return chosen.Count > 0;
     }
 
-    static Page OpenPage(CliContext context, TerminalDevice terminal, string root) =>
-        new(context.Output, context.OutputPalette, terminal, $"toobusy · {context.Shorten(root)}");
+    // Opens the page of toobusy for what is done on it, and closes it when that is over or the page was left: the
+    // session it gives remembers what was done, for the report each command leaves in the terminal. A run that was
+    // killed on the page is told as one, even where one more Ctrl+C stopped the tool from outside while the run did
+    // what the kill does not cut.
+    static async Task<Session> WithPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task> open, CancellationToken cancellationToken)
+    {
+        using var page = new Page(context.Output, context.OutputPalette, terminal, $"toobusy · {context.Shorten(bench.Root)}");
+        var session = new Session(page, bench);
+        try
+        {
+            await open(session);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested || session.Runs is [.., { End: RunEnd.Killed }])
+        {
+            // The page was left.
+        }
+
+        return session;
+    }
 
     // What the commands work with in the project. Outside a demo the choices of the user need a place on the
-    // machine; without one it says so and gives null.
-    static async Task<Workbench?> OpenAsync(CliContext context, string root, bool demo, bool ready, CancellationToken cancellationToken)
+    // machine; without one it says so and gives null. `watched` says whether a page shows what is read while it is
+    // read.
+    static async Task<Workbench?> OpenAsync(CliContext context, string root, bool demo, bool ready, bool watched, CancellationToken cancellationToken)
     {
         if (!demo && context.PersonalFolder is null)
         {
@@ -914,7 +892,7 @@ public static class CliApp
             return null;
         }
 
-        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, context.Clock, context.Home, context.Variables, cancellationToken);
+        return await Workbench.OpenAsync(root, demo, context.Processes, context.PersonalFolder ?? "", ready, watched, context.Clock, context.Home, context.Variables, cancellationToken);
     }
 
     // The root of the project around the folder; without a project it says so and gives null.

@@ -506,6 +506,20 @@ public sealed class InitCommandTests : CliAppTests
         Assert.False(Directory.Exists(Path.Combine(folder.FullName, ".toobusy")));
     }
 
+    // The boards of a demo take their time on the screen, so that the wait for them can be looked at; a setup that
+    // asks nothing has no wait to look at.
+    [Fact]
+    public async Task WithYesADemoWaitsForNothing()
+    {
+        GitRepository();
+        var clock = new InstantClock();
+
+        var (exit, _, _) = await RunAsync(Context(null) with { Clock = clock }, ["init", "--demo", "--yes"]);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(InstantClock.Start, clock.Now);
+    }
+
     [Fact]
     public async Task WithYesInATerminalNoScreenIsOpened()
     {
