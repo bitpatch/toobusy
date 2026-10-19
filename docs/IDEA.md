@@ -49,7 +49,7 @@ What is one person's own is not in the folder: the milestone to work on, and the
 - **One task at a time in the shared working copy** in the first version. The design must not prevent running several sessions in parallel in separate git worktrees later.
 - **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it.
 - **The owner can always look inside.** Every message names the session and how to open it.
-- **A single native binary.** Built with Native AOT for macOS, Linux and Windows; macOS is the first platform.
+- **A single native binary.** Built with Native AOT for macOS and Linux; macOS is the first platform, and Windows comes later.
 
 ## Where it comes from
 

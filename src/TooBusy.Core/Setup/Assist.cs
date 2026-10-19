@@ -437,7 +437,7 @@ public static class Assist
 
             The rules of a command:
 
-            - it is one line for the shell, `sh -c` and on Windows `cmd /c`, run at the root of the working copy, after the branch is brought up to date;
+            - it is one line for the shell, `sh -c`, run at the root of the working copy, after the branch is brought up to date;
             - it exits with 0 when all is well: a `before` that fails stops the run before the task is touched, and an `after` that fails stops the run after it;
             - it is given up after {Spoken.Time(RunPolicy.Default.CommandTime)};
             - it learns the task from its environment: `TOOBUSY_TASK` is the number, `TOOBUSY_TASK_TITLE` the title and `TOOBUSY_TASK_URL` the address;

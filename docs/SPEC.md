@@ -108,7 +108,7 @@ The file that `init` writes carries a short comment over each section. `init` on
 
 Only the tasks of one milestone are taken, and the user says which: one of the open milestones of the repository, or none, and then tasks are taken whatever their milestone. toobusy never chooses a milestone on its own.
 
-The choice is personal. It is not a setting of the project and is not committed: it is kept on the machine of the user, for each project apart, in `projects.toml` of the user's own toobusy folder. That folder is `$XDG_CONFIG_HOME/toobusy` when the variable is set, `%APPDATA%\toobusy` on Windows, and `~/.config/toobusy` otherwise. On a machine that names none of them, every command that works in a project fails with `toobusy: there is no home folder to keep your choices in` and exit code 2; a demo, which keeps nothing, does not.
+The choice is personal. It is not a setting of the project and is not committed: it is kept on the machine of the user, for each project apart, in `projects.toml` of the user's own toobusy folder. That folder is `$XDG_CONFIG_HOME/toobusy` when the variable is set, and `~/.config/toobusy` otherwise. On a machine that names neither, every command that works in a project fails with `toobusy: there is no home folder to keep your choices in` and exit code 2; a demo, which keeps nothing, does not.
 
 ```toml
 ["/Users/ann/Projects/rocket"]
@@ -1080,7 +1080,7 @@ A branch without an upstream has nothing to be brought up to date with: the log 
 
 A project may need something done around every task: that the ports of its development server are free before one, that the server is stopped after it. As a rule in the instructions of the project it is something a session may forget, so the run does it itself: `task.before` and `task.after` of the settings are two commands, each optional, that the run runs around a task.
 
-**A command** is a line for the shell of the machine, `sh -c` and on Windows `cmd /c`, run at the root of the working copy with its input closed and git's prompts off, as [The branch of the tasks](#the-branch-of-the-tasks) says under a login. The run knows of it only whether it exited with 0. It has the environment of toobusy and, of the task:
+**A command** is a line for the shell of the machine, `sh -c`, run at the root of the working copy with its input closed and git's prompts off, as [The branch of the tasks](#the-branch-of-the-tasks) says under a login. The run knows of it only whether it exited with 0. It has the environment of toobusy and, of the task:
 
 | Variable | What it is |
 |---|---|

@@ -163,20 +163,18 @@ public sealed class PersonalSettingsFileTests : IDisposable
     }
 
     [Theory]
-    [InlineData("/settings", null, false, "/settings")]
-    [InlineData(null, null, false, "/home/ann/.config")]
-    [InlineData("", @"C:\Users\ann\AppData\Roaming", true, @"C:\Users\ann\AppData\Roaming")]
-    public void TheFolderFollowsTheCustomOfThePlatform(string? given, string? roaming, bool windows, string settings)
+    [InlineData("/settings", "/settings/toobusy")]
+    [InlineData(null, "/home/ann/.config/toobusy")]
+    [InlineData("", "/home/ann/.config/toobusy")]
+    public void TheFolderIsTheOneOfXdgWhenItIsSetAndInTheHomeOtherwise(string? given, string found)
     {
-        var found = PersonalSettingsFile.FindFolder(name => name == "XDG_CONFIG_HOME" ? given : name == "APPDATA" ? roaming : null, "/home/ann", windows);
-
-        Assert.Equal(Path.Combine(settings.Replace("/home/ann/.config", Path.Combine("/home/ann", ".config"), StringComparison.Ordinal), "toobusy"), found);
+        Assert.Equal(found, PersonalSettingsFile.FindFolder(name => name == "XDG_CONFIG_HOME" ? given : null, "/home/ann"));
     }
 
     [Fact]
     public void WithoutAHomeThereIsNoFolder()
     {
-        Assert.Null(PersonalSettingsFile.FindFolder(_ => null, "", windows: false));
+        Assert.Null(PersonalSettingsFile.FindFolder(_ => null, ""));
     }
 
     PersonalSettingsFile Of(string root) => new(folder.FullName, root);

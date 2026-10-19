@@ -57,8 +57,7 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
             },
         Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         Processes = new ProcessRunner(),
-        PersonalFolder = PersonalSettingsFile.FindFolder(
-            Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+        PersonalFolder = PersonalSettingsFile.FindFolder(Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
         Variables = Environment.GetEnvironmentVariable,
         Trace = Environment.GetEnvironmentVariable("TOOBUSY_TRACE") == "1",
     };

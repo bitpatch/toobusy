@@ -5,7 +5,7 @@ using TooBusy.Core.Run;
 
 namespace TooBusy.Infrastructure.Processes;
 
-// The commands of a project, run through the shell of the machine in a folder: `sh -c` and, on Windows, `cmd /c`.
+// The commands of a project, run through the shell of the machine in a folder, `sh -c`.
 // The input of a command is closed at once and git's prompts are off, as `Unattended` has them, so that it does not
 // wait for an answer. What it prints to its output and to where its errors go is kept as one text, as it comes.
 public sealed class ShellCommands(string folder) : IProjectCommands
@@ -64,9 +64,6 @@ public sealed class ShellCommands(string folder) : IProjectCommands
 
     static ProcessStartInfo Shell(string command)
     {
-        if (OperatingSystem.IsWindows())
-            return new ProcessStartInfo("cmd.exe") { Arguments = $"/d /s /c \"{command}\"" };
-
         var shell = new ProcessStartInfo("sh");
         shell.ArgumentList.Add("-c");
         shell.ArgumentList.Add(command);

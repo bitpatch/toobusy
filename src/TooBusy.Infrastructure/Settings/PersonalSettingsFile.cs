@@ -21,15 +21,14 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
 
     public string Path { get; } = System.IO.Path.Combine(folder, "projects.toml");
 
-    // The folder of the user's own settings: `$XDG_CONFIG_HOME/toobusy`, `%APPDATA%\toobusy` on Windows, and
-    // `~/.config/toobusy` otherwise. Null when no such folder is known.
-    public static string? FindFolder(Func<string, string?> variable, string home, bool windows)
+    // The folder of the user's own settings: `$XDG_CONFIG_HOME/toobusy`, and `~/.config/toobusy` otherwise. Null when
+    // no such folder is known.
+    public static string? FindFolder(Func<string, string?> variable, string home)
     {
         var settings = variable("XDG_CONFIG_HOME") is { Length: > 0 } given ? given
-            : windows ? variable("APPDATA")
             : home.Length > 0 ? System.IO.Path.Combine(home, ".config")
             : null;
-        return string.IsNullOrEmpty(settings) ? null : System.IO.Path.Combine(settings, "toobusy");
+        return settings is null ? null : System.IO.Path.Combine(settings, "toobusy");
     }
 
     public MilestoneChoice? LoadMilestone() => Load(Milestone) is { } title ? new MilestoneChoice(title.Length == 0 ? null : title) : null;
