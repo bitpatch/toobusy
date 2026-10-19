@@ -86,7 +86,8 @@ public sealed class Screen(TextWriter output, Palette palette, Func<(int Width, 
         }
     }
 
-    // The blink is counted in beats: so many of them take it from its brightest to nothing and back.
+    // The blink is counted in beats: so many of them take it from its brightest to nothing and back. tools/screenshot.py
+    // reads the two numbers from these lines for the length of a blink, so they stay numbers written out.
     public static readonly TimeSpan Beat = TimeSpan.FromMilliseconds(80);
     const int Beats = 20;
 

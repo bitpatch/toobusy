@@ -26,7 +26,7 @@ dotnet run --project src/TooBusy.Cli -- about             # how a run works, wit
 dotnet run --project src/TooBusy.Cli -- doctor            # checks everything a run needs; changes nothing
 dotnet run --project src/TooBusy.Cli -- doctor --demo     # the same over a made-up machine that has it all
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
-tools/screenshot.py init --demo -- "until:Choose another" shot down enter until:Filter shot tab shot blink   # pictures of the screen in artifacts/screens; the setup reads from GitHub first: wait for its question
+tools/screenshot.py init --demo -- "until:Choose another" shot down enter until:Filter shot tab shot blink   # pictures of the screen in a new folder of artifacts/screens; the setup reads from GitHub first: wait for its question
 tools/screenshot.py run --demo -- "until:Edit src" shot type:/ shot   # a run goes on by itself: wait for what it shows
 ```
 
@@ -37,7 +37,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 - Follow the dependency rules in docs/ARCHITECTURE.md. `TooBusy.Core` depends on nothing; adapters depend on Core only. The architecture tests enforce it.
 - Keep the code Native AOT compatible: no reflection-based serialisation, no dependency that is not trim-safe. Check a new package by publishing the native binary.
 - Nothing project-specific in the code. The repository is the one of the `origin` remote, and the board and the labels come from the settings in `.toobusy/`. What a project will choose later, such as the statuses of its board, branches, prompts and commands, goes into the settings too, never into the code.
-- A change of what a screen looks like is looked at before it is shown: take pictures with `tools/screenshot.py` and read them. The tests see the text of a screen, not its colours.
+- A change of what a screen looks like is looked at before it is shown: take pictures with `tools/screenshot.py` and read them. The tests see the text of a screen, not its colours. The tool works on macOS and Linux and needs `python3`, and the network at its first run, when it installs `pyte` and `Pillow` into `artifacts/screens/.venv`; it builds the Debug binary, runs it with `--demo` only unless `--real` is given, ends it with Ctrl+C and puts the pictures of each run into a folder of their own, which it prints. Its terminal has all the colours, so the `Basic` and `None` palettes are not seen on it, and its font is not the one of a real terminal. `tools/screenshot.py --help` has its options: `--light`, `--size`, `--scale`, `--binary`, `--no-build`, `--directory` and `--real`.
 - The code and the documentation say the same thing. Before a task is finished, check whether its change calls for one in the documentation: docs/SPEC.md, docs/IDEA.md, docs/ARCHITECTURE.md, the README, the text of `toobusy about`, the steps of `toobusy init --assist`, the help of a command and this file. Change what it does, in the same commit.
 - New behaviour comes with tests. Core is tested with hand-written fakes of its ports.
 - A test does not wait without an end, so that a regression fails it with a message instead of hanging the whole run. A screen test waits for the page through `Keys.Hold`, `Keys.Until`, `ScriptedRun.NextAsync`, `SeenAsync` or `GoneAsync`, which give up after `Keys.Patience`, or a hundred presses, with a message, the last two with what the screen shows; a run in Core is ended by its fakes: the two days of `FakeClock` and the `Budget` of the calls a run makes again and again, in `RunFakes.cs`.

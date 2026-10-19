@@ -17,13 +17,19 @@ What stands before `--` are the arguments of toobusy, what stands after it is th
     shot[:<name>]   takes a picture
     blink[:<n>]     takes n pictures (10 if not said) over one blink and stacks the rows that change
 
-The pictures go to artifacts/screens. The emulator and the drawing need pyte and Pillow: at the first run they are
+toobusy is run with --demo only, unless --real is given: without it a run takes real tasks of the tracker and starts
+real sessions. When the scenario is over toobusy is ended with Ctrl+C, as a user ends it, so that a run kills its
+session the way it does; it is killed only when it does not end.
+
+The pictures of each run of the tool go to a folder of their own in artifacts/screens, so that those of an earlier
+one stay to be compared with. The emulator and the drawing need pyte and Pillow: at the first run they are
 installed into artifacts/screens/.venv, and nothing is added to toobusy itself.
 """
 
 import argparse
 import fcntl
 import os
+import re
 import select
 import shutil
 import signal
@@ -39,9 +45,13 @@ SCREENS = ROOT / "artifacts" / "screens"
 VENV = SCREENS / ".venv"
 BINARY = ROOT / "src" / "TooBusy.Cli" / "bin" / "Debug" / "net10.0" / "toobusy"
 
-# One blink of the screen: Screen.Beat times Screen.Beats.
-BLINK = 1.6
+# Where the length of a blink is said: Screen.Beat times Screen.Beats.
+SCREEN = ROOT / "src" / "TooBusy.Cli" / "Terminal" / "Screen.cs"
 SETTLE = 0.25
+
+# How long toobusy is given to end on Ctrl+C, and then on a SIGINT from outside, before it is killed.
+STOPPING = 15.0
+INTERRUPTED = 5.0
 
 KEYS = {
     "tab": b"\t",
@@ -209,10 +219,31 @@ class Terminal:
             rows.append(row)
         return rows
 
+    def ended(self, seconds):
+        """Waits for the binary to end, for the given time at most, and takes in what it writes meanwhile: a process
+        does not end while what it wrote to its terminal is unread."""
+        end = time.monotonic() + seconds
+        while self.process.poll() is None and time.monotonic() < end:
+            self.read(0.05)
+        return self.process.poll() is not None
+
     def close(self):
+        """Ends the binary as a user does: Ctrl+C, typed as the terminal types it, and once more after a while.
+        On a page of toobusy it is a key, which asks first and leaves the second time, and a run that is left so kills
+        its session; where no page is open the terminal makes a SIGINT of it. Only a binary that does not end on that
+        gets a SIGINT from outside, and then SIGKILL."""
+        for wait in (SETTLE, STOPPING):
+            if self.process.poll() is None:
+                try:
+                    os.write(self.master, b"\x03")
+                except OSError:
+                    pass
+                self.ended(wait)
         if self.process.poll() is None:
-            self.process.send_signal(signal.SIGKILL)
-        # The terminal is closed first: a process does not end while what it wrote to its terminal is unread.
+            self.process.send_signal(signal.SIGINT)
+            if not self.ended(INTERRUPTED):
+                print("screenshot: toobusy did not end on Ctrl+C and was killed", file=sys.stderr)
+                self.process.send_signal(signal.SIGKILL)
         os.close(self.master)
         self.process.wait()
 
@@ -273,14 +304,25 @@ class Painter:
         return image
 
 
+def blink_length():
+    """How many seconds one blink of the screen takes, read from where the screen has it, so that it is the same."""
+    source = SCREEN.read_text()
+    beat = re.search(r"\bBeat = TimeSpan\.FromMilliseconds\((\d+)\);", source)
+    beats = re.search(r"\bconst int Beats = (\d+);", source)
+    if not beat or not beats:
+        sys.exit(f"screenshot: the length of a blink, Screen.Beat times Screen.Beats, is not found in {SCREEN.relative_to(ROOT)}")
+    return int(beat[1]) * int(beats[1]) / 1000
+
+
 def blink(terminal, painter, count):
     """Pictures of the rows that change during one blink, one under another in the order of time."""
     from PIL import Image
 
+    length = blink_length()
     frames = []
     for _ in range(count):
         frames.append(terminal.cells())
-        terminal.read(BLINK / count)
+        terminal.read(length / count)
 
     changing = [y for y in range(len(frames[0])) if any(frame[y] != frames[0][y] for frame in frames)]
     if not changing:
@@ -293,6 +335,19 @@ def blink(terminal, painter, count):
     for index, strip in enumerate(strips):
         image.paste(strip, (0, index * (strip.height + gap)))
     return image, f"rows {first + 1}–{last} at {count} moments of a blink"
+
+
+def new_folder(command):
+    """The folder of the pictures of this run of the tool: named by the time and the command of toobusy."""
+    name = time.strftime("%Y%m%d-%H%M%S") + "".join(f"-{word}" for word in command[:1] if not word.startswith("-"))
+    for count in range(1, 100):
+        folder = SCREENS / (name if count == 1 else f"{name}-{count}")
+        try:
+            folder.mkdir(parents=True)
+            return folder
+        except FileExistsError:
+            pass
+    sys.exit(f"screenshot: no new folder could be made for {name} in {SCREENS.relative_to(ROOT)}")
 
 
 def main():
@@ -311,7 +366,12 @@ def main():
     parser.add_argument("--no-build", action="store_true", help="do not build before running")
     parser.add_argument("--directory", default=str(ROOT), help="the folder toobusy is run in (the repository)")
     parser.add_argument("--scale", type=int, default=2, help="how many pixels a point takes (2)")
+    parser.add_argument("--real", action="store_true", help="run toobusy without --demo, on the real tracker and assistant")
     options, command = parser.parse_known_args(arguments)
+
+    if "--demo" not in command and not options.real:
+        sys.exit("screenshot: toobusy is run with --demo only: without it a run takes real tasks and starts real "
+                 "sessions. --real runs it as it is.")
 
     with_libraries()
 
@@ -326,17 +386,14 @@ def main():
     theme = THEMES["light" if options.light else "dark"]
     painter = Painter(theme, options.scale)
 
-    SCREENS.mkdir(parents=True, exist_ok=True)
-    for old in [*SCREENS.glob("*.png"), *SCREENS.glob("*.txt")]:
-        old.unlink()
-
+    folder = new_folder(command)
     terminal = Terminal([options.binary or str(BINARY), *command], columns, rows, theme, options.directory)
     taken = 0
 
     def save(image, name, note):
         nonlocal taken
         taken += 1
-        path = SCREENS / f"{taken:02}-{name}.png"
+        path = folder / f"{taken:02}-{name}.png"
         image.save(path)
         path.with_suffix(".txt").write_text(terminal.text() + "\n")
         print(f"{path.relative_to(ROOT)}  {note}")
