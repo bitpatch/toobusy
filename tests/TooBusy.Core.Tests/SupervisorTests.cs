@@ -1,6 +1,7 @@
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
 
@@ -13,7 +14,7 @@ public sealed partial class SupervisorTests : IDisposable
     const string Done = "Did it.\nTOOBUSY: done";
     const string Half = "Half of it; the rest is #9.\nTOOBUSY: partial";
 
-    static readonly QueueRules Rules = new(["manual"], ["feature", "bug"], "needs-owner", "interrupted", Board: true);
+    static readonly QueueRules Rules = new(new LabelSettings(["manual"], ["feature", "bug"], "needs-owner", "interrupted"), Board: true);
 
     readonly FakeClock clock = new();
     readonly FakeTracker tracker = new();

@@ -1,12 +1,13 @@
 using TooBusy.Core.Assistant;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
 
 public class AboutTests
 {
-    static readonly QueueRules Rules = new(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted", Board: true);
+    static readonly QueueRules Rules = new(new LabelSettings(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted"), Board: true);
 
     static readonly NewTasks Ground = new("needs-owner", [], "<the milestone the user works on>", "<the address of the board>");
 
@@ -28,6 +29,8 @@ public class AboutTests
         Assert.Contains($"```text\n{Briefing.AfterStop(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains($"```text\n{Briefing.AfterAbort(12)}\n```", text, StringComparison.Ordinal);
         Assert.Contains("```text\n- A session worked on this task before, and its conversation is gone: it left no report.", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.InterruptedRule}\n```", text, StringComparison.Ordinal);
+        Assert.Contains($"```text\n{Briefing.LostRule}\n```", text, StringComparison.Ordinal);
         Assert.EndsWith("is the project's to say, and so is which tasks it makes besides the one for the owner: in the skill a session starts with, as told under “A session starts with the skill of the project”, or in its instructions.\n", text, StringComparison.Ordinal);
     }
 
@@ -80,7 +83,7 @@ public class AboutTests
     [Fact]
     public void AProjectWithoutABoardAndWithoutLabelsToTakeIsToldAsItIs()
     {
-        var text = About.Text(new QueueRules(["manual"], [], "manual", "interrupted", Board: false), RunPolicy.Default);
+        var text = About.Text(new QueueRules(new LabelSettings(["manual"], [], "manual", "interrupted"), Board: false), RunPolicy.Default);
 
         Assert.Contains("- A task with the label `manual` is not taken.\n- The project has no board: a task has no status, and where a status is named below, nothing is moved.\n", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Only a task with", text, StringComparison.Ordinal);

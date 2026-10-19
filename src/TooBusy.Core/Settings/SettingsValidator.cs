@@ -74,9 +74,9 @@ public static partial class SettingsValidator
                 new QueueSettings(labels),
                 new AssistantSettings(assistantType ?? "") { PermissionMode = mode })
             {
-                Skill = skill?.Text,
+                Session = new SessionSettings(skill?.Text),
                 Commands = new TaskCommands(Command(SettingsKeys.TaskBefore), Command(SettingsKeys.TaskAfter)),
-                Branch = branch?.Text,
+                Workspace = new WorkspaceSettings(branch?.Text),
             };
         }
 

@@ -137,7 +137,7 @@ public sealed class UnwrittenSettings(ISettingsStore file, bool madeUp = false) 
             new QueueSettings(new LabelSettings(["draft"], ["feature", "bug", "chore", "docs"], "manual", "interrupted")),
             new AssistantSettings(SettingsKeys.ClaudeCodeAssistant))
         {
-            Skill = "task-auto",
+            Session = new SessionSettings("task-auto"),
         }
         : null;
 

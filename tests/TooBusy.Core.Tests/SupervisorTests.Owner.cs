@@ -96,7 +96,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(1, result.Done);
-        Assert.Equal([Briefing.Alone(3, Rules.Manual)], session.Told);
+        Assert.Equal([Briefing.Alone(3, Rules.Labels.Manual)], session.Told);
         Assert.Contains($"‖ #3 ended its turn without saying how the task went · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never · fake attach 3", log.Lines);
     }
 

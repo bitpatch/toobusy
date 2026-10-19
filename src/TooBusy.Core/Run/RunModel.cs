@@ -5,15 +5,15 @@ using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Run;
 
-// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, with the
-// labels the run was told to skip, and the model and the effort the tasks are done with. Board is the address of the board of the project, null where it has none:
-// a run needs it only to tell a session where a new task stands. Skill is the skill of the project a session starts
-// with, null where the project names none. Only is the number of the one task the run does, and Most how many tasks
-// it takes at most; null is a run of the whole queue. A run is given one of the two at most. Commands are the
-// commands of the project the run runs around a task. Branch is the branch the tasks are done on, null where the
-// project names none: the working copy is checked to be on it and brought up to date with its upstream.
-// PermissionMode is the permission mode of the assistant its sessions work in, the one of the settings or the one
-// a session is started in when they name none.
+// What a run works on: the milestone, null for tasks whatever their milestone, the rules of the queue, with the labels
+// the run was told to skip, and the model and the effort the tasks are done with. Board is the address of the board of
+// the project, null where it has none: a run needs it only to tell a session where a new task stands. Skill is the
+// skill of the project a session starts with, null where the project names none. Only is the number of the one task the
+// run does, and Most how many tasks it takes at most; null is a run of the whole queue. A run is given one of the two
+// at most. Commands are the commands of the project the run runs around a task. Branch is the branch the tasks are done
+// on, null where the project names none: the working copy is checked to be on it and brought up to date with its
+// upstream. PermissionMode is the permission mode of the assistant its sessions work in, the one of the settings or the
+// one a session is started in when they name none.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
@@ -38,7 +38,7 @@ public sealed record NewTasks(string Manual, IReadOnlyList<string> Take, string?
 {
     public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
 
-    public static NewTasks Of(RunPlan plan) => new(plan.Rules.Manual, plan.Rules.Take, plan.Milestone, plan.Rules.Board ? plan.Board : null) { Statuses = plan.Rules.Statuses };
+    public static NewTasks Of(RunPlan plan) => new(plan.Rules.Labels.Manual, plan.Rules.Labels.Take, plan.Milestone, plan.Rules.Board ? plan.Board : null) { Statuses = plan.Rules.Statuses };
 }
 
 // The times and the counts of a run.
@@ -250,6 +250,9 @@ public static class Spoken
             : time.TotalHours < 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)time.TotalMinutes} min")
             : string.Create(CultureInfo.InvariantCulture, $"{(int)time.TotalHours} h {time.Minutes:00} min");
     }
+
+    // A moment as a run names it, whatever the time zone of the machine: `2026-10-19 14:05 UTC`.
+    public static string Moment(DateTimeOffset moment) => string.Create(CultureInfo.InvariantCulture, $"{moment.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
 
     public static string Tasks(int count) => count == 1 ? "1 task" : string.Create(CultureInfo.InvariantCulture, $"{count} tasks");
 

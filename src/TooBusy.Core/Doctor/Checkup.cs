@@ -100,7 +100,7 @@ public sealed class Checkup(ICheckupMachine machine, ISettingsStore settings, st
         // A session that starts with a skill the assistant does not have never begins its work: it is not asked.
         if (loaded?.Settings is not { } named)
             Tell(Waits(Skill, "the settings"));
-        else if (named.Skill is not { } skill)
+        else if (named.Session.Skill is not { } skill)
             Tell(new CheckResult(Skill, CheckState.Skipped, "the project names no skill"));
         else
         {

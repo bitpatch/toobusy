@@ -144,6 +144,13 @@ public class BriefingTests
     }
 
     [Fact]
+    public void TheRulesOfATaskTakenAgainAreLinesOfItsFirstMessageAsTheyAreNamed()
+    {
+        Assert.Contains(Briefing.InterruptedRule, Briefing.Task(Export, Ground, interrupted: true).Split('\n'));
+        Assert.Contains(Briefing.LostRule, Briefing.Task(Export, Ground, interrupted: false, lost: true).Split('\n'));
+    }
+
+    [Fact]
     public void TheRuleOfATaskThatWasInterruptedNamesTheCommentsAsTheyAreWritten()
     {
         var message = Briefing.Task(Export, Ground, interrupted: true);

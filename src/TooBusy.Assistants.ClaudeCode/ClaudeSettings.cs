@@ -7,7 +7,7 @@ namespace TooBusy.Assistants.ClaudeCode;
 // the run, when there is one, after every step, so that it reaches a session that works without cutting its turn.
 // The status line, which Claude Code feeds with the state of the session, writes that state to a file, where the run
 // reads the usage limits. And the session works in the working copy itself: a run takes one task at a time there.
-public static class SessionSettings
+public static class ClaudeSettings
 {
     public static string Json(ClaudeFolders folders)
     {

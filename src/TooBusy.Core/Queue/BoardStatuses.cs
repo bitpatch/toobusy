@@ -24,12 +24,14 @@ public sealed record BoardStatuses(string Todo, string InProgress, string Done)
         : Same(name, Done) ? BoardStatus.Done
         : BoardStatus.Other;
 
+    // What the board calls one of the three. A task is moved to no other status, and none of the others has a name
+    // to give the user, so asking for one is a bug.
     public string NameOf(BoardStatus status) => status switch
     {
         BoardStatus.Todo => Todo,
         BoardStatus.InProgress => InProgress,
         BoardStatus.Done => Done,
-        _ => status.ToString(),
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Only Todo, In Progress and Done have a name on the board."),
     };
 
     // The names of the three that are not among the statuses of a board.

@@ -95,7 +95,7 @@ public sealed record Workbench(
     // repository. `only` is the one task the run does and `most` how many it takes at most; without them it is a run
     // of the whole queue. `skip` are the labels whose tasks the run leaves out.
     public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null) =>
-        Runs.Open(settings, new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Branch, PermissionMode = settings.Assistant.SessionMode });
+        Runs.Open(settings, new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Session.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Workspace.Branch, PermissionMode = settings.Assistant.SessionMode });
 
     // The run that goes on in the working copy; null when none does.
     public GoingRun? Going() => Runs.Going();
@@ -148,7 +148,7 @@ public sealed record Workbench(
             Milestone = Personal.LoadMilestone(),
             Model = Personal.LoadModel(),
             Effort = Personal.LoadEffort(),
-            Skill = loaded?.Settings?.Skill is { } skill ? Machine.FindSkill(skill) : null,
+            Skill = loaded?.Settings?.Session.Skill is { } skill ? Machine.FindSkill(skill) : null,
             Going = Going()?.Sign.Told,
         };
         if (reading == AssistReading.Nothing)

@@ -167,7 +167,7 @@ public enum SyncStatus
 // How the branch came out of its sync. Upstream is what it follows, as `origin/develop`; Ahead and Behind count the
 // commits of the branch that its upstream lacks and those of the upstream that it lacked, once the remote was fetched.
 // Said is what git said of a failure, in a line. MayPass says of a remote that could not be fetched that the failure
-// may pass by itself, as when the remote did not answer in time or the network was away: a sync made again may reach it.
+// may pass by itself, as when the remote did not answer in time or the network was away: another sync may reach it.
 public sealed record BranchSync(SyncStatus Status, string? Upstream = null, int Ahead = 0, int Behind = 0, string Said = "")
 {
     public bool MayPass { get; init; }
@@ -252,8 +252,8 @@ public sealed record TaskRecord(int Number, SessionTrace Session, RecordState St
 // throws LocalStateException.
 public interface IRunSign
 {
-    // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given: of two runs
-    // that put theirs up at the same moment, one is given the sign of the other.
+    // Puts the sign up. When another run goes on in the working copy, nothing is put up and its sign is given: of two
+    // runs that put theirs up at the same moment, one is given the sign of the other.
     RunSign? Raise(RunSign sign);
 
     // Says anew what the run is doing.
@@ -299,7 +299,7 @@ public sealed record RunSign(RunPhase Phase)
 
             var waits = Phase switch
             {
-                RunPhase.WaitingForLimit when Until is { } until => string.Create(CultureInfo.InvariantCulture, $" · waits for a usage limit until {until.UtcDateTime:yyyy-MM-dd HH:mm} UTC"),
+                RunPhase.WaitingForLimit when Until is { } until => $" · waits for a usage limit until {Spoken.Moment(until)}",
                 RunPhase.WaitingForLimit => " · waits for a usage limit",
                 RunPhase.WaitingForOwner => " · its session waits for the owner",
                 _ => "",
@@ -325,9 +325,10 @@ public interface IRunView
     }
 }
 
-// A run of the queue. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at
-// once, and its task stays as it is. A task whose session was being started goes back to Todo, and one whose outcome
-// or pause was being told is told to its end.
+// A run of the queue. It is made once: a second RunAsync throws InvalidOperationException, and a second run is a new
+// one. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at once, and its
+// task stays as it is. A task whose session was being started goes back to Todo, and one whose outcome or pause was
+// being told is told to its end.
 public interface IQueueRun
 {
     Task<RunResult> RunAsync(IRunView view, CancellationToken kill);

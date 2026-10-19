@@ -324,7 +324,7 @@ public class SettingsTomlTests
         var existing = Example + "\n[task]\n# The server of the project.\nbefore = 'scripts/dev.sh ports free'   # by hand\n";
         var read = SettingsToml.Read(existing).Settings!;
 
-        var rewritten = SettingsToml.Write(read with { Skill = "task-auto" }, existing);
+        var rewritten = SettingsToml.Write(read with { Session = new SessionSettings("task-auto") }, existing);
 
         Assert.StartsWith(existing, rewritten, StringComparison.Ordinal);
         Assert.Equal(new TaskCommands("scripts/dev.sh ports free", null), SettingsToml.Read(rewritten).Settings!.Commands);
@@ -339,26 +339,26 @@ public class SettingsTomlTests
         var read = SettingsToml.Read(existing);
 
         Assert.Empty(read.Errors);
-        Assert.Equal("develop", read.Settings!.Branch);
-        Assert.Null(SettingsToml.Read(Example).Settings!.Branch);
-        Assert.StartsWith(existing, SettingsToml.Write(read.Settings with { Skill = "task-auto" }, existing), StringComparison.Ordinal);
+        Assert.Equal("develop", read.Settings!.Workspace.Branch);
+        Assert.Null(SettingsToml.Read(Example).Settings!.Workspace.Branch);
+        Assert.StartsWith(existing, SettingsToml.Write(read.Settings with { Session = new SessionSettings("task-auto") }, existing), StringComparison.Ordinal);
     }
 
     [Fact]
     public void ANewFileWithABranchHasItsSectionLastAndARewriteWithoutOneTakesItsLineAway()
     {
-        var settings = Settings with { Commands = new TaskCommands("make free", null), Branch = "develop" };
+        var settings = Settings with { Commands = new TaskCommands("make free", null), Workspace = new WorkspaceSettings("develop") };
 
         var text = SettingsToml.Write(settings);
 
         Assert.EndsWith("\n" + TaskComment + "[task]\nbefore = \"make free\"\n\n" + WorkspaceComment + "[workspace]\nbranch = \"develop\"\n", text, StringComparison.Ordinal);
-        Assert.Equal("develop", SettingsToml.Read(text).Settings!.Branch);
+        Assert.Equal("develop", SettingsToml.Read(text).Settings!.Workspace.Branch);
         Assert.DoesNotContain("[workspace]", SettingsToml.Write(Settings), StringComparison.Ordinal);
 
-        var without = SettingsToml.Write(settings with { Branch = null }, text);
+        var without = SettingsToml.Write(settings with { Workspace = WorkspaceSettings.None }, text);
 
         Assert.EndsWith(WorkspaceComment + "[workspace]\n", without, StringComparison.Ordinal);
-        Assert.Null(SettingsToml.Read(without).Settings!.Branch);
+        Assert.Null(SettingsToml.Read(without).Settings!.Workspace.Branch);
     }
 
     [Fact]
@@ -399,8 +399,8 @@ public class SettingsTomlTests
         var result = SettingsToml.Read(Example + "\n[session]\nskill = \"task-auto\"\n");
 
         Assert.Empty(result.Errors);
-        AssertSame(Settings with { Skill = "task-auto" }, result.Settings!);
-        Assert.Null(SettingsToml.Read(Example).Settings!.Skill);
+        AssertSame(Settings with { Session = new SessionSettings("task-auto") }, result.Settings!);
+        Assert.Null(SettingsToml.Read(Example).Settings!.Session.Skill);
     }
 
     [Fact]
@@ -415,7 +415,7 @@ public class SettingsTomlTests
     [Fact]
     public void ANewFileOfAProjectWithASkillHasItsSectionLast()
     {
-        var text = SettingsToml.Write(Settings with { Skill = "task-auto" });
+        var text = SettingsToml.Write(Settings with { Session = new SessionSettings("task-auto") });
 
         Assert.EndsWith(
             """
@@ -430,25 +430,25 @@ public class SettingsTomlTests
             """.ReplaceLineEndings("\n"),
             text,
             StringComparison.Ordinal);
-        AssertSame(Settings with { Skill = "task-auto" }, SettingsToml.Read(text).Settings!);
+        AssertSame(Settings with { Session = new SessionSettings("task-auto") }, SettingsToml.Read(text).Settings!);
         Assert.DoesNotContain("[session]", SettingsToml.Write(Settings), StringComparison.Ordinal);
     }
 
     [Fact]
     public void ARewriteAddsChangesAndRemovesTheSkill()
     {
-        var added = SettingsToml.Write(Settings with { Skill = "task-auto" }, Example);
+        var added = SettingsToml.Write(Settings with { Session = new SessionSettings("task-auto") }, Example);
         Assert.Equal(
             Example + "\n# What a session starts with: the skill of the project that says how a task is done here without its owner.\n[session]\nskill = \"task-auto\"\n",
             added);
 
-        var changed = SettingsToml.Write(Settings with { Skill = "night-shift" }, added);
+        var changed = SettingsToml.Write(Settings with { Session = new SessionSettings("night-shift") }, added);
         Assert.Equal(added.Replace("\"task-auto\"", "\"night-shift\"", StringComparison.Ordinal), changed);
 
         // A project that gives its skill up loses the line; the section stays, empty.
         var removed = SettingsToml.Write(Settings, changed);
         Assert.Equal(changed.Replace("skill = \"night-shift\"\n", "", StringComparison.Ordinal), removed);
-        Assert.Null(SettingsToml.Read(removed).Settings!.Skill);
+        Assert.Null(SettingsToml.Read(removed).Settings!.Session.Skill);
     }
 
     [Fact]
@@ -558,7 +558,7 @@ public class SettingsTomlTests
         Assert.Equal(expected.Queue.Labels.Manual, actual.Queue.Labels.Manual);
         Assert.Equal(expected.Queue.Labels.Interrupted, actual.Queue.Labels.Interrupted);
         Assert.Equal(expected.Assistant, actual.Assistant);
-        Assert.Equal(expected.Skill, actual.Skill);
+        Assert.Equal(expected.Session.Skill, actual.Session.Skill);
         Assert.Equal(expected.Commands, actual.Commands);
     }
 }

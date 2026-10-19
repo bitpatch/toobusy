@@ -29,9 +29,9 @@ public class AssistTests
                 new QueueSettings(new LabelSettings(blocking ?? ["question"], take ?? ["feature", "bug"], "manual", "interrupted")),
                 new AssistantSettings("claude-code") { PermissionMode = mode })
             {
-                Skill = skill,
+                Session = new SessionSettings(skill),
                 Commands = commands ?? TaskCommands.None,
-                Branch = branch,
+                Workspace = new WorkspaceSettings(branch),
             },
             []),
         File,

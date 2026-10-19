@@ -6,17 +6,13 @@ namespace TooBusy.Core.Queue;
 // must stand as one to do. Statuses are what that board calls the statuses a run knows. Skip are the labels this run
 // was told to leave out, whatever the settings say: a task with one of them is held for this run, as one with a
 // blocking label is, but the task a run has a session for already is gone on with all the same.
-public sealed record QueueRules(IReadOnlyList<string> Blocking, IReadOnlyList<string> Take, string Manual, string Interrupted, bool Board)
+public sealed record QueueRules(LabelSettings Labels, bool Board)
 {
     public BoardStatuses Statuses { get; init; } = BoardStatuses.Default;
 
     public IReadOnlyList<string> Skip { get; init; } = [];
 
-    public static QueueRules Of(ProjectSettings settings) => new(
-        settings.Queue.Labels.Blocking, settings.Queue.Labels.Take, settings.Queue.Labels.Manual, settings.Queue.Labels.Interrupted, settings.Tracker.Board is not null)
-    {
-        Statuses = settings.Tracker.Statuses,
-    };
+    public static QueueRules Of(ProjectSettings settings) => new(settings.Queue.Labels, settings.Tracker.Board is not null) { Statuses = settings.Tracker.Statuses };
 }
 
 // A task that opens once the tasks before it are closed.
@@ -37,7 +33,7 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
     {
         var refused = open.Select(task => (Task: task, Reason: Refusal(task, rules))).Where(pair => pair.Reason is not null).ToDictionary(pair => pair.Task.Number, pair => pair.Reason!);
         var taken = open.Where(task => !refused.ContainsKey(task.Number))
-            .OrderByDescending(task => task.Has(rules.Interrupted)).ThenBy(task => task.Number).ToList();
+            .OrderByDescending(task => task.Has(rules.Labels.Interrupted)).ThenBy(task => task.Number).ToList();
 
         // The tasks are closed one after another as a run would close them, and what waits for them opens.
         var done = new HashSet<int>();
@@ -66,7 +62,7 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
 
     // The task a run takes first because it was interrupted before; null when there is none. A task that is held or
     // waits is not taken first, so it does not count.
-    public QueueTask? Interrupted(QueueRules rules) => Ready is [var first, ..] && first.Has(rules.Interrupted) ? first : null;
+    public QueueTask? Interrupted(QueueRules rules) => Ready is [var first, ..] && first.Has(rules.Labels.Interrupted) ? first : null;
 
     // What a run would take as things are: how many tasks, and the interrupted one it goes on with first.
     // `recorded` is the task an earlier run left with a session, which comes before any other.
@@ -78,12 +74,12 @@ public sealed record TaskLineup(IReadOnlyList<QueueTask> Ready, IReadOnlyList<La
     // this run skips: the skip is about the tasks a run takes anew, and a session that was started is finished.
     public static string? Keeps(QueueTask task, QueueRules rules)
     {
-        if (rules.Blocking.FirstOrDefault(task.Has) is { } blocking)
+        if (rules.Labels.Blocking.FirstOrDefault(task.Has) is { } blocking)
             return $"it has the {blocking} label";
-        if (task.Has(rules.Manual))
-            return $"it waits for the owner: it has the {rules.Manual} label";
-        if (rules.Take.Count > 0 && !rules.Take.Any(task.Has))
-            return $"it has none of the labels to take: {string.Join(", ", rules.Take)}";
+        if (task.Has(rules.Labels.Manual))
+            return $"it waits for the owner: it has the {rules.Labels.Manual} label";
+        if (rules.Labels.Take.Count > 0 && !rules.Labels.Take.Any(task.Has))
+            return $"it has none of the labels to take: {string.Join(", ", rules.Labels.Take)}";
         return null;
     }
 

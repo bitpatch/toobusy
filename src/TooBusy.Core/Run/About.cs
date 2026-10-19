@@ -21,15 +21,13 @@ public static class About
     // for a session to be started in.
     public static string Text(QueueRules? rules, RunPolicy policy, string? skill = null, TaskCommands? commands = null, string? branch = null, string? permissionMode = null)
     {
-        var manual = rules is null ? "the manual label" : $"the `{rules.Manual}` label";
+        var manual = rules is null ? "the manual label" : $"the `{rules.Labels.Manual}` label";
 
         // What the messages name of a project: its manual label where the settings are read, and the milestone
         // of the user and the address of the board, which are not read here.
-        var label = rules?.Manual ?? "<the manual label>";
+        var label = rules?.Labels.Manual ?? "<the manual label>";
         var ground = new NewTasks(label, [], "<the milestone the user works on>", rules is null or { Board: true } ? "<the address of the board>" : null) { Statuses = rules?.Statuses ?? BoardStatuses.Default };
-        var interrupted = rules is null ? "the label of interrupted tasks" : $"the `{rules.Interrupted}` label";
-        var again = Briefing.Task(Sample, ground, interrupted: true).Split('\n').First(line => line.StartsWith("- This task was interrupted before.", StringComparison.Ordinal));
-        var lost = Briefing.Task(Sample, ground, interrupted: false, lost: true).Split('\n').First(line => line.StartsWith("- A session worked on this task before", StringComparison.Ordinal));
+        var interrupted = rules is null ? "the label of interrupted tasks" : $"the `{rules.Labels.Interrupted}` label";
 
         // What is said of the skill of this project, and how its first message begins.
         var named = rules is null ? "No settings are read here, so it is not said whether this project names one: the first message is shown below as it is without a skill."
@@ -94,10 +92,10 @@ public static class About
         }
         else
         {
-            if (rules.Blocking.Count > 0)
-                text.Append(CultureInfo.InvariantCulture, $"- A task with {Labels(rules.Blocking, "the label", "one of the labels")} is not taken.\n");
-            if (rules.Take.Count > 0)
-                text.Append(CultureInfo.InvariantCulture, $"- Only a task with {Labels(rules.Take, "the label", "one of the labels")} is taken.\n");
+            if (rules.Labels.Blocking.Count > 0)
+                text.Append(CultureInfo.InvariantCulture, $"- A task with {Labels(rules.Labels.Blocking, "the label", "one of the labels")} is not taken.\n");
+            if (rules.Labels.Take.Count > 0)
+                text.Append(CultureInfo.InvariantCulture, $"- Only a task with {Labels(rules.Labels.Take, "the label", "one of the labels")} is taken.\n");
             text.Append(rules.Board
                 ? $"- The project has a board: a task is taken only from the status {todo}. The statuses a run knows are named below as the settings of the project call them, {todo}, {progress} and {done}.\n"
                 : "- The project has no board: a task has no status, and where a status is named below, nothing is moved.\n");
@@ -185,7 +183,7 @@ public static class About
             The task is named and not passed on: the session reads its description and its comments in the tracker. The milestone is the one the user works on; for a user who works without a milestone it is the one of the task, or none. The board is named only in a project that has one. A task with a label that a task needs to be taken is told to put that label on the new task too, so that a run takes it once the owner has answered. A task that was interrupted before, by `/abort` or by a usage limit in another working copy, has one rule more, after the others:
 
             ```text
-            {again}
+            {Briefing.InterruptedRule}
             ```
 
             ### A session that waits for the owner
@@ -235,7 +233,7 @@ public static class About
             - Where the conversation is gone, a new session is started with the first message. After a wrap-up it has the rule of a task that was interrupted, above; otherwise it has this one:
 
             ```text
-            {lost}
+            {Briefing.LostRule}
             ```
 
             A session that failed, or whose task did not pass the checks, is not gone on with: its task gets {manual} and waits for the owner, as told under “How a task ends”.

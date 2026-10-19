@@ -126,7 +126,7 @@ public static class Assist
             $"milestone: {MilestoneInShort(ground.Milestone)}; model: {ModelInShort(ground.Model)}; effort: {ground.Effort ?? "not chosen"}",
             "the project's own; toobusy does not read them",
             SkillInShort(ground),
-            Stated(ground) is { } kept ? $"branch: {Quoted(kept.Branch)}; before: {Quoted(kept.Commands.Before)}; after: {Quoted(kept.Commands.After)}" : Unstated(ground),
+            Stated(ground) is { } kept ? $"branch: {Quoted(kept.Workspace.Branch)}; before: {Quoted(kept.Commands.Before)}; after: {Quoted(kept.Commands.After)}" : Unstated(ground),
             Stated(ground) is { } mode ? $"permission mode: {ModeInShort(mode)}; the settings of Claude Code in the project are not read by toobusy" : Unstated(ground),
             "`toobusy doctor` passes every check",
         ];
@@ -382,14 +382,14 @@ public static class Assist
         var settings = Stated(ground);
 
         // A skill that is written may be one that sessions of another way of running the tasks started with.
-        var written = settings?.Skill is not null && ground.Skill is { Found: true, Place: var place } ? place : null;
+        var written = settings?.Session.Skill is not null && ground.Skill is { Found: true, Place: var place } ? place : null;
         Part(text, "As things are", (settings, ground.Skill) switch
         {
             (null, _) => $"{Unstated(ground)}.",
-            ({ Skill: null }, _) => "the project names no skill: a session starts with the message of toobusy alone.",
-            ({ Skill: { } name }, { Found: true } look) => $"the project names the skill `{name}`, and it is written: {look.Place}.",
-            ({ Skill: { } name }, { Found: false } look) => $"the project names the skill `{name}`, and it is not written yet: {look.Place} is where it goes. `toobusy doctor` fails and no run starts until it is there.",
-            ({ Skill: { } name }, _) => $"the project names the skill `{name}`, a skill of a plugin, which toobusy does not look for.",
+            ({ Session.Skill: null }, _) => "the project names no skill: a session starts with the message of toobusy alone.",
+            ({ Session.Skill: { } name }, { Found: true } look) => $"the project names the skill `{name}`, and it is written: {look.Place}.",
+            ({ Session.Skill: { } name }, { Found: false } look) => $"the project names the skill `{name}`, and it is not written yet: {look.Place} is where it goes. `toobusy doctor` fails and no run starts until it is there.",
+            ({ Session.Skill: { } name }, _) => $"the project names the skill `{name}`, a skill of a plugin, which toobusy does not look for.",
         });
         Part(text, "Decide", $"""
             whether the project needs a skill for a session to start with, and what it says.
@@ -427,7 +427,7 @@ public static class Assist
         var settings = Stated(ground);
         Part(text, "As things are", settings is null
             ? $"{Unstated(ground)}."
-            : $"the branch of the tasks: {Quoted(settings.Branch)}; before a task: {Quoted(settings.Commands.Before)}; after a task: {Quoted(settings.Commands.After)}.");
+            : $"the branch of the tasks: {Quoted(settings.Workspace.Branch)}; before a task: {Quoted(settings.Commands.Before)}; after a task: {Quoted(settings.Commands.After)}.");
         Part(text, "Decide", $"""
             what the run itself does around every task, whatever its session does or forgets.
 
@@ -490,7 +490,7 @@ public static class Assist
 
     static void LastCheck(StringBuilder text, AssistGround ground)
     {
-        var skill = Stated(ground)?.Skill is { } name && ground.Skill is { Found: not null } look ? $"the skill `{name}`, {look.Place}" : "the skill, when the project has one";
+        var skill = Stated(ground)?.Session.Skill is { } name && ground.Skill is { Found: not null } look ? $"the skill `{name}`, {look.Place}" : "the skill, when the project has one";
         Part(text, "As things are", "`toobusy doctor` tells: it checks everything a run needs, and changes nothing.");
         Part(text, "Look at", $"what `toobusy doctor` prints. A check that fails goes back to its step: the tools, the logins and the repository to `{Command(1)}`, the settings and the labels to `{Command(2)}`, the board and its statuses to `{Command(3)}`, the skill to `{Command(6)}`.");
         Part(text, "Ask the owner", "nothing but the commit of the setup, where the instructions of the project say that a commit is asked for. When the step is done, tell them in a few lines what was set: which tasks a run takes, the board, their own choices, the skill, the branch, the commands around a task, the permission mode and what was changed in the instructions; and that the setup is complete. Propose nothing after it: no demo, no first run and no next thing to try. A run is theirs to start.");
@@ -540,10 +540,10 @@ public static class Assist
     static string SkillInShort(AssistGround ground) => (Stated(ground), ground.Skill) switch
     {
         (null, _) => Unstated(ground),
-        ({ Skill: null }, _) => "no skill",
-        ({ Skill: { } name }, { Found: true }) => $"`{name}`, written",
-        ({ Skill: { } name }, { Found: false }) => $"`{name}`, not written yet",
-        ({ Skill: { } name }, _) => $"`{name}`, a skill of a plugin",
+        ({ Session.Skill: null }, _) => "no skill",
+        ({ Session.Skill: { } name }, { Found: true }) => $"`{name}`, written",
+        ({ Session.Skill: { } name }, { Found: false }) => $"`{name}`, not written yet",
+        ({ Session.Skill: { } name }, _) => $"`{name}`, a skill of a plugin",
     };
 
     static string ModeInShort(ProjectSettings settings) => settings.Assistant.PermissionMode is { } named

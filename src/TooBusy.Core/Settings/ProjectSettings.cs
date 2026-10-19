@@ -3,23 +3,33 @@ using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Settings;
 
-// The settings of a project as `.toobusy/settings.toml` holds them. An instance is always valid:
-// it comes out of SettingsValidator or is put together by the setup.
+// The settings of a project as `.toobusy/settings.toml` holds them, a record for each of its sections. An instance is
+// always valid: it comes out of SettingsValidator or is put together by the setup.
 public sealed record ProjectSettings(TrackerSettings Tracker, QueueSettings Queue, AssistantSettings Assistant)
 {
     // The version of the settings schema that this build reads and writes.
     public const int SchemaVersion = 1;
 
-    // The skill of the project a session starts with, by its name; null when the project names none.
-    public string? Skill { get; init; }
+    public SessionSettings Session { get; init; } = SessionSettings.None;
 
-    // The commands of the project a run runs around a task.
+    // The commands of the project a run runs around a task, the section `task`.
     public TaskCommands Commands { get; init; } = TaskCommands.None;
 
-    // The branch the tasks are done on: a run checks that the working copy is on it and brings it up to date with
-    // its upstream before a task. Null when the project names none, and a run does the tasks on whatever is checked
-    // out.
-    public string? Branch { get; init; }
+    public WorkspaceSettings Workspace { get; init; } = WorkspaceSettings.None;
+}
+
+// What a session of the project starts with: Skill is the skill, by its name; null when the project names none.
+public sealed record SessionSettings(string? Skill)
+{
+    public static SessionSettings None { get; } = new(Skill: null);
+}
+
+// The working copy the tasks are done in. Branch is the branch they are done on: a run checks that the working copy is
+// on it and brings it up to date with its upstream before a task. Null when the project names none, and a run does the
+// tasks on whatever is checked out.
+public sealed record WorkspaceSettings(string? Branch)
+{
+    public static WorkspaceSettings None { get; } = new(Branch: null);
 }
 
 // What a run runs through the shell of the machine, at the root of the working copy: Before a task is taken, and

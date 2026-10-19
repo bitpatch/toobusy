@@ -88,6 +88,7 @@ public class OutcomeTests
     [InlineData("Half of #12 is done.", false)]
     [InlineData("See https://github.com/acme/rocket/issues/12.", false)]
     [InlineData("The rest is task # 34, or C# 13.", false)]
+    [InlineData("Done up to step #2 of 5.", true)]
     [InlineData("", false)]
     public void AReportNamesATaskOtherThanItsOwnByItsNumberOrItsAddress(string report, bool names)
     {

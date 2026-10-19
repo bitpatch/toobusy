@@ -66,7 +66,9 @@ public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = n
     }
 
     // Whether the report names a task other than `own`, as a session that made a task of what is left does. It is
-    // the report that is read, not the tracker: what the named task is, is the session's to see to.
+    // the report that is read, not the tracker: what the named task is, is the session's to see to. So any number
+    // after a `#` counts, an ordinal as `step #2 of 5` among it: should a report pass on that alone, the check may ask
+    // for the address of an issue or for a number that is not a small one.
     public bool Names(int own)
     {
         foreach (var naming in Naming)

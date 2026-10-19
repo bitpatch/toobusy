@@ -27,9 +27,9 @@ sealed record SetupAnswers(
         settings.Queue.Labels.Take,
         settings.Queue.Labels.Manual,
         settings.Queue.Labels.Interrupted,
-        settings.Skill ?? "",
+        settings.Session.Skill ?? "",
         settings.Commands,
-        settings.Branch,
+        settings.Workspace.Branch,
         settings.Assistant.PermissionMode);
 
     // The settings of the answers, with the address of the board: a new board has one once it is made.
@@ -38,16 +38,16 @@ sealed record SetupAnswers(
         new QueueSettings(new LabelSettings(Blocking, Take, Manual, Interrupted)),
         new AssistantSettings(SettingsKeys.ClaudeCodeAssistant) { PermissionMode = PermissionMode })
     {
-        Skill = Skill.Length > 0 ? Skill : null,
+        Session = new SessionSettings(Skill.Length > 0 ? Skill : null),
         Commands = Commands,
-        Branch = Branch,
+        Workspace = new WorkspaceSettings(Branch),
     };
 }
 
-// Called is what the board that was answered calls the statuses a run knows, and Board the board they were named for:
-// a board that is answered again proposes them. Asked is whether they were asked for: a board that was asked about is asked about
-// again when the user comes back to it. Lacking is what is said of a board whose statuses are taken without a
-// question although a run would take no task of it, or cannot be read; empty when nothing is.
+// Called is what the board that was answered calls the statuses a run knows, and Board the board they were named for: a
+// board that is answered again proposes them. Asked is whether they were asked for: a board that was asked about is
+// asked about again when the user comes back to it. Lacking is what is said of a board whose statuses are taken without
+// a question although a run would take no task of it, or cannot be read; empty when nothing is.
 sealed record StatusesAnswer(BoardStatuses Called, string? Board, bool Asked, IReadOnlyList<SetupNote> Lacking)
 {
     // The names of GitHub, named for no board: those of a new board, and of a project without one.

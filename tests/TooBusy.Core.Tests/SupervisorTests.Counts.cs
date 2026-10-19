@@ -165,4 +165,15 @@ public sealed partial class SupervisorTests
         Assert.Null(sign.Written[^1]);
         Assert.Single(sign.Written, written => written is null);
     }
+
+    [Fact]
+    public async Task ASupervisorMakesOneRunAndRefusesASecond()
+    {
+        tracker.Add(3);
+        await RunAsync();
+        tracker.Add(4);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(RunAsync);
+        Assert.Equal([3], assistant.Started.Select(start => start.Task));
+    }
 }

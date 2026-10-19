@@ -46,7 +46,7 @@ public class ProjectSetupTests
 
         // The manual label is one of the repository, so the list points at it.
         Assert.Equal(["Project", "Blocking labels", "Labels to take", ManualLabel, InterruptLabel, "Skill", "Write the settings?"], dialog.Asked);
-        Assert.Equal("task-auto", store.Saved.Skill);
+        Assert.Equal("task-auto", store.Saved.Session.Skill);
         Assert.Single(dialog.Shown.Notes);
     }
 
@@ -461,7 +461,7 @@ public class ProjectSetupTests
                 "Skill: none → task-auto",
             ],
             dialog.Shown.Notes.Where(note => note.Tone == SetupTone.Change).Select(note => note.Text));
-        Assert.Equal("task-auto", store.Saved!.Skill);
+        Assert.Equal("task-auto", store.Saved!.Session.Skill);
     }
 
     [Fact]
@@ -940,7 +940,7 @@ public class ProjectSetupTests
 
         var result = await RunAsync();
 
-        Assert.Equal("night-shift", store.Saved!.Skill);
+        Assert.Equal("night-shift", store.Saved!.Session.Skill);
         Assert.Contains(new SetupAnswer("Skill", "night-shift"), result.Answers);
     }
 
@@ -951,7 +951,7 @@ public class ProjectSetupTests
 
         var result = await RunAsync();
 
-        Assert.Null(store.Saved!.Skill);
+        Assert.Null(store.Saved!.Session.Skill);
         Assert.Contains(new SetupAnswer("Skill", "none"), result.Answers);
         Assert.Empty(dialog.Refused);
     }
@@ -965,14 +965,14 @@ public class ProjectSetupTests
         await RunAsync();
 
         Assert.Equal(["task auto"], dialog.Refused);
-        Assert.Equal("task-auto", store.Saved!.Skill);
+        Assert.Equal("task-auto", store.Saved!.Session.Skill);
     }
 
     [Fact]
     public async Task SettingsThatNameASkillProposeIt()
     {
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
-        store.Current = Existing with { Skill = "night-shift" };
+        store.Current = Existing with { Session = new SessionSettings("night-shift") };
         machine.Skills = ["night-shift"];
         var result = await RunAsync();
 
@@ -984,7 +984,7 @@ public class ProjectSetupTests
     public async Task TheCommandsTheBranchAndThePermissionModeAreNotAskedForAndAreKept()
     {
         var commands = new TaskCommands("scripts/dev.sh ports free", "scripts/dev.sh server stop");
-        store.Current = Existing with { Commands = commands, Branch = "develop", Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
+        store.Current = Existing with { Commands = commands, Workspace = new WorkspaceSettings("develop"), Assistant = new AssistantSettings("claude-code") { PermissionMode = "dontAsk" } };
         dialog.Answer("Skill", "task-auto");
         machine.Skills = ["task-auto"];
 
@@ -992,7 +992,7 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
         Assert.Equal(commands, store.Saved!.Commands);
-        Assert.Equal("develop", store.Saved.Branch);
+        Assert.Equal("develop", store.Saved.Workspace.Branch);
         Assert.Equal("dontAsk", store.Saved.Assistant.PermissionMode);
         Assert.Empty(result.Unasked);
         Assert.DoesNotContain(result.Answers, answer => answer.Value.Contains("dev.sh", StringComparison.Ordinal));
@@ -1101,15 +1101,15 @@ public class ProjectSetupTests
     {
         var first = await RunAsync(new SetupProposals { Branch = new(" develop ") });
 
-        Assert.Equal("develop", store.Saved!.Branch);
+        Assert.Equal("develop", store.Saved!.Workspace.Branch);
         Assert.Equal([new SetupAnswer("Branch", "none → develop")], first.Unasked);
         Assert.Contains(new SetupNote(SetupTone.Change, "Branch: none → develop"), dialog.Shown.Notes);
 
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
-        store.Current = Existing with { Branch = "develop" };
+        store.Current = Existing with { Workspace = new WorkspaceSettings("develop") };
         var changed = await RunAsync(new SetupProposals(Before: new("make free")) { Branch = new("main") });
 
-        Assert.Equal("main", store.Saved!.Branch);
+        Assert.Equal("main", store.Saved!.Workspace.Branch);
         Assert.Equal([new SetupAnswer("Before a task", "none → make free"), new SetupAnswer("Branch", "develop → main")], changed.Unasked);
         Assert.Equal(
             [new SetupNote(SetupTone.Change, "Before a task: none → make free"), new SetupNote(SetupTone.Change, "Branch: develop → main")],
@@ -1118,7 +1118,7 @@ public class ProjectSetupTests
         var gone = await RunUnaskedAsync(new SetupProposals { Branch = new(null) });
 
         Assert.Equal(SetupOutcome.Written, gone.Outcome);
-        Assert.Null(store.Saved!.Branch);
+        Assert.Null(store.Saved!.Workspace.Branch);
         Assert.Equal([new SetupAnswer("Branch", "develop → none")], gone.Unasked);
 
         var same = await RunUnaskedAsync(new SetupProposals { Branch = new("develop") });
@@ -1139,7 +1139,7 @@ public class ProjectSetupTests
         Assert.Null(store.Saved);
 
         boards.Read = new SetupBoards([new(Rocket, "Rocket", true)], []);
-        store.Current = Existing with { Branch = "develop" };
+        store.Current = Existing with { Workspace = new WorkspaceSettings("develop") };
         var asked = await RunAsync(new SetupProposals { Branch = new(name) });
 
         Assert.Equal(SetupOutcome.NothingToChange, asked.Outcome);
@@ -1203,7 +1203,7 @@ public class ProjectSetupTests
         Assert.Equal(said, dialog.Shown.Notes.TakeLast(2));
         Assert.Equal(said, result.Notes);
         Assert.Equal(SetupOutcome.Written, result.Outcome);
-        Assert.Equal("task-auto", store.Saved!.Skill);
+        Assert.Equal("task-auto", store.Saved!.Session.Skill);
     }
 
     [Fact]
@@ -1516,14 +1516,14 @@ public class ProjectSetupTests
     [Fact]
     public async Task TheOptionsOfTheSkillAreProposedBeforeWhatTheSettingsSay()
     {
-        store.Current = Existing with { Skill = "night-shift" };
+        store.Current = Existing with { Session = new SessionSettings("night-shift") };
         machine.Skills = ["night-shift", "task-auto"];
 
         await RunAsync(new SetupProposals(Skill: "/task-auto"));
-        Assert.Equal("task-auto", store.Saved!.Skill);
+        Assert.Equal("task-auto", store.Saved!.Session.Skill);
 
         await RunAsync(new SetupProposals(Skill: ""));
-        Assert.Null(store.Saved!.Skill);
+        Assert.Null(store.Saved!.Session.Skill);
         Assert.Contains(new SetupNote(SetupTone.Change, "Skill: night-shift → none"), dialog.Shown.Notes);
     }
 
@@ -1541,7 +1541,7 @@ public class ProjectSetupTests
     [Fact]
     public async Task TheMenuListsEverySettingWithItsValue()
     {
-        store.Current = Existing with { Skill = "task-auto", Branch = "develop" };
+        store.Current = Existing with { Session = new SessionSettings("task-auto"), Workspace = new WorkspaceSettings("develop") };
 
         var setup = await OpenAsync();
 
@@ -1662,7 +1662,7 @@ public class ProjectSetupTests
 
         Assert.Equal(SetupOutcome.Written, result.Outcome);
         Assert.Equal(["Skill", "Save the change?", "Skill", "Save the change?"], dialog.Asked);
-        Assert.Equal("night-shift", store.Saved!.Skill);
+        Assert.Equal("night-shift", store.Saved!.Session.Skill);
     }
 
     [Fact]
@@ -1871,7 +1871,7 @@ public class ProjectSetupTests
             Assert.Equal(SetupOutcome.Written, (await setup.ChangeAsync(setting, TestContext.Current.CancellationToken)).Outcome);
 
         Assert.Equal(new TaskCommands("scripts/dev.sh ports free", null), store.Saved!.Commands);
-        Assert.Equal("develop", store.Saved.Branch);
+        Assert.Equal("develop", store.Saved.Workspace.Branch);
         Assert.Equal(["my branch"], dialog.Refused);
         Assert.Equal("dontAsk", store.Saved.Assistant.PermissionMode);
         Assert.Equal(["auto", "dontAsk"], dialog.Offered["Permission mode"]);

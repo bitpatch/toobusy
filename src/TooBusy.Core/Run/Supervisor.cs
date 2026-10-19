@@ -51,7 +51,7 @@ public sealed class Supervisor(
     TaskRecord? record;
 
     // What the sign of the run says, as it was written last; null while the sign is not up.
-    RunSign? told;
+    RunSign? shown;
 
     // The tasks the run closed: those that are done, and those that are done in part.
     int done;
@@ -71,10 +71,17 @@ public sealed class Supervisor(
     // Whether the run said that the branch of the tasks has no upstream: it says so once.
     bool unfollowed;
 
+    // How many times the run was started. A supervisor makes one run: what it counts and what it was asked for are
+    // never reset, so a second run needs a supervisor of its own.
+    int runs;
+
     public void Send(RunCommand command) => commands.Enqueue(command);
 
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
     {
+        if (Interlocked.Increment(ref runs) > 1)
+            throw new InvalidOperationException("A supervisor makes one run: a second run needs a supervisor of its own.");
+
         this.view = view;
         var started = clock.Now;
 
@@ -98,7 +105,7 @@ public sealed class Supervisor(
             return Ended(RunEnd.Problem, unstarted);
         }
 
-        told = up;
+        shown = up;
         RunResult result;
         using (machine.KeepAwake())
         {
@@ -130,7 +137,7 @@ public sealed class Supervisor(
             }
             finally
             {
-                told = null;
+                shown = null;
                 Lower();
             }
         }
@@ -187,18 +194,21 @@ public sealed class Supervisor(
                 var (kept, why) = TaskLineup.Recorded(open, plan.Rules, before.Number);
                 if (kept is null)
                 {
+                    // The session of the record where it was looked for: it is not looked for again to be stopped.
+                    IAssistantSession? found = null;
+
                     // A task that is not among the open ones may be closed, as by a commit of its session with
                     // `Closes #12` in its message: the queue has only the open ones, so the task is read by its number.
                     if (open.All(task => task.Number != before.Number) && await ClosedTaskAsync(before.Number, kill) is { } closed)
                     {
                         // The work of a session that came to its line is not lost over that: its task is settled.
                         // The session of a record that says more than that it worked did not end so.
-                        var session = before.State == RecordState.Working ? await assistant.FindAsync(before.Session, kill) : null;
-                        var look = session is null ? null : await session.LookAsync(kill);
+                        found = before.State == RecordState.Working ? await assistant.FindAsync(before.Session, kill) : null;
+                        var look = found is null ? null : await found.LookAsync(kill);
                         if (look is not null)
-                            Seen(before.Number, session!, look);
+                            Seen(before.Number, found!, look);
                         if (look?.Phase == SessionPhase.Unseen)
-                            return Stop($"the sessions of the assistant cannot be read, so the session of #{closed.Number} is left as it is · {session!.Open} · the next run looks again");
+                            return Stop($"the sessions of the assistant cannot be read, so the session of #{closed.Number} is left as it is · {found!.Open} · the next run looks again");
 
                         if (look is not null && Over(look))
                         {
@@ -212,7 +222,7 @@ public sealed class Supervisor(
                             last = closed.Number;
                             var waiting = lineup.Ready.Count + lineup.Later.Count;
                             var after = plan.Most is { } few ? Math.Min(waiting, few - taken - 1) : waiting;
-                            if (await DoAsync(closed, after, since => FinishAsync(closed, session!, look, since, after, kill), kill) is { } over)
+                            if (await DoAsync(closed, after, since => FinishAsync(closed, found!, look, since, after, kill), kill) is { } over)
                                 return over;
 
                             taken++;
@@ -220,11 +230,11 @@ public sealed class Supervisor(
                         }
 
                         why = before.State != RecordState.Working ? "it is closed"
-                            : session is null ? "it is closed, and nothing is left of its session"
+                            : found is null ? "it is closed, and nothing is left of its session"
                             : "it is closed, and its session did not say how the task went";
                     }
 
-                    await ForgetAsync(before, why!, tree.Changes > 0);
+                    await ForgetAsync(before, why!, tree.Changes > 0, found);
                     continue;
                 }
 
@@ -288,12 +298,13 @@ public sealed class Supervisor(
     }
 
     // A task of the record that is not gone on with: its session is stopped, so that nothing works on with nobody
-    // watching, and the record is forgotten.
-    async Task ForgetAsync(TaskRecord before, string why, bool changes)
+    // watching, and the record is forgotten. `found` is the session of the record where the run has found it
+    // already; otherwise it is looked for here.
+    async Task ForgetAsync(TaskRecord before, string why, bool changes, IAssistantSession? found)
     {
         await Quietly(async () =>
         {
-            if (await assistant.FindAsync(before.Session, CancellationToken.None) is { } session)
+            if ((found ?? await assistant.FindAsync(before.Session, CancellationToken.None)) is { } session)
                 await session.StopAsync(CancellationToken.None);
         });
         state.Clear();
@@ -302,10 +313,9 @@ public sealed class Supervisor(
     }
 
     // Does one task with the commands of the project around it: null when the run goes on to the next one. `take`
-    // is what is done with the task, from the moment that is given to it. The
-    // command after the task runs when the run has done with it, whatever became of it, the tracker being told
-    // already. One that fails stops the run, which does not go on over what the command was to put right; a run
-    // that ends anyway only says so.
+    // is what is done with the task, from the moment that is given to it. The command after the task runs when the
+    // run has done with it, whatever became of it, the tracker being told already. One that fails stops the run,
+    // which does not go on over what the command was to put right; a run that ends anyway only says so.
     async Task<RunResult?> DoAsync(QueueTask task, int queued, Func<DateTimeOffset, Task<RunResult?>> take, CancellationToken kill)
     {
         var since = clock.Now;
@@ -359,7 +369,7 @@ public sealed class Supervisor(
         CommandEnd end;
         try
         {
-            end = await shell.RunAsync(command, Told(task), time, kill);
+            end = await shell.RunAsync(command, Variables(task), time, kill);
         }
         catch (OperationCanceledException) when (kill.IsCancellationRequested)
         {
@@ -442,7 +452,7 @@ public sealed class Supervisor(
     }
 
     // What a command of the project is told of the task, in its environment.
-    static Dictionary<string, string> Told(QueueTask task) => new()
+    static Dictionary<string, string> Variables(QueueTask task) => new()
     {
         ["TOOBUSY_TASK"] = task.Number.ToString(CultureInfo.InvariantCulture),
         ["TOOBUSY_TASK_TITLE"] = task.Title,
@@ -455,7 +465,7 @@ public sealed class Supervisor(
     {
         seen = null;
         var number = task.Number;
-        var again = task.Has(plan.Rules.Interrupted);
+        var again = task.Has(plan.Rules.Labels.Interrupted);
         Show(new RunStatus(RunPhase.Preparing, $"Starting #{number}…") { Task = task, Since = since, Queued = queued });
 
         // The session of the record, how the task is taken with it, and the look at a session that ended with an
@@ -569,7 +579,7 @@ public sealed class Supervisor(
             }
 
             if (again)
-                await UnlabelAsync(number, plan.Rules.Interrupted, kill);
+                await UnlabelAsync(number, plan.Rules.Labels.Interrupted, kill);
         }
         catch (TrackerException refused)
         {
@@ -591,9 +601,9 @@ public sealed class Supervisor(
         }
 
         Say(RunMark.Started, $"#{number} {task.Title} — {(before is null ? "started" : "taken again")} · {how} · {session.Open}");
-        string?[] taken = [plan.Rules.Board ? $"{plan.Rules.Statuses.InProgress} on the board" : null, unassigned is null ? "assigned to the current user" : null];
-        if (taken.Any(how => how is not null))
-            Say(RunMark.Note, $"#{number} is {string.Join(" and ", taken.Where(how => how is not null))}; the session is told that toobusy keeps its task");
+        string?[] kept = [plan.Rules.Board ? $"{plan.Rules.Statuses.InProgress} on the board" : null, unassigned is null ? "assigned to the current user" : null];
+        if (kept.Any(part => part is not null))
+            Say(RunMark.Note, $"#{number} is {string.Join(" and ", kept.Where(part => part is not null))}; the session is told that toobusy keeps its task");
         if (unassigned is not null)
             Say(RunMark.Attention, $"{unassigned} · the run goes on");
 
@@ -748,7 +758,7 @@ public sealed class Supervisor(
 
         // How many times the session was told to go on alone, how many of the last ones brought no step of its
         // own, and how many steps it had made when it was told last.
-        var told = 0;
+        var sent = 0;
         var idle = 0;
         var steps = 0;
         var limitWaits = 0;
@@ -793,7 +803,7 @@ public sealed class Supervisor(
                 if (!waiting)
                 {
                     await session.AskAsync(Briefing.WrapUp(number), kill);
-                    Say(RunMark.Interrupted, $"Asked #{number} to wrap up after its current step: nothing committed, a report in the task, the {plan.Rules.Interrupted} label");
+                    Say(RunMark.Interrupted, $"Asked #{number} to wrap up after its current step: nothing committed, a report in the task, the {plan.Rules.Labels.Interrupted} label");
                 }
             }
 
@@ -864,7 +874,7 @@ public sealed class Supervisor(
                     {
                         return new Watched(look);
                     }
-                    else if (reported && (told > 0 || aborting))
+                    else if (reported && (sent > 0 || aborting))
                     {
                         // A session that was told that no answer will come, and one that was asked to wrap up, has
                         // nothing more to do: such a reply ends the task, whatever the assistant marks it as.
@@ -877,10 +887,10 @@ public sealed class Supervisor(
                     else if (reported)
                     {
                         // It is told so at once, with no countdown: nothing is asked of the owner.
-                        told++;
+                        sent++;
                         steps = look.Steps;
                         (waiting, sendAt) = (false, null);
-                        var message = Briefing.NoAnswer(number, plan.Rules.Manual);
+                        var message = Briefing.NoAnswer(number, plan.Rules.Labels.Manual);
                         Say(RunMark.Attention, $"#{number} ended its turn with a line for toobusy, but Claude Code marks it as waiting for an answer · it is told that none will come · {session.Open}");
                         Quote(look.Reply, session);
                         Say(RunMark.Note, $"“{message}”");
@@ -904,21 +914,21 @@ public sealed class Supervisor(
                         // the run aborts, a session that did not get the request to wrap up as a message yet is not
                         // left to the owner for the messages before: it gets that one first.
                         waiting = true;
-                        idle = told > 0 && look.Steps == steps ? idle + 1 : 0;
-                        var left = aborting && !cut ? null
+                        idle = sent > 0 && look.Steps == steps ? idle + 1 : 0;
+                        var why = aborting && !cut ? null
                             : idle >= policy.IdleMessages ? $"{policy.IdleMessages} messages in a row brought no step of its own"
-                            : told >= policy.Messages ? $"it was told to go on alone {policy.Messages} times"
+                            : sent >= policy.Messages ? $"it was told to go on alone {policy.Messages} times"
                             : null;
-                        sendAt = left is null && !aborting ? clock.Now + policy.OwnerWait : null;
+                        sendAt = why is null && !aborting ? clock.Now + policy.OwnerWait : null;
                         Say(RunMark.Paused, (look.Phase == SessionPhase.Asking ? $"#{number} waits for the owner: {look.Asks ?? "an answer is needed"}" : $"#{number} ended its turn without saying how the task went")
                             + (sendAt is not null ? $" · it is told to go on alone in {Spoken.Time(policy.OwnerWait)}: /nudge does it now, /hold never"
-                                : left is not null ? $" · it is left to the owner: {left}"
+                                : why is not null ? $" · it is left to the owner: {why}"
                                 : "")
                             + $" · {session.Open}");
                         Quote(look.Reply, session);
                         if (!aborting)
                             machine.Notify($"#{number} waits for an answer");
-                        if (look.Phase == SessionPhase.Ended && left is not null)
+                        if (look.Phase == SessionPhase.Ended && why is not null)
                             return new Watched(look);
                     }
 
@@ -935,10 +945,10 @@ public sealed class Supervisor(
 
             if (waiting && !aborting && (nudge || (sendAt is { } due && clock.Now >= due)))
             {
-                told++;
+                sent++;
                 steps = look.Steps;
                 (waiting, sendAt) = (false, null);
-                var message = Briefing.Alone(number, plan.Rules.Manual);
+                var message = Briefing.Alone(number, plan.Rules.Labels.Manual);
                 Say(RunMark.GoesOn, $"#{number} is told to go on without the owner: its turn is cut, and this is the next message of its conversation · {session.Open}");
                 Say(RunMark.Note, $"“{message}”");
                 var former = session.Trace.Id;
@@ -1023,22 +1033,10 @@ public sealed class Supervisor(
         paused = true;
         var calls = CancellationToken.None;
         var missing = new List<string>();
-        async Task Try(Func<Task> change)
-        {
-            try
-            {
-                await change();
-            }
-            catch (TrackerException refused)
-            {
-                missing.Add(refused.Message);
-            }
-        }
-
         await Quietly(() => session.StopAsync(calls));
-        await Try(() => LabelAsync(number, plan.Rules.Interrupted, kill, uncut: true));
-        await Try(() => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
-        await Try(() => tracker.CommentAsync(number, Briefing.Paused(why, session.Open), calls));
+        await Try(missing, () => LabelAsync(number, plan.Rules.Labels.Interrupted, kill, uncut: true));
+        await Try(missing, () => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
+        await Try(missing, () => tracker.CommentAsync(number, Briefing.Paused(why, session.Open), calls));
         state.Save(record = new TaskRecord(number, session.Trace, RecordState.Paused));
         if (session.Trace.Conversation is null)
             missing.Add("the conversation of its session is not known");
@@ -1187,6 +1185,7 @@ public sealed class Supervisor(
         var number = task.Number;
         var rules = plan.Rules;
         var shut = $"#{number} was closed before its session ended, and is left closed";
+        var commented = closed ? $"#{number} was closed already, and has the report of the session as its comment" : $"#{number} is closed, with the report of the session as its comment";
         switch (outcome.Kind)
         {
             case OutcomeKind.Done:
@@ -1194,7 +1193,7 @@ public sealed class Supervisor(
                 await CloseAsync(number, closed, kill);
                 done++;
                 Say(RunMark.Done, $"#{number} {task.Title} — done in {took}");
-                Say(RunMark.Note, closed ? $"#{number} was closed already, and has the report of the session as its comment" : $"#{number} is closed, with the report of the session as its comment");
+                Say(RunMark.Note, commented);
                 return (RunMark.Done, null);
 
             case OutcomeKind.Partial:
@@ -1203,7 +1202,7 @@ public sealed class Supervisor(
                 await CloseAsync(number, closed, kill);
                 partial++;
                 Say(RunMark.Partial, $"#{number} {task.Title} — done in part in {took}");
-                Say(RunMark.Note, (closed ? $"#{number} was closed already, and has the report of the session as its comment" : $"#{number} is closed, with the report of the session as its comment") + "; what is left is a task that the session made");
+                Say(RunMark.Note, $"{commented}; what is left is a task that the session made");
                 return (RunMark.Partial, null);
 
             case OutcomeKind.Owner when closed:
@@ -1213,11 +1212,11 @@ public sealed class Supervisor(
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Owner:
-                await LabelAsync(number, rules.Manual, kill, uncut: true);
-                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Manual), CancellationToken.None);
+                await LabelAsync(number, rules.Labels.Manual, kill, uncut: true);
+                await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Owner, outcome.Report, session.Open, label: rules.Labels.Manual), CancellationToken.None);
                 await MoveAsync(number, BoardStatus.Todo, kill, uncut: true);
                 Say(RunMark.Owner, $"#{number} {task.Title} — waits for the owner after {took}");
-                Say(RunMark.Note, $"#{number} has the {rules.Manual} label and a comment that says what is needed; no run takes it while it has the label");
+                Say(RunMark.Note, $"#{number} has the {rules.Labels.Manual} label and a comment that says what is needed; no run takes it while it has the label");
                 return (RunMark.Owner, null);
 
             case OutcomeKind.Interrupted when closed:
@@ -1227,7 +1226,7 @@ public sealed class Supervisor(
                 return (RunMark.Interrupted, aborting ? null : Stop($"#{number} was interrupted, and nobody asked for it · {session.Open}"));
 
             default:
-                await LabelAsync(number, rules.Interrupted, kill, uncut: true);
+                await LabelAsync(number, rules.Labels.Interrupted, kill, uncut: true);
                 await tracker.CommentAsync(number, Briefing.Comment(OutcomeKind.Interrupted, outcome.Report, session.Open), CancellationToken.None);
                 await MoveAsync(number, BoardStatus.Todo, kill, uncut: true);
                 Say(RunMark.Interrupted, $"#{number} {task.Title} — interrupted after {took}: the report is in the task, and the next run takes it first");
@@ -1243,25 +1242,11 @@ public sealed class Supervisor(
     // none of it.
     async Task LeaveAsync(int number, IAssistantSession session, string why, string report, bool closed, CancellationToken kill)
     {
-        var manual = plan.Rules.Manual;
+        var manual = plan.Rules.Labels.Manual;
         var missing = new List<string>();
-        async Task<bool> Try(Func<Task> change)
-        {
-            try
-            {
-                await change();
-                return true;
-            }
-            catch (TrackerException refused)
-            {
-                missing.Add(refused.Message);
-                return false;
-            }
-        }
-
         if (closed)
         {
-            if (await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual, closed: true), CancellationToken.None)))
+            if (await Try(missing, () => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual, closed: true), CancellationToken.None)))
                 Say(RunMark.Note, $"#{number} was closed before its session ended, and is left closed, with a comment that says what went wrong; no run takes it until it is opened again");
             else
                 Say(RunMark.Attention, $"#{number} is closed and did not get the comment that says what went wrong: {missing[0]}");
@@ -1269,11 +1254,11 @@ public sealed class Supervisor(
         }
 
         // Without the label the status is all that holds the task, so it is moved only when the label is put.
-        var labelled = await Try(() => LabelAsync(number, manual, kill, uncut: true));
-        await Try(() => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual), CancellationToken.None));
+        var labelled = await Try(missing, () => LabelAsync(number, manual, kill, uncut: true));
+        await Try(missing, () => tracker.CommentAsync(number, Briefing.Stopped(why, report, session.Open, manual), CancellationToken.None));
         if (labelled)
         {
-            await Try(() => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
+            await Try(missing, () => MoveAsync(number, BoardStatus.Todo, kill, uncut: true));
             Say(RunMark.Note, $"#{number} has the {manual} label{(missing.Count == 0 ? " and a comment that says what went wrong" : "")}; no run takes it while it has the label");
         }
 
@@ -1308,8 +1293,8 @@ public sealed class Supervisor(
     Task<QueueTask?> ClosedTaskAsync(int number, CancellationToken kill, bool uncut = false) =>
         AgainAsync($"#{number} is read", calls => tracker.ReadClosedAsync(number, calls), kill, uncut);
 
-    Task MoveAsync(int number, BoardStatus status, CancellationToken kill, bool uncut = false) =>
-        AgainAsync($"#{number} is moved to {plan.Rules.Statuses.NameOf(status)}", calls => tracker.SetStatusAsync(number, status, calls), kill, uncut);
+    Task MoveAsync(int number, BoardStatus to, CancellationToken kill, bool uncut = false) =>
+        AgainAsync($"#{number} is moved to {plan.Rules.Statuses.NameOf(to)}", calls => tracker.SetStatusAsync(number, to, calls), kill, uncut);
 
     Task AssignAsync(int number, CancellationToken kill) =>
         AgainAsync($"#{number} is assigned to the current user", calls => tracker.AssignAsync(number, calls), kill);
@@ -1378,42 +1363,40 @@ public sealed class Supervisor(
         return true;
     }
 
-    // Takes what the owner asked for, in the order it was asked.
+    // Takes what the owner asked for, in the order it was asked. A command does something only where it is among the
+    // commands that mean something at the moment, as the run shows them; otherwise the log says why it does nothing.
     void Drain()
     {
         var heard = false;
         while (commands.TryDequeue(out var command))
         {
             heard = true;
+            if (!Available(status).HasFlag(Flag(command)))
+            {
+                Say(RunMark.Note, command switch
+                {
+                    RunCommand.Stop when aborting => "Already aborting",
+                    RunCommand.Stop => "Already stopping after the current task",
+                    RunCommand.Continue when aborting => "An /abort cannot be taken back",
+                    RunCommand.Continue => "Nothing to take back: the queue goes on",
+                    RunCommand.Abort => "Already asked to wrap up",
+                    _ => $"/{command.ToString().ToLowerInvariant()} means nothing now",
+                });
+                continue;
+            }
+
             var waitsForLimit = status is { Phase: RunPhase.WaitingForLimit, Task: not null };
             switch (command)
             {
-                case RunCommand.Stop when aborting:
-                    Say(RunMark.Note, "Already aborting");
-                    break;
-                case RunCommand.Stop when stopping && !waitsForLimit:
-                    Say(RunMark.Note, "Already stopping after the current task");
-                    break;
                 case RunCommand.Stop:
                     stopping = true;
                     Say(RunMark.Paused, waitsForLimit ? $"#{status.Task!.Number} waits for a limit: it is paused now, and the next run goes on with its session"
                         : status.Task is { } current ? $"Will stop after #{current.Number} · /continue takes tasks again"
                         : "The queue stops before the next task");
                     break;
-
-                case RunCommand.Continue when aborting:
-                    Say(RunMark.Note, "An /abort cannot be taken back");
-                    break;
-                case RunCommand.Continue when stopping:
+                case RunCommand.Continue:
                     stopping = false;
                     Say(RunMark.GoesOn, "The queue goes on after the current task");
-                    break;
-                case RunCommand.Continue:
-                    Say(RunMark.Note, "Nothing to take back: the queue goes on");
-                    break;
-
-                case RunCommand.Abort when aborting:
-                    Say(RunMark.Note, "Already asked to wrap up");
                     break;
                 case RunCommand.Abort:
                     (aborting, stopping) = (true, true);
@@ -1422,15 +1405,11 @@ public sealed class Supervisor(
                     else if (waitsForLimit)
                         Say(RunMark.Interrupted, $"#{status.Task.Number} waits for a limit and cannot wrap up: it is paused with its changes in the working tree");
                     break;
-
-                case RunCommand.Nudge when status.Phase == RunPhase.WaitingForOwner && !aborting:
+                case RunCommand.Nudge:
                     nudge = true;
                     break;
-                case RunCommand.Hold when status is { Phase: RunPhase.WaitingForOwner, Until: not null }:
-                    hold = true;
-                    break;
                 default:
-                    Say(RunMark.Note, $"/{command.ToString().ToLowerInvariant()} means nothing now");
+                    hold = true;
                     break;
             }
         }
@@ -1438,6 +1417,16 @@ public sealed class Supervisor(
         if (heard)
             Show(status);
     }
+
+    // A command among the commands that mean something.
+    static RunCommands Flag(RunCommand command) => command switch
+    {
+        RunCommand.Stop => RunCommands.Stop,
+        RunCommand.Continue => RunCommands.Continue,
+        RunCommand.Abort => RunCommands.Abort,
+        RunCommand.Nudge => RunCommands.Nudge,
+        _ => RunCommands.Hold,
+    };
 
     // The first lines of a run: what it works on, the labels it skips, and what it will not take as things are.
     void Head(TaskLineup lineup)
@@ -1455,9 +1444,9 @@ public sealed class Supervisor(
     static string Held(TaskLineup lineup) => "Held: " + string.Join(" · ", lineup.Held.Select(held => $"#{held.Task.Number} {held.Reason}"));
 
     // What a session said, line by line, without the empty lines and without the line that is for toobusy.
-    static List<string> Said(string? reply) =>
-        [.. (reply ?? "").Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0 && !line.Trim().StartsWith(Outcome.Mark, StringComparison.OrdinalIgnoreCase))];
+    static List<string> Said(string? reply) => [.. Lines(reply ?? "").Where(line => !line.Trim().StartsWith(Outcome.Mark, StringComparison.OrdinalIgnoreCase))];
 
+    // The lines of a text that are not empty, without what ends them.
     static List<string> Lines(string text) => [.. text.Split('\n').Select(line => line.TrimEnd()).Where(line => line.Length > 0)];
 
     // What a session said, in the log: its first lines, and where the rest is.
@@ -1531,23 +1520,23 @@ public sealed class Supervisor(
         status = next with { Limits = limits, Behind = taken, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
         view.Show(status);
         var now = RunSign.Of(status);
-        if (told is null || now == told)
+        if (shown is null || now == shown)
             return;
 
         // A sign that cannot be written stops the run, and is not tried again while the run ends over it.
         try
         {
             sign.Change(now);
-            told = now;
+            shown = now;
         }
         catch (LocalStateException)
         {
-            told = null;
+            shown = null;
             throw;
         }
     }
 
-    // The commands that mean something at the moment.
+    // The commands that mean something at the moment: the run shows them, and does nothing for any other.
     RunCommands Available(RunStatus at)
     {
         if (at.Phase == RunPhase.Ended)
@@ -1564,7 +1553,23 @@ public sealed class Supervisor(
     static string Limit(UsageWindow window) => $"the {window.Name} limit";
 
     static string Reset(UsageWindow window) =>
-        window.ResetsAt is { } reset ? string.Create(CultureInfo.InvariantCulture, $", it resets {reset.UtcDateTime:yyyy-MM-dd HH:mm} UTC") : "";
+        window.ResetsAt is { } reset ? $", it resets {Spoken.Moment(reset)}" : "";
+
+    // A change of the tracker that a refusal does not stop: what was refused is added to `missing`, and the change
+    // counts as not made. True when it was made.
+    static async Task<bool> Try(List<string> missing, Func<Task> change)
+    {
+        try
+        {
+            await change();
+            return true;
+        }
+        catch (TrackerException refused)
+        {
+            missing.Add(refused.Message);
+            return false;
+        }
+    }
 
     // What is tried for good measure: a refusal of it changes nothing of what the run does next.
     static async Task Quietly(Func<Task> attempt)

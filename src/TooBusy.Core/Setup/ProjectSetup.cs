@@ -149,7 +149,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             var commands = new TaskCommands(
                 Offered(proposals.Before, current?.Commands.Before, "--before"),
                 Offered(proposals.After, current?.Commands.After, "--after"));
-            var branch = OfferedBranch(proposals.Branch, current?.Branch);
+            var branch = OfferedBranch(proposals.Branch, current?.Workspace.Branch);
             var permissionMode = OfferedPermissionMode(proposals.PermissionMode, current?.Assistant.PermissionMode);
             if (!await ReadBoardsAsync(cancellationToken))
                 return new SetupResult(SetupOutcome.Left, []);
@@ -237,10 +237,10 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
                 Value(SetupSetting.Take, TakeLabel, labels.Take.Count == 0 ? "any task" : string.Join(", ", labels.Take)),
                 Value(SetupSetting.Manual, ManualLabel, labels.Manual),
                 Value(SetupSetting.Interrupted, InterruptLabel, labels.Interrupted),
-                Value(SetupSetting.Skill, SkillLabel, settings.Skill),
+                Value(SetupSetting.Skill, SkillLabel, settings.Session.Skill),
                 Value(SetupSetting.Before, BeforeLabel, settings.Commands.Before),
                 Value(SetupSetting.After, AfterLabel, settings.Commands.After),
-                Value(SetupSetting.Branch, BranchLabel, settings.Branch),
+                Value(SetupSetting.Branch, BranchLabel, settings.Workspace.Branch),
                 Value(SetupSetting.PermissionMode, PermissionModeLabel, settings.Assistant.PermissionMode ?? UnnamedMode),
             ];
         }
@@ -392,7 +392,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         proposals.Take ?? current?.Queue.Labels.Take ?? [],
         proposals.Manual?.Trim() ?? current?.Queue.Labels.Manual ?? ProposedManual,
         proposals.Interrupted?.Trim() ?? current?.Queue.Labels.Interrupted ?? ProposedInterrupted,
-        proposals.Skill ?? (current is null ? ProposedSkill : current.Skill ?? ""),
+        proposals.Skill ?? (current is null ? ProposedSkill : current.Session.Skill ?? ""),
         commands,
         branch,
         permissionMode);
@@ -1013,7 +1013,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
 
         // A skill that is named and not written yet is to be written before a run: a session that starts with a
         // skill the assistant does not have does nothing. The menu says so where the skill is changed.
-        unwritten = answers.Skill is { Length: > 0 } skill && skill != changing?.Skill && environment.FindSkill(skill) is { Found: false } look
+        unwritten = answers.Skill is { Length: > 0 } skill && skill != changing?.Session.Skill && environment.FindSkill(skill) is { Found: false } look
             ? [new SetupNote(SetupTone.Warning, $"There is no skill “{skill}” yet: write {look.Place} before a run."), new SetupNote(SetupTone.Muted, "`toobusy about` tells what the skill is to say.")]
             : [];
 
@@ -1108,7 +1108,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
             (StatusesLabel, Listed(before.Tracker.Statuses), Listed(address is null ? before.Tracker.Statuses : made is null ? answers.Statuses.Called : BoardStatuses.Default)),
             (ManualLabel, before.Queue.Labels.Manual, answers.Manual),
             (InterruptLabel, before.Queue.Labels.Interrupted, answers.Interrupted),
-            (SkillLabel, before.Skill ?? "none", answers.Skill is { Length: > 0 } skill ? skill : "none"),
+            (SkillLabel, before.Session.Skill ?? "none", answers.Skill is { Length: > 0 } skill ? skill : "none"),
         ];
         return
         [
@@ -1126,7 +1126,7 @@ public sealed class ProjectSetup(ISetupDialog? dialog, ISetupEnvironment environ
         [
             (BeforeLabel, before.Before, answers.Commands.Before, "none"),
             (AfterLabel, before.After, answers.Commands.After, "none"),
-            (BranchLabel, current?.Branch, answers.Branch, "none"),
+            (BranchLabel, current?.Workspace.Branch, answers.Branch, "none"),
             (PermissionModeLabel, current?.Assistant.PermissionMode, answers.PermissionMode, UnnamedMode),
         ];
         return [.. unasked.Where(setting => setting.Before != setting.After).Select(setting => new SetupAnswer(setting.Name, $"{setting.Before ?? setting.None} → {setting.After ?? setting.None}"))];

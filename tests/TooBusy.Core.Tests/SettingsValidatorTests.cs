@@ -282,12 +282,12 @@ public class SettingsValidatorTests
     [Fact]
     public void TheBranchOfTheTasksIsOptional()
     {
-        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Branch);
+        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Workspace.Branch);
 
         var named = SettingsValidator.Validate(Document(("workspace", ""), (SettingsKeys.WorkspaceBranch, "release/2.0")));
 
         Assert.Empty(named.Errors);
-        Assert.Equal("release/2.0", named.Settings!.Branch);
+        Assert.Equal("release/2.0", named.Settings!.Workspace.Branch);
     }
 
     // Each refused by `git check-ref-format --branch` as well.
@@ -354,12 +354,12 @@ public class SettingsValidatorTests
     [Fact]
     public void TheSkillIsOptional()
     {
-        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Skill);
+        Assert.Null(SettingsValidator.Validate(Document()).Settings!.Session.Skill);
 
         var named = SettingsValidator.Validate(Document(("session", ""), (SettingsKeys.SessionSkill, "task-auto")));
 
         Assert.Empty(named.Errors);
-        Assert.Equal("task-auto", named.Settings!.Skill);
+        Assert.Equal("task-auto", named.Settings!.Session.Skill);
     }
 
     [Theory]

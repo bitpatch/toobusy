@@ -112,10 +112,10 @@ public static class SettingsToml
         (SettingsKeys.FormerManualLabel, null),
         (SettingsKeys.AssistantType, settings.Assistant.Type),
         (SettingsKeys.PermissionMode, settings.Assistant.PermissionMode),
-        (SettingsKeys.SessionSkill, settings.Skill),
+        (SettingsKeys.SessionSkill, settings.Session.Skill),
         (SettingsKeys.TaskBefore, settings.Commands.Before),
         (SettingsKeys.TaskAfter, settings.Commands.After),
-        (SettingsKeys.WorkspaceBranch, settings.Branch),
+        (SettingsKeys.WorkspaceBranch, settings.Workspace.Branch),
     ];
 
     // The name of a status as the file keeps it: not at all in a project without a board, and not when it is the

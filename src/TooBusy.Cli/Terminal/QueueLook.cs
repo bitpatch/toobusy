@@ -107,7 +107,7 @@ public static class QueueLook
 
     // Why a run takes the task before the others; null for a task it takes in its turn.
     static string? Mark(QueueTask task, QueueTask? recorded, QueueRules rules) =>
-        task.Number == recorded?.Number ? Left : task.Has(rules.Interrupted) ? Interrupted : null;
+        task.Number == recorded?.Number ? Left : task.Has(rules.Labels.Interrupted) ? Interrupted : null;
 
     static string Number(QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"#{task.Number}");
 

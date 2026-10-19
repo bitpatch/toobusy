@@ -66,7 +66,7 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
             kept = new ImitatedTasks(rules, killed: true);
             remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, clock.Now)));
         }
-        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Interrupted))
+        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Labels.Interrupted))
         {
             kept = new ImitatedTasks(rules, killed: false);
         }
@@ -146,9 +146,9 @@ public sealed class ImitatedTasks : ITaskTracker
 
     public ImitatedTasks(QueueRules rules, bool killed)
     {
-        manual = rules.Manual;
+        manual = rules.Labels.Manual;
         statuses = rules.Statuses;
-        string Type(int kind) => rules.Take.Count > 0 ? rules.Take[kind % rules.Take.Count] : Types[kind];
+        string Type(int kind) => rules.Labels.Take.Count > 0 ? rules.Labels.Take[kind % rules.Labels.Take.Count] : Types[kind];
         void Add(int number, string title, string[] labels, BoardStatus status = BoardStatus.Todo, int[]? after = null)
         {
             var stands = rules.Board ? status : BoardStatus.Missing;
@@ -162,8 +162,8 @@ public sealed class ImitatedTasks : ITaskTracker
         Add(103, "Fix the rounding of a discount", [Type(1)]);
         Add(104, "Update the dependencies", [Type(2)]);
         Add(105, "Describe the export in the manual", [Type(3)], after: [102]);
-        if (rules.Blocking.Count > 0)
-            Add(106, "Move the site to the new hosting", [Type(2), rules.Blocking[0]]);
+        if (rules.Labels.Blocking.Count > 0)
+            Add(106, "Move the site to the new hosting", [Type(2), rules.Labels.Blocking[0]]);
         if (rules.Board)
             Add(107, "Add a dark theme", [Type(0)], BoardStatus.InProgress);
     }

@@ -58,7 +58,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         string[] model = start.Model.Name is { } named ? ["--model", named] : [];
         var result = await processes.RunAsync(
             "claude",
-            ["--bg", "--permission-mode", permissionMode, "--permission-prompts", "none", "--settings", SessionSettings.Json(folders), .. model, "--effort", start.Effort, "-n", start.Name, start.Message],
+            ["--bg", "--permission-mode", permissionMode, "--permission-prompts", "none", "--settings", ClaudeSettings.Json(folders), .. model, "--effort", start.Effort, "-n", start.Name, start.Message],
             Patience,
             cancellationToken);
         var said = result.Output + "\n" + result.Error;
@@ -319,7 +319,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
                 // A session that Claude Code lists keeps the options it was started with and goes on with them:
                 // given any again, Claude Code starts a copy instead. One that it does not list any more, whose
                 // conversation is on the machine all the same, is given the options of a session once more.
-                string[] options = found is null ? ["--permission-mode", claude.permissionMode, "--permission-prompts", "none", "--settings", SessionSettings.Json(claude.folders)] : [];
+                string[] options = found is null ? ["--permission-mode", claude.permissionMode, "--permission-prompts", "none", "--settings", ClaudeSettings.Json(claude.folders)] : [];
                 var result = await claude.AskAsync(["--bg", "--resume", known, .. options, message], cancellationToken);
                 var said = result.Output + "\n" + result.Error;
                 if (result.Status == ProcessStatus.TimedOut)
@@ -376,7 +376,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             {
                 claude.folders.MakeLocal();
                 var written = claude.folders.Request + ".tmp";
-                File.WriteAllBytes(written, SessionSettings.Request(message));
+                File.WriteAllBytes(written, ClaudeSettings.Request(message));
                 File.Move(written, claude.folders.Request, overwrite: true);
             }
             catch (Exception unwritten) when (unwritten is IOException or UnauthorizedAccessException)

@@ -1,10 +1,11 @@
 using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
 
 namespace TooBusy.Core.Tests;
 
 public class TaskLineupTests
 {
-    static readonly QueueRules Rules = new(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted", Board: true);
+    static readonly QueueRules Rules = new(new LabelSettings(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted"), Board: true);
 
     [Fact]
     public void TasksAreTakenByTheirNumbers()
@@ -154,7 +155,7 @@ public class TaskLineupTests
     [Fact]
     public void WithoutLabelsToTakeAnyTaskIsTaken()
     {
-        var lineup = TaskLineup.Arrange([Task(3, labels: []), Task(5, labels: ["docs"])], Rules with { Take = [] });
+        var lineup = TaskLineup.Arrange([Task(3, labels: []), Task(5, labels: ["docs"])], Rules with { Labels = Rules.Labels with { Take = [] } });
 
         Assert.Equal([3, 5], lineup.Ready.Select(task => task.Number));
     }
@@ -263,9 +264,9 @@ public class TaskLineupTests
 
         var rules = QueueRules.Of(settings);
 
-        Assert.Equal(["manual"], rules.Blocking);
-        Assert.Equal(["bug"], rules.Take);
-        Assert.Equal(("ask", "paused", false), (rules.Manual, rules.Interrupted, rules.Board));
+        Assert.Equal(["manual"], rules.Labels.Blocking);
+        Assert.Equal(["bug"], rules.Labels.Take);
+        Assert.Equal(("ask", "paused", false), (rules.Labels.Manual, rules.Labels.Interrupted, rules.Board));
         Assert.Empty(rules.Skip);
         Assert.True(QueueRules.Of(settings with { Tracker = new Settings.TrackerSettings("github", "https://github.com/orgs/acme/projects/1") }).Board);
     }

@@ -346,7 +346,7 @@ public class CheckupTests
     [Fact]
     public async Task TheSkillOfTheSettingsMustBeThere()
     {
-        store.Current = Project(Rocket) with { Skill = "task-auto" };
+        store.Current = Project(Rocket) with { Session = new SessionSettings("task-auto") };
         Assert.Equal(
             new CheckResult(
                 "skill",
@@ -363,7 +363,7 @@ public class CheckupTests
     [Fact]
     public async Task ASkillThatCannotBeLookedForPassesAndSaysSo()
     {
-        store.Current = Project(Rocket) with { Skill = "toolbox:task-auto" };
+        store.Current = Project(Rocket) with { Session = new SessionSettings("toolbox:task-auto") };
         machine.Skills = null;
 
         Assert.Equal(new CheckResult("skill", CheckState.Passed, "toolbox:task-auto, a skill of a plugin: it is not looked for"), Of(await RunAsync(), "skill"));

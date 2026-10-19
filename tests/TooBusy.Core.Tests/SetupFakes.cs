@@ -276,9 +276,9 @@ sealed class FakeSettingsStore : ISettingsStore
         $"take = {string.Join(", ", settings.Queue.Labels.Take)}",
         $"manual = {settings.Queue.Labels.Manual}",
         $"interrupted = {settings.Queue.Labels.Interrupted}",
-        $"skill = {settings.Skill}",
+        $"skill = {settings.Session.Skill}",
         $"before = {settings.Commands.Before}",
         $"after = {settings.Commands.After}",
-        $"branch = {settings.Branch}",
+        $"branch = {settings.Workspace.Branch}",
         $"permission-mode = {settings.Assistant.PermissionMode}") + "\n";
 }

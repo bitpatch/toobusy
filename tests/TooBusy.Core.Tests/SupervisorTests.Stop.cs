@@ -143,7 +143,7 @@ public sealed partial class SupervisorTests
         var result = await RunAsync();
 
         Assert.Equal(new RunResult(RunEnd.Stopped, 0), result);
-        Assert.Equal([Briefing.Alone(3, Rules.Manual), Briefing.WrapUp(3)], session.Told);
+        Assert.Equal([Briefing.Alone(3, Rules.Labels.Manual), Briefing.WrapUp(3)], session.Told);
         Assert.DoesNotContain(log.Lines, line => line.Contains("it is left to the owner", StringComparison.Ordinal));
         Assert.Contains("label 3 +interrupted", tracker.Did);
     }

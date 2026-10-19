@@ -54,6 +54,12 @@ public class BoardStatusesTests
         Assert.Equal(["Ready", "Doing", "Stage 2"], Named.Names);
     }
 
+    [Theory]
+    [InlineData(BoardStatus.Missing)]
+    [InlineData(BoardStatus.Other)]
+    public void AStatusThatATaskIsNotMovedToHasNoName(BoardStatus status) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => Named.NameOf(status));
+
     [Fact]
     public void WhatABoardLacksGoesByTheNamesOfTheSettings()
     {

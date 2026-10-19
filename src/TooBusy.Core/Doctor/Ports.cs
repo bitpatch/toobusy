@@ -99,8 +99,9 @@ public enum CheckState
     Skipped,
 }
 
-// How a check ended. Text is what a passed check found, what a warned one warns of, what is wrong for a failed one,
-// and what a skipped one waits for; Details are more lines of what is wrong, and Fix is the command, or the address, that puts it right.
+// How a check ended. Text is what a passed check found, what a warned one warns of, what is wrong for a failed one, and
+// what a skipped one waits for; Details are more lines of what is wrong, and Fix is the command, or the address, that
+// puts it right.
 public sealed record CheckResult(string Name, CheckState State, string Text = "", string? Fix = null)
 {
     public IReadOnlyList<string> Details { get; init; } = [];

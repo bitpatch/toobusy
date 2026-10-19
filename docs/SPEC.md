@@ -1167,7 +1167,7 @@ The line is read whatever its case and whatever marks of emphasis stand around i
 
 A task ends when the turn of its session ends with a line for toobusy. It ends so too when Claude Code marks the session as waiting for an answer though its reply ends with the line, once the session was told that no answer will come, and while the run aborts, as [A session that waits for the owner](#a-session-that-waits-for-the-owner) describes. Either way the outcome is read from that reply.
 
-What the session says is checked first: after `done`, `partial`, `owner` and `interrupted` the working tree must be clean, and after `done` and `partial` the branch must have no commit that its upstream lacks; a branch without an upstream has nothing to lack, and passes. After `partial` the report must name a task other than its own, as `#34` or by the address of an issue: the task of what is left, which the session made. It is the report that is read, not the tracker: what the named task is, the run does not look at. Then the tracker is told:
+What the session says is checked first: after `done`, `partial`, `owner` and `interrupted` the working tree must be clean, and after `done` and `partial` the branch must have no commit that its upstream lacks; a branch without an upstream has nothing to lack, and passes. After `partial` the report must name a task other than its own, as `#34` or by the address of an issue: the task of what is left, which the session made. It is the report that is read, not the tracker: what the named task is, the run does not look at, so any number after a `#` counts, as the `#2` of `step #2 of 5` does. Then the tracker is told:
 
 | Outcome | The tracker |
 |---|---|

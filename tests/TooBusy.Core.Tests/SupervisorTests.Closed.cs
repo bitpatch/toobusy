@@ -168,6 +168,22 @@ public sealed partial class SupervisorTests
     }
 
     [Fact]
+    public async Task TheSessionThatWasLookedAtForAClosedTaskIsStoppedWithoutBeingLookedForAgain()
+    {
+        state.Record = Record(5);
+        tracker.Add(3);
+        tracker.Add(5, status: BoardStatus.InProgress);
+        tracker.Shut(5);
+        var session = assistant.Session(5);
+        session.Works();
+
+        await RunAsync();
+
+        Assert.Equal([Record(5).Session], assistant.Found);
+        Assert.Equal(1, session.Stopped);
+    }
+
+    [Fact]
     public async Task WhileTheSessionsCannotBeReadAClosedTaskOfTheRecordIsLeftAsItIs()
     {
         state.Record = Record(5);

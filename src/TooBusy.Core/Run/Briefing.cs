@@ -51,20 +51,9 @@ public static class Briefing
 
             """);
         if (interrupted)
-        {
-            message.Append("""
-                - This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how. One that starts with **Interrupted.** is the report of the session before: go on with what it says is left, and do again what it says was undone. One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description.
-
-                """);
-        }
-
+            message.Append(InterruptedRule).Append('\n');
         if (lost)
-        {
-            message.Append("""
-                - A session worked on this task before, and its conversation is gone: it left no report. What it changed and did not commit may still be in the working copy: the changes that `git status` shows before you start are its. Look at them with `git diff`, keep what is right, undo what is not, and go on from there.
-
-                """);
-        }
+            message.Append(LostRule).Append('\n');
 
         message.Append(CultureInfo.InvariantCulture, $"""
 
@@ -90,6 +79,12 @@ public static class Briefing
             """);
         return message.ToString();
     }
+
+    // The rule a first message adds for a task that was interrupted before, and the one for a task whose session
+    // before is lost, as `Task` adds them.
+    public const string InterruptedRule = "- This task was interrupted before. The last comment of the task that starts with **Interrupted.** or with **Stopped by a usage limit** says how. One that starts with **Interrupted.** is the report of the session before: go on with what it says is left, and do again what it says was undone. One that starts with **Stopped by a usage limit** has no report: the session before worked elsewhere, and its uncommitted changes are not here, so do the task from its description.";
+
+    public const string LostRule = "- A session worked on this task before, and its conversation is gone: it left no report. What it changed and did not commit may still be in the working copy: the changes that `git status` shows before you start are its. Look at them with `git diff`, keep what is right, undo what is not, and go on from there.";
 
     // The line a first message begins with in a project that names a skill: the command of the skill, and the task
     // by its number and its title.

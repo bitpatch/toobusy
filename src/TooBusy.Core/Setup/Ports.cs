@@ -141,10 +141,10 @@ public abstract record BoardAnswer
 }
 
 // What the options of `toobusy init` say before anything is asked, each the proposed answer of its question; null
-// leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an
-// empty name of the skill: no skill. The commands around a task, the branch and the permission mode have no
-// question: null leaves them as the settings have them. The three statuses are what the board calls them: each is the proposed answer of its
-// question, which a board that is named as GitHub names one is not asked.
+// leaves a question with what it proposes by itself. An empty list of labels is an answer: no label; and so is an empty
+// name of the skill: no skill. The commands around a task, the branch and the permission mode have no question: null
+// leaves them as the settings have them. The three statuses are what the board calls them: each is the proposed answer
+// of its question, which a board that is named as GitHub names one is not asked.
 public sealed record SetupProposals(
     BoardProposal? Board = null,
     IReadOnlyList<string>? Blocking = null,
