@@ -65,6 +65,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         var started = now();
         var feed = new RunFeed();
         using var kill = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var outside = cancellationToken.Register(() => run.Note("toobusy is stopped from outside, by a signal or as its terminal closed: the run is killed"));
         var working = Task.Run(() => run.RunAsync(feed, kill.Token), CancellationToken.None);
 
         // Whether the menu was opened with `/`, whether the commands that a waiting session brought were put away,
@@ -130,12 +131,15 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
             await WatchAsync();
             return Result = await working;
         }
-        catch
+        catch (Exception left)
         {
-            // The page is left while the run works, with Ctrl+C or because something went wrong on it: the run is
-            // killed, never left to go on with nobody watching it, and what it says of that is kept. What the kill
-            // does not cut may take a while, and the page goes on showing the run until it is over. Ctrl+C is the
-            // terminal's own meanwhile: one more stops the tool from outside, which waits for the run a while at most.
+            // The page is left while the run works, with Ctrl+C, because its terminal went away or because something
+            // went wrong on it: the run is killed, never left to go on with nobody watching it, its log says why, and
+            // what it says of that is kept. What the kill does not cut may take a while, and the page goes on showing
+            // the run until it is over, where it still can. Ctrl+C is the terminal's own meanwhile: one more stops the
+            // tool from outside, which waits for the run a while at most.
+            if (!kill.IsCancellationRequested)
+                run.Note(Why(left));
             await kill.CancelAsync();
             page.GiveBackControlC();
             try
@@ -166,6 +170,13 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
             page.Leaving = "exit";
         }
     }
+
+    // Why the page was left while the run worked, for the log of the run: an error that nothing foresaw whole, with
+    // where it happened.
+    string Why(Exception left) =>
+        left is OperationCanceledException ? "the page of the run is left with Ctrl+C: the run is killed"
+        : page.Lost is { } lost ? $"the terminal of the run went away ({lost}): the run is killed"
+        : $"the page of the run failed: the run is killed\n{left}";
 
     // Sends the command of the entry to the run; false, for the menu, which is closed by it.
     static bool Sent(IQueueRun run, Entry entry)

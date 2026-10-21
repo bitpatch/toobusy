@@ -552,8 +552,55 @@ public sealed class RunScreenTests : IDisposable
         await Assert.ThrowsAsync<OperationCanceledException>(() => screen.RunAsync(run, TestContext.Current.CancellationToken));
 
         Assert.True(run.Killed);
+        Assert.Equal(["the page of the run is left with Ctrl+C: the run is killed"], run.Notes);
         Assert.Equal(new RunResult(RunEnd.Killed, 0), screen.Result);
         Assert.Equal(["  toobusy · ~/rocket", " 0 tasks in 0 s", " ■ Killed"], terminal.Tape.Text.Split('\n'));
+    }
+
+    // The window of the terminal is closed while the run works: nothing that is drawn is seen any more, the run is
+    // killed, and its log says why. The page is left, with an error that says why.
+    [Fact]
+    public async Task ARunWhoseTerminalGoesAwayIsKilledAndItsLogSaysWhy()
+    {
+        var gone = false;
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working);
+            return await run.ForEverAsync();
+        });
+        terminal.Device = terminal.Device with { Lost = () => gone ? "Input/output error" : null };
+        terminal.Keys.Hold(() => gone = Has("1:24"));
+
+        using var page = terminal.Open();
+        var screen = new RunScreen(page, () => now);
+        var left = await Assert.ThrowsAsync<IOException>(() => screen.RunAsync(run, TestContext.Current.CancellationToken));
+
+        Assert.Equal("The terminal is gone: Input/output error", left.Message);
+        Assert.True(run.Killed);
+        Assert.Equal(["the terminal of the run went away (Input/output error): the run is killed"], run.Notes);
+        Assert.Equal(new RunResult(RunEnd.Killed, 0), screen.Result);
+    }
+
+    // What nothing foresaw goes wrong on the page while the run works: the run is killed, and its log has the whole
+    // error, with where it happened.
+    [Fact]
+    public async Task ARunWhosePageFailsIsKilledAndItsLogHasTheWholeError()
+    {
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working);
+            return await run.ForEverAsync();
+        });
+        terminal.Device = terminal.Device with { KeyWaiting = () => terminal.Keys.Waiting || (Has("1:24") ? throw new InvalidOperationException("boom") : false) };
+
+        using var page = terminal.Open();
+        var screen = new RunScreen(page, () => now);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => screen.RunAsync(run, TestContext.Current.CancellationToken));
+
+        Assert.True(run.Killed);
+        var note = Assert.Single(run.Notes);
+        Assert.StartsWith("the page of the run failed: the run is killed\nSystem.InvalidOperationException: boom\n   at ", note, StringComparison.Ordinal);
+        Assert.Equal(new RunResult(RunEnd.Killed, 0), screen.Result);
     }
 
     [Fact]
@@ -636,6 +683,7 @@ public sealed class RunScreenTests : IDisposable
         var result = await new RunScreen(page, () => now).RunAsync(run, outside.Token);
 
         Assert.Equal(new RunResult(RunEnd.Killed, 0), result);
+        Assert.Equal(["toobusy is stopped from outside, by a signal or as its terminal closed: the run is killed"], run.Notes);
         Assert.False(terminal.Saw("finish the current task, then stop"));
         Assert.Equal(["  toobusy · ~/rocket", " 0 tasks in 0 s", " ■ Killed"], terminal.Tape.Text.Split('\n'));
     }

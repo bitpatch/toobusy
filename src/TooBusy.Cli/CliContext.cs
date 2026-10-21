@@ -40,7 +40,8 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
     // `TOOBUSY_TRACE=1` asks for it.
     public bool Trace { get; init; }
 
-    public static CliContext OfProcess() => new(Environment.CurrentDirectory, Console.Out, Console.Error)
+    // The tool as the process has it; `terminal` is what writes to the terminal, which says when it went away.
+    public static CliContext OfProcess(TerminalWriter? terminal) => new(Environment.CurrentDirectory, Console.Out, Console.Error)
     {
         OutputPalette = Palette.Detect(!Console.IsOutputRedirected, Environment.GetEnvironmentVariable),
         ErrorPalette = Palette.Detect(!Console.IsErrorRedirected, Environment.GetEnvironmentVariable),
@@ -54,6 +55,7 @@ public sealed record CliContext(string Folder, TextWriter Output, TextWriter Err
                 TakeControlC = taken => Console.TreatControlCAsInput = taken,
                 WatchSize = changed => OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGWINCH, _ => changed()),
                 Every = (time, tick) => new Timer(_ => tick(), null, time, time),
+                Lost = () => terminal?.Lost,
             },
         Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         Processes = new ProcessRunner(),

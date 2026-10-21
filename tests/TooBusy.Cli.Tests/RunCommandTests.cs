@@ -257,6 +257,37 @@ public sealed class RunCommandTests : CliAppTests
             (record.RootElement.GetProperty("task").GetInt32(), record.RootElement.GetProperty("session").GetString(), record.RootElement.GetProperty("conversation").GetString(), record.RootElement.GetProperty("state").GetString()));
     }
 
+    // The window of the terminal is closed, or the user is logged out, while a session works: the run is killed as by
+    // Ctrl+C, and the tool ends as after a kill instead of falling over the terminal it can no longer write to.
+    [Fact]
+    public async Task ARunWhoseTerminalGoesAwayIsKilledAndItsLogSaysWhy()
+    {
+        GitRepository();
+        WriteSettings(Settings);
+        await ChooseAllAsync();
+        var processes = SessionMachine("working");
+        var context = Context(processes) with { Home = personal.FullName, Clock = new PacedClock() };
+        Converse(context, RunsTheTests);
+        var gone = false;
+        var keys = new Keys().Hold(() => gone = Shown("Bash: dotnet test"));
+
+        var (exit, _, error) = await RunAsync(context with
+        {
+            Terminal = new TerminalDevice(keys.Read, () => (120, 30))
+            {
+                KeyWaiting = () => keys.Waiting,
+                Lost = () => gone ? "Input/output error" : null,
+            },
+        }, ["run"]);
+
+        Assert.Equal("", error);
+        Assert.Equal(130, exit);
+        Assert.Contains(processes.Asked, asked => asked.Command == "claude" && asked.Arguments.Contains("stop"));
+        var log = File.ReadAllLines(Assert.Single(Directory.GetFiles(Path.Combine(folder.FullName, ".toobusy", "local", "logs"))));
+        Assert.Contains(log, line => line.EndsWith(" the terminal of the run went away (Input/output error): the run is killed", StringComparison.Ordinal));
+        Assert.Contains(" run ended: killed · ", log[^1], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ARunDoesNotStartBeforeTheMilestoneIsChosen()
     {

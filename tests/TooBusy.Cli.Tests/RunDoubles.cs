@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using TooBusy.Core.Run;
 
@@ -61,6 +62,13 @@ public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> pla
     }
 
     public void Send(RunCommand command) => commands.Writer.TryWrite(command);
+
+    readonly ConcurrentQueue<string> notes = new();
+
+    // What the page noted for the log of the run, in order.
+    public IReadOnlyList<string> Notes => [.. notes];
+
+    public void Note(string text) => notes.Enqueue(text);
 
     // The next command of the page; a run that is killed meanwhile stops waiting. A page that sends none within the
     // patience of the keys fails the test instead of keeping it waiting.

@@ -6,7 +6,8 @@ namespace TooBusy.Cli.Terminal;
 // is pressed twice in a row: the first one asks, any other key takes the question back. Leaving this way throws
 // OperationCanceledException, which the command that opened the page catches. Escape is asked about in the same way
 // where the page is told that it leaves: the first one is read as a key that means nothing. A page that is being
-// left may give Ctrl+C back to the terminal before it is closed, so that one more stops the program.
+// left may give Ctrl+C back to the terminal before it is closed, so that one more stops the program. A page whose
+// terminal went away is left too: what draws on it or reads a key from it throws IOException, which says why.
 public sealed class Page : IDisposable
 {
     readonly Screen screen;
@@ -78,6 +79,7 @@ public sealed class Page : IDisposable
     // it does not draw.
     public void Draw(IReadOnlyList<Line> question, IReadOnlyList<Line> choice, string keys, Caret? caret = null, int? chosen = null, int? waiting = null, int? running = null, bool back = false)
     {
+        Check();
         if (device.KeyWaiting())
             return;
 
@@ -91,7 +93,7 @@ public sealed class Page : IDisposable
     // again, so that it can draw what changes meanwhile.
     public async Task<ConsoleKeyInfo?> ReadAsync(Task wake)
     {
-        while (!device.KeyWaiting())
+        while (!Checked(device.KeyWaiting))
         {
             if (wake.IsCompleted)
                 return null;
@@ -160,7 +162,7 @@ public sealed class Page : IDisposable
 
     public ConsoleKeyInfo Read()
     {
-        var key = device.ReadKey();
+        var key = Checked(device.ReadKey);
         var asked = key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control) ? "ctrl+c"
             : key.Key == ConsoleKey.Escape && EscapeLeaves ? "esc"
             : null;
@@ -173,6 +175,25 @@ public sealed class Page : IDisposable
 
         leaving = asked;
         return asked == "esc" ? Nothing : key;
+    }
+
+    // Why the terminal of the page went away; null while it is there.
+    public string? Lost => device.Lost();
+
+    // Throws when the terminal went away: the page is left then.
+    void Check()
+    {
+        if (Lost is { } why)
+            throw new IOException($"The terminal is gone: {why}");
+    }
+
+    // What the terminal answers, unless it went away; the answer of one that is going away is not taken.
+    T Checked<T>(Func<T> ask)
+    {
+        Check();
+        var answer = ask();
+        Check();
+        return answer;
     }
 
     public void Dispose()

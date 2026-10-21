@@ -880,7 +880,7 @@ public static class CliApp
     // Opens the page of toobusy for what is done on it, and closes it when that is over or the page was left: the
     // session it gives remembers what was done, for the report each command leaves in the terminal. A run that was
     // killed on the page is told as one, even where one more Ctrl+C stopped the tool from outside while the run did
-    // what the kill does not cut.
+    // what the kill does not cut, and so is one whose terminal went away.
     static async Task<Session> WithPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task> open, CancellationToken cancellationToken)
     {
         using var page = new Page(context.Output, context.OutputPalette, terminal, $"toobusy · {bench.Folder}");
@@ -892,6 +892,10 @@ public static class CliApp
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested || session.Runs is [.., { End: RunEnd.Killed }])
         {
             // The page was left.
+        }
+        catch (Exception) when (terminal.Lost() is not null)
+        {
+            // The terminal went away, and the page with it: a run on it was killed, and its log says so.
         }
 
         return session;

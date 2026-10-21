@@ -61,6 +61,25 @@ public sealed class LoggedRunTests : IDisposable
         Assert.Equal(["  the log of the run: " + log.DisplayPath, "run ended: emptied · 2 done"], Logged.Lines(log));
     }
 
+    // Why the page killed the run goes into the log, in its place among what the run says.
+    [Fact]
+    public async Task ANoteGoesIntoTheLogOnly()
+    {
+        var log = new RunLogFile(folder.FullName, clock);
+        LoggedRun? run = null;
+        run = new LoggedRun(new FakeRun(view =>
+        {
+            run!.Note("the terminal of the run went away (Input/output error): the run is killed");
+            view.Say(new RunLine(RunMark.Interrupted, "Killed"));
+            return Task.FromResult(new RunResult(RunEnd.Killed, 0));
+        }), log);
+
+        await run.RunAsync(view, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(view.Lines, line => line.Text.Contains("terminal", StringComparison.Ordinal));
+        Assert.Equal(["the terminal of the run went away (Input/output error): the run is killed", "■ Killed"], Logged.Lines(log)[..2]);
+    }
+
     // How the run sees its session goes into the log and not to the screen.
     [Fact]
     public async Task ATraceGoesIntoTheLogOnly()

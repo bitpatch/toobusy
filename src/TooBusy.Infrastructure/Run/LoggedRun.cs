@@ -30,4 +30,6 @@ public sealed class LoggedRun(IQueueRun inner, RunLogFile log) : IQueueRun
     }
 
     public void Send(RunCommand command) => inner.Send(command);
+
+    public void Note(string text) => log.Write(text);
 }

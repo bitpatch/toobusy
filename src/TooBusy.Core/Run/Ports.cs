@@ -329,10 +329,15 @@ public interface IRunView
 // A run of the queue. It is made once: a second RunAsync throws InvalidOperationException, and a second run is a new
 // one. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at once, and its
 // task stays as it is. A task whose session was being started goes back to Todo, and one whose outcome or pause was
-// being told is told to its end.
+// being told is told to its end. Note is what happened to the run from outside it that only its log keeps, as why it
+// is killed: a run that has no such log does nothing with it.
 public interface IQueueRun
 {
     Task<RunResult> RunAsync(IRunView view, CancellationToken kill);
 
     void Send(RunCommand command);
+
+    void Note(string text)
+    {
+    }
 }
