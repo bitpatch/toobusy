@@ -1,0 +1,4 @@
+# Instructions for AI assistants: the tests
+
+- A test does not wait without an end, so that a regression fails it with a message instead of hanging the whole run. A screen test waits for the page through `Keys.Hold`, `Keys.Until`, `ScriptedRun.NextAsync`, `SeenAsync` or `GoneAsync`, which give up after `Keys.Patience`, or a hundred presses, with a message, the last two with what the screen shows; a run in Core is ended by its fakes: the two days of `FakeClock` and the `Budget` of the calls a run makes again and again, in `RunFakes.cs`.
+- A test says what it depends on, so that a change that keeps the behaviour fails no test that is not about it: a time comes from the policy of the fixture, the calls of the tracker are compared in any order but where the order is behaviour, a line of a list is gone to with `Keys.Until` by what it says, and the commands of the machine are answered by the `ScriptedProcesses` of the test project. docs/ARCHITECTURE.md has the details.
