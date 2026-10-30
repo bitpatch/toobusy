@@ -20,6 +20,7 @@ dotnet run --project src/TooBusy.Cli -- init --demo       # imitated setup of th
 dotnet run --project src/TooBusy.Cli -- init --assist     # the walk through the setup for an assistant: the introduction and the first step; `--assist 3` is step 3 alone; changes nothing
 dotnet run --project src/TooBusy.Cli -- run --demo        # a run over the fifteen made-up tasks of a shop and their sessions; changes nothing
 dotnet run --project src/TooBusy.Cli -- run --demo --max 2    # the same, two tasks at most; `--task 101` does that task and no other; `--skip-label docs` leaves out the tasks with that label
+dotnet run --project src/TooBusy.Cli -- run --demo --sessions 3    # the same with three sessions at once, each in a made-up worktree
 dotnet run --project src/TooBusy.Cli -- queue --demo      # the queue of a demo of a run: what is ready, what opens later, what is held; `--json` for an assistant
 dotnet run --project src/TooBusy.Cli -- status            # whether a run is going on in this working copy; exits with 3 while one is; `--json` for an assistant; `--demo` shows a made-up one
 dotnet run --project src/TooBusy.Cli -- about             # how a run works, with every message a session gets

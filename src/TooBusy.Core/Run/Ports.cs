@@ -247,6 +247,40 @@ public enum RecordState
 
 public sealed record TaskRecord(int Number, SessionTrace Session, RecordState State = RecordState.Working);
 
+// A branch of the remote that the work of the tasks comes back to: `origin` and `develop`.
+public sealed record Upstream(string Remote, string Branch)
+{
+    public string Name => $"{Remote}/{Branch}";
+}
+
+// How the work of a git worktree comes back: it stands on a branch of its own, which follows the branch of the tasks
+// on the remote, and its session pushes to that one.
+public sealed record Landing(string Branch, Upstream Onto);
+
+// A working copy a session works in, with the ports that are bound to its folder. Landing is null for the working copy
+// the run was started in, whose branch is the one that is pushed; it is that of a git worktree otherwise.
+public sealed record WorkingCopy(string Folder, IWorkspace Workspace, IRunState State, IProjectCommands Shell, IAssistant Assistant)
+{
+    public Landing? Landing { get; init; }
+}
+
+// The git worktrees of a run of several sessions: a task is done in one of its own, which stays while a record names
+// it or changes of its session are in it. A worktree that cannot be made or removed throws LocalStateException.
+public interface IWorkingCopies
+{
+    // The worktrees earlier runs left.
+    Task<IReadOnlyList<WorkingCopy>> FindAsync(CancellationToken cancellationToken);
+
+    // What a branch follows on the remote; null when it follows nothing.
+    Task<Upstream?> FollowedAsync(string branch, CancellationToken cancellationToken);
+
+    // A new worktree for a task, on a branch of its own that follows the branch of the tasks as this machine knows it.
+    Task<WorkingCopy> MakeAsync(int task, Upstream onto, CancellationToken cancellationToken);
+
+    // Takes away a worktree whose work is over, and its branch.
+    Task RemoveAsync(WorkingCopy copy, CancellationToken cancellationToken);
+}
+
 // The sign a run puts up in the working copy for as long as it goes on, so that whoever works beside it can tell: a
 // second run, which does not start, and `toobusy status`. Unlike the record it does not outlive its run: it is taken
 // down when the run ends, and the sign of a run that died says nothing. A sign that cannot be written or taken down
@@ -265,7 +299,7 @@ public interface IRunSign
 
 // What a run says of itself on its sign: where it is, the task it works on, with its title and its address, null
 // between tasks, how the session of the task is opened, null while it has none, and until when the run waits for a
-// usage limit.
+// usage limit. Beside is the same of the other tasks of a run of several sessions.
 public sealed record RunSign(RunPhase Phase)
 {
     public int? Task { get; init; }
@@ -278,6 +312,8 @@ public sealed record RunSign(RunPhase Phase)
 
     public DateTimeOffset? Until { get; init; }
 
+    public IReadOnlyList<RunSign> Beside { get; init; } = [];
+
     // What is said of a run on its sign, of all it shows: a sign changes when one of these does, not with every step
     // of a session.
     public static RunSign Of(RunStatus status) => new(status.Phase)
@@ -287,11 +323,21 @@ public sealed record RunSign(RunPhase Phase)
         Url = status.Task?.Url,
         Open = status.Task is null ? null : status.Open,
         Until = status.Phase == RunPhase.WaitingForLimit ? status.Until : null,
+        Beside = [.. status.Beside.Select(Of)],
     };
 
-    // The run in a few words, as `toobusy status` and a run that does not start say it: the task and how its session
-    // is opened, with what the run waits for, or that it is between tasks.
-    public string Told
+    // Two signs say the same when what stands beside the task does too.
+    public bool Equals(RunSign? other) =>
+        other is not null && (Phase, Task, Title, Url, Open, Until) == (other.Phase, other.Task, other.Title, other.Url, other.Open, other.Until) && Beside.SequenceEqual(other.Beside);
+
+    public override int GetHashCode() => HashCode.Combine(Phase, Task, Title, Url, Open, Until, Beside.Count);
+
+    // The run in a few words, as a run that does not start says it: the task and how its session is opened, with what
+    // the run waits for, or that it is between tasks; and so of the tasks beside it.
+    public string Told => string.Join(" · ", ((RunSign[])[this, .. Beside]).Select(sign => sign.TaskTold));
+
+    // One task of the run in a few words, as `toobusy status` says it.
+    public string TaskTold
     {
         get
         {
@@ -327,7 +373,7 @@ public interface IRunView
 }
 
 // A run of the queue. It is made once: a second RunAsync throws InvalidOperationException, and a second run is a new
-// one. Commands may be sent from any thread; the cancellation is the kill: the session is stopped at once, and its
+// one. Commands may be sent from any thread; the cancellation is the kill: every session is stopped at once, and its
 // task stays as it is. A task whose session was being started goes back to Todo, and one whose outcome or pause was
 // being told is told to its end. Note is what happened to the run from outside it that only its log keeps, as why it
 // is killed: a run that has no such log does nothing with it.
@@ -335,7 +381,8 @@ public interface IQueueRun
 {
     Task<RunResult> RunAsync(IRunView view, CancellationToken kill);
 
-    void Send(RunCommand command);
+    // `task` is the task a command for a session that waits is meant for: null is the one that has waited longest.
+    void Send(RunCommand command, int? task = null);
 
     void Note(string text)
     {

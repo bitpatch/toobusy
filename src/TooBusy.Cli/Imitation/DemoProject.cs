@@ -11,6 +11,9 @@ public static class DemoProject
 
     public const string Repository = "example/demo-project";
 
+    // The branch a demo of several sessions lands its made-up work on.
+    public const string Branch = "develop";
+
     // The organisation the repository belongs to, and the user who runs the demo.
     public const string Organisation = "example";
 

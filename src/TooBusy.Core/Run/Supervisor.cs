@@ -7,7 +7,8 @@ namespace TooBusy.Core.Run;
 // A run of the queue: it takes the tasks one after another, each a `TaskRun`, which has the assistant do it in a session
 // of its own, watches the session, and tells the tracker how the task went. It is the run that keeps the task of a
 // session: it is moved before its session starts and after it ends, and the session is told so. New tasks are the
-// session's to make.
+// session's to make. A run of several sessions takes tasks side by side, each in a git worktree of its own, as
+// `Supervisor.Many.cs` says.
 //
 // It never goes on past a doubt: a session that ends without saying how the task went, a working tree that is not
 // clean, a tracker that refuses, a command of the project that fails, a file of the run that cannot be written, and
@@ -16,8 +17,9 @@ namespace TooBusy.Core.Run;
 // the branch, are made again when GitHub or the remote did not answer, and stop the run only after that.
 //
 // Everything it knows of time comes from the clock, and everything it is told comes through `Send`, which only puts
-// the command in a line: the run itself looks at the line, in one place, so nothing here is shared between threads.
-public sealed class Supervisor(
+// the command in a line: the run itself looks at the line, in one place. A task goes on a `Flow` of its own, and what
+// the flows share is kept under `gate`.
+public sealed partial class Supervisor(
     ITaskTracker tracker,
     IAssistant assistant,
     IWorkspace workspace,
@@ -27,20 +29,24 @@ public sealed class Supervisor(
     IClock clock,
     IProjectCommands shell,
     RunPlan plan,
-    RunPolicy policy) : IQueueRun, ITaskHost
+    RunPolicy policy,
+    IWorkingCopies? copies = null) : IQueueRun
 {
-    readonly ConcurrentQueue<RunCommand> commands = new();
+    readonly ConcurrentQueue<(RunCommand Command, int? Task)> commands = new();
+    readonly Lock gate = new();
+
+    // The working copy the run was started in, and the flow of what is done there and between tasks.
+    readonly WorkingCopy home = new("", workspace, state, shell, assistant);
+    Flow? main;
+
+    Flow Main => main ??= new Flow(this);
 
     IRunView view = Silent.View;
-    RunStatus status = new(RunPhase.Preparing, "");
     UsageLimits limits = UsageLimits.Unknown;
 
-    // What the owner asked for: to stop after the task, to stop as soon as possible, and, of the session that waits,
-    // to be told now or never.
+    // What the owner asked for: to stop after the task, and to stop as soon as possible.
     bool stopping;
     bool aborting;
-    bool nudge;
-    bool hold;
 
     // What the sign of the run says, as it was written last; null while the sign is not up.
     RunSign? shown;
@@ -52,9 +58,6 @@ public sealed class Supervisor(
     // The tasks of this run that came to an outcome: done, done in part or left to the owner. A run that was
     // started for a number of tasks counts them.
     int taken;
-
-    // What the pause of a task or a kill said last: it is why the run ended.
-    string? left;
 
     // Whether the run said that the branch of the tasks has no upstream: it says so once.
     bool unfollowed;
@@ -74,10 +77,12 @@ public sealed class Supervisor(
 
     RunTracker Calls => calls ??= new RunTracker(tracker, clock, plan, policy, Say);
 
-    // A task of the run, as a new one: what it keeps is its own.
-    TaskRun NewTask(QueueTask task, int queued) => new(task, queued, this, new TaskTools(Calls, assistant, workspace, state, shell, clock, plan, policy));
+    // A task of the run in a working copy, as a new one: what it keeps is its own. A worktree is brought up to date
+    // with the branch it lands on, as the working copy is with the branch of the settings.
+    TaskRun NewTask(Flow flow, WorkingCopy copy, QueueTask task, int queued) =>
+        new(task, queued, flow, new TaskTools(Calls, copy.Assistant, copy.Workspace, copy.State, copy.Shell, clock, copy.Landing is { } landing ? plan with { Branch = landing.Onto.Branch } : plan, policy) { Landing = copy.Landing });
 
-    public void Send(RunCommand command) => commands.Enqueue(command);
+    public void Send(RunCommand command, int? task = null) => commands.Enqueue((command, task));
 
     public async Task<RunResult> RunAsync(IRunView view, CancellationToken kill)
     {
@@ -89,7 +94,7 @@ public sealed class Supervisor(
 
         // One run goes on in a working copy: a second one would work in the middle of the task of the first. A run
         // whose sign cannot be put up starts nothing either: nobody beside it could tell that it goes on.
-        var up = RunSign.Of(status);
+        var up = RunSign.Of(Shown());
         string? unstarted;
         try
         {
@@ -103,7 +108,7 @@ public sealed class Supervisor(
         if (unstarted is not null)
         {
             Say(RunMark.Failed, $"Did not start: {unstarted}");
-            Show(new RunStatus(RunPhase.Ended, ""));
+            Show(Main, new RunStatus(RunPhase.Ended, ""));
             return Ended(RunEnd.Problem, unstarted);
         }
 
@@ -113,29 +118,7 @@ public sealed class Supervisor(
         {
             try
             {
-                result = await LoopAsync(kill);
-            }
-            catch (OperationCanceledException) when (kill.IsCancellationRequested)
-            {
-                result = Ended(RunEnd.Killed, left);
-            }
-            catch (TrackerException refused)
-            {
-                result = Stop(refused.Message);
-            }
-            catch (AssistantException refused)
-            {
-                result = Stop(refused.Message);
-            }
-            catch (LocalStateException unwritten)
-            {
-                result = Stop(unwritten.Message);
-            }
-            catch (Exception unforeseen)
-            {
-                // What nothing of the run foresaw stops it all the same, a cancellation that is not the kill among
-                // it: a session that worked was stopped where its task was done, and the log names what happened.
-                result = Stop(Unforeseen(unforeseen), unforeseen.ToString());
+                result = (await GuardedAsync(async () => await LoopAsync(kill), Main, kill))!;
             }
             finally
             {
@@ -145,34 +128,76 @@ public sealed class Supervisor(
         }
 
         Say(RunMark.Note, $"Worked {Spoken.Time(clock.Now - started)}");
-        Show(new RunStatus(RunPhase.Ended, ""));
+        Show(Main, new RunStatus(RunPhase.Ended, ""));
         return result;
     }
 
-    async Task<RunResult> LoopAsync(CancellationToken kill)
+    // What ends a flow of the run, or the run: no exception leaves it. A tracker, an assistant and a file of the run
+    // that refuse stop the run with their words, and anything else does too, a cancellation that is not the kill among
+    // it: a session that worked was stopped where its task was done, and the log names what happened.
+    async Task<RunResult?> GuardedAsync(Func<Task<RunResult?>> doing, Flow flow, CancellationToken kill)
+    {
+        try
+        {
+            return await doing();
+        }
+        catch (OperationCanceledException) when (kill.IsCancellationRequested)
+        {
+            return Ended(RunEnd.Killed, flow.Left);
+        }
+        catch (TrackerException refused)
+        {
+            return Stop(refused.Message);
+        }
+        catch (AssistantException refused)
+        {
+            return Stop(refused.Message);
+        }
+        catch (LocalStateException unwritten)
+        {
+            return Stop(unwritten.Message);
+        }
+        catch (Exception unforeseen)
+        {
+            return Stop(Unforeseen(unforeseen), unforeseen.ToString());
+        }
+    }
+
+    // A run of several sessions goes first where it has worktrees to go on with; a run of one session goes on from
+    // there in the working copy, as it does when there are none.
+    async Task<RunResult> LoopAsync(CancellationToken kill) => (copies is null ? null : await ManyAsync(kill)) ?? await OneAsync(kill);
+
+    // What the owner wants before the next task: a kill, which is thrown, the end of a stop, or the end of a run that
+    // was started for one task or for a number of them, as one that its owner stopped. Null when the run goes on.
+    RunResult? Wanted(CancellationToken kill)
+    {
+        kill.ThrowIfCancellationRequested();
+        if (stopping)
+        {
+            Say(aborting ? RunMark.Interrupted : RunMark.Paused, $"Stopped {(aborting ? "after /abort" : "by /stop")} · {Went()}");
+            Notify($"Stopped: {Went()}");
+            return Ended(RunEnd.Stopped);
+        }
+
+        if (Asked() is not { } asked)
+            return null;
+
+        Say(RunMark.Paused, $"{asked} · {Went()}");
+        Notify($"{asked}: {Went()}");
+        return Ended(RunEnd.Stopped, asked);
+    }
+
+    async Task<RunResult> OneAsync(CancellationToken kill)
     {
         while (true)
         {
             Drain();
-            kill.ThrowIfCancellationRequested();
-            if (stopping)
-            {
-                Say(aborting ? RunMark.Interrupted : RunMark.Paused, $"Stopped {(aborting ? "after /abort" : "by /stop")} · {Went()}");
-                machine.Notify($"Stopped: {Went()}");
-                return Ended(RunEnd.Stopped);
-            }
-
-            // A run that was started for one task, or for a number of them, ends as one that its owner stopped.
-            if (Asked() is { } asked)
-            {
-                Say(RunMark.Paused, $"{asked} · {Went()}");
-                machine.Notify($"{asked}: {Went()}");
-                return Ended(RunEnd.Stopped, asked);
-            }
+            if (Wanted(kill) is { } wanted)
+                return wanted;
 
             // The record of an earlier run is looked at before the queue. A task that has one left its changes in
             // the working tree, and they are the only ones a run starts over; a session that wrapped up left none.
-            Show(new RunStatus(RunPhase.Preparing, "Checking the working tree…"));
+            Show(Main, new RunStatus(RunPhase.Preparing, "Checking the working tree…"));
             var before = state.Load();
             if (await workspace.ReadAsync(kill) is not { } tree)
                 return Stop("the working tree cannot be read");
@@ -184,7 +209,7 @@ public sealed class Supervisor(
             if (tree.Changes > 0 && (before is null || before.State == RecordState.WrappedUp))
                 return Stop("the working tree is not clean: commit or stash the changes first");
 
-            Show(new RunStatus(RunPhase.Preparing, "Reading the queue…"));
+            Show(Main, new RunStatus(RunPhase.Preparing, "Reading the queue…"));
             var open = await Calls.OpenTasksAsync(kill);
             var lineup = TaskLineup.Arrange(open, plan.Rules);
             if (before is not null)
@@ -194,7 +219,7 @@ public sealed class Supervisor(
                 var (kept, why) = TaskLineup.Recorded(open, plan.Rules, before.Number);
                 if (kept is null)
                 {
-                    if (await UnkeptAsync(before, why!, open, lineup, tree, kill) is { } over)
+                    if (await UnkeptAsync(home, before, why!, open, lineup, tree, kill) is { } over)
                         return over;
                     continue;
                 }
@@ -221,13 +246,11 @@ public sealed class Supervisor(
             {
                 if (!first && lineup.Held.Count > 0)
                     Say(RunMark.Note, Held(lineup));
-                Say(RunMark.Done, $"No task is left · {Went()}");
-                machine.Notify($"No task is left: {Went()}");
-                return Ended(RunEnd.Emptied);
+                return NoneLeft();
             }
 
             first = false;
-            limits = assistant.ReadLimits().At(clock.Now);
+            ReadLimits();
             var task = lineup.Ready[0];
             if (task.Number == last)
                 return Stop($"#{task.Number} came up again after its session");
@@ -235,17 +258,38 @@ public sealed class Supervisor(
             last = task.Number;
             var queued = lineup.Ready.Count + lineup.Later.Count - 1;
             var ahead = plan.Most is { } most ? Math.Min(queued, most - taken - 1) : queued;
-            if (await NewTask(task, ahead).TakeAsync(before, kill) is { } ended)
+            if (await NewTask(Main, home, task, ahead).TakeAsync(before, kill) is { } ended)
                 return ended;
 
-            taken++;
+            Taken();
         }
+    }
+
+    RunResult NoneLeft()
+    {
+        Say(RunMark.Done, $"No task is left · {Went()}");
+        Notify($"No task is left: {Went()}");
+        return Ended(RunEnd.Emptied);
+    }
+
+    // Reads the limits of the assistant anew, for what the run shows too.
+    UsageLimits ReadLimits()
+    {
+        lock (gate)
+            return limits = assistant.ReadLimits().At(clock.Now);
+    }
+
+    // A task that came to an outcome.
+    void Taken()
+    {
+        lock (gate)
+            taken++;
     }
 
     // The task of a record that the queue does not go on with. One that was closed while nobody watched is settled
     // when its session ended with a line for toobusy, so that the work of a session that came to its line is not lost
     // over that, and the run goes on with the next task; any other is forgotten. Null when the run goes on.
-    async Task<RunResult?> UnkeptAsync(TaskRecord before, string why, IReadOnlyList<QueueTask> open, TaskLineup lineup, WorkspaceState tree, CancellationToken kill)
+    async Task<RunResult?> UnkeptAsync(WorkingCopy copy, TaskRecord before, string why, IReadOnlyList<QueueTask> open, TaskLineup lineup, WorkspaceState tree, CancellationToken kill)
     {
         // The session of the record where it was looked for: it is not looked for again to be stopped.
         IAssistantSession? found = null;
@@ -255,10 +299,10 @@ public sealed class Supervisor(
         if (open.All(task => task.Number != before.Number) && await Calls.ClosedTaskAsync(before.Number, kill) is { } closed)
         {
             var waiting = lineup.Ready.Count + lineup.Later.Count;
-            var settled = NewTask(closed, plan.Most is { } few ? Math.Min(waiting, few - taken - 1) : waiting);
+            var settled = NewTask(Main, copy, closed, plan.Most is { } few ? Math.Min(waiting, few - taken - 1) : waiting);
 
             // The session of a record that says more than that it worked did not end so.
-            found = before.State == RecordState.Working ? await assistant.FindAsync(before.Session, kill) : null;
+            found = before.State == RecordState.Working ? await copy.Assistant.FindAsync(before.Session, kill) : null;
             var look = found is null ? null : await found.LookAsync(kill);
             if (look is not null)
                 settled.Seen(found!, look);
@@ -273,12 +317,12 @@ public sealed class Supervisor(
                 if (first)
                     Head(lineup);
                 first = false;
-                limits = assistant.ReadLimits().At(clock.Now);
+                ReadLimits();
                 last = closed.Number;
                 if (await settled.FinishAsync(found!, look, kill) is { } over)
                     return over;
 
-                taken++;
+                Taken();
                 return null;
             }
 
@@ -287,7 +331,7 @@ public sealed class Supervisor(
                 : "it is closed, and its session did not say how the task went";
         }
 
-        await ForgetAsync(before, why, tree.Changes > 0, found);
+        await ForgetAsync(copy, before, why, tree.Changes > 0, found);
         return null;
     }
 
@@ -303,79 +347,93 @@ public sealed class Supervisor(
     {
         var problem = $"#{number} is not taken: {why}";
         Say(RunMark.Failed, $"Stopped: {problem} · no task was started");
-        machine.Notify($"Stopped: {problem}");
+        Notify($"Stopped: {problem}");
         return Ended(RunEnd.Problem, problem);
     }
 
     // A task of the record that is not gone on with: its session is stopped, so that nothing works on with nobody
     // watching, and the record is forgotten. `found` is the session of the record where the run has found it
     // already; otherwise it is looked for here.
-    async Task ForgetAsync(TaskRecord before, string why, bool changes, IAssistantSession? found)
+    async Task ForgetAsync(WorkingCopy copy, TaskRecord before, string why, bool changes, IAssistantSession? found)
     {
         await Quietly(async () =>
         {
-            if ((found ?? await assistant.FindAsync(before.Session, CancellationToken.None)) is { } session)
+            if ((found ?? await copy.Assistant.FindAsync(before.Session, CancellationToken.None)) is { } session)
                 await StopAsync(before.Number, session, CancellationToken.None);
         });
-        state.Clear();
+        copy.State.Clear();
         Say(RunMark.Attention, $"#{before.Number} was left with a session by an earlier run, but it is not gone on with: {why} · its session is stopped and forgotten"
             + (changes ? ", and its changes are still in the working tree" : ""));
     }
 
     // Takes what the owner asked for, in the order it was asked. A command does something only where it is among the
-    // commands that mean something at the moment, as the run shows them; otherwise the log says why it does nothing.
+    // commands that mean something at the moment, as the run shows them; otherwise the log says why it does nothing. One
+    // for a session that waits goes to the flow of that session.
     void Drain()
     {
-        var heard = false;
-        while (commands.TryDequeue(out var command))
+        lock (gate)
         {
-            heard = true;
-            if (!Available(status).HasFlag(Flag(command)))
+            var heard = false;
+            while (commands.TryDequeue(out var order))
             {
-                Say(RunMark.Note, command switch
+                heard = true;
+                var command = order.Command;
+                var aimed = command is RunCommand.Nudge or RunCommand.Hold ? Flows.FirstOrDefault(flow => flow.Waits && (order.Task is null || flow.Number == order.Task)) : null;
+                var at = aimed?.Status ?? Shown();
+                if ((command is RunCommand.Nudge or RunCommand.Hold && aimed is null) || !Available(at).HasFlag(Flag(command)))
                 {
-                    RunCommand.Stop when aborting => "Already aborting",
-                    RunCommand.Stop => "Already stopping after the current task",
-                    RunCommand.Continue when aborting => "An /abort cannot be taken back",
-                    RunCommand.Continue => "Nothing to take back: the queue goes on",
-                    RunCommand.Abort => "Already asked to wrap up",
-                    _ => $"/{command.ToString().ToLowerInvariant()} means nothing now",
-                });
-                continue;
+                    Say(RunMark.Note, command switch
+                    {
+                        RunCommand.Stop when aborting => "Already aborting",
+                        RunCommand.Stop => "Already stopping after the current task",
+                        RunCommand.Continue when aborting => "An /abort cannot be taken back",
+                        RunCommand.Continue => "Nothing to take back: the queue goes on",
+                        RunCommand.Abort => "Already asked to wrap up",
+                        _ => $"/{command.ToString().ToLowerInvariant()} means nothing now",
+                    });
+                    continue;
+                }
+
+                List<RunStatus> tasks = [.. Shown().Tasks];
+                var limited = tasks.Where(task => task.Phase == RunPhase.WaitingForLimit).Select(task => task.Task!.Number).ToList();
+                switch (command)
+                {
+                    case RunCommand.Stop:
+                        stopping = true;
+                        foreach (var number in limited)
+                            Say(RunMark.Paused, $"#{number} waits for a limit: it is paused now, and the next run goes on with its session");
+                        if (tasks.Count == 0)
+                            Say(RunMark.Paused, "The queue stops before the next task");
+                        else if (tasks.Count > limited.Count)
+                            Say(RunMark.Paused, $"Will stop after {string.Join(", ", tasks.Where(task => task.Phase != RunPhase.WaitingForLimit).Select(task => $"#{task.Task!.Number}"))} · /continue takes tasks again");
+                        break;
+                    case RunCommand.Continue:
+                        stopping = false;
+                        Say(RunMark.GoesOn, "The queue goes on after the current task");
+                        break;
+                    case RunCommand.Abort:
+                        (aborting, stopping) = (true, true);
+                        if (tasks.Count == 0)
+                            Say(RunMark.Interrupted, "Nothing is running: the queue stops before the next task");
+                        foreach (var number in limited)
+                            Say(RunMark.Interrupted, $"#{number} waits for a limit and cannot wrap up: it is paused with its changes in the working tree");
+                        break;
+                    case RunCommand.Nudge:
+                        aimed!.Nudge();
+                        break;
+                    default:
+                        aimed!.Hold();
+                        break;
+                }
             }
 
-            var waitsForLimit = status is { Phase: RunPhase.WaitingForLimit, Task: not null };
-            switch (command)
-            {
-                case RunCommand.Stop:
-                    stopping = true;
-                    Say(RunMark.Paused, waitsForLimit ? $"#{status.Task!.Number} waits for a limit: it is paused now, and the next run goes on with its session"
-                        : status.Task is { } current ? $"Will stop after #{current.Number} · /continue takes tasks again"
-                        : "The queue stops before the next task");
-                    break;
-                case RunCommand.Continue:
-                    stopping = false;
-                    Say(RunMark.GoesOn, "The queue goes on after the current task");
-                    break;
-                case RunCommand.Abort:
-                    (aborting, stopping) = (true, true);
-                    if (status.Task is null)
-                        Say(RunMark.Interrupted, "Nothing is running: the queue stops before the next task");
-                    else if (waitsForLimit)
-                        Say(RunMark.Interrupted, $"#{status.Task.Number} waits for a limit and cannot wrap up: it is paused with its changes in the working tree");
-                    break;
-                case RunCommand.Nudge:
-                    nudge = true;
-                    break;
-                default:
-                    hold = true;
-                    break;
-            }
+            if (heard)
+                Publish();
         }
-
-        if (heard)
-            Show(status);
     }
+
+    // The flows of the tasks that are worked on.
+    IEnumerable<Flow> Flows => going.Count > 0 ? going : [Main];
 
     // A command among the commands that mean something.
     static RunCommands Flag(RunCommand command) => command switch
@@ -393,7 +451,8 @@ public sealed class Supervisor(
         var queue = plan.Only is { } only ? $"#{only} and no other task"
             : $"{Spoken.Tasks(lineup.Ready.Count + lineup.Later.Count)} in the queue" + (plan.Most is { } most ? $", {most} at most" : "");
         var skips = plan.Rules.Skip.Count > 0 ? $" · skips {string.Join(", ", plan.Rules.Skip)}" : "";
-        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {queue}{skips} · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort · {plan.PermissionMode} mode");
+        var sessions = plan.Sessions > 1 ? string.Create(CultureInfo.InvariantCulture, $" · {plan.Sessions} sessions at once") : "";
+        Say(RunMark.Head, $"{plan.Milestone ?? "No milestone"} · {queue}{skips} · {plan.Model.Name ?? "the assistant's own model"} · {plan.Effort} effort · {plan.PermissionMode} mode{sessions}");
         if (lineup.Later.Count > 0)
             Say(RunMark.Note, "Opens later: " + string.Join(" · ", lineup.Later.Select(later => $"#{later.Task.Number} after {string.Join(", ", later.After.Select(before => $"#{before}"))}")));
         if (lineup.Held.Count > 0)
@@ -405,9 +464,13 @@ public sealed class Supervisor(
     // `detail` is what the log on disk keeps of the problem beyond its line: the whole of an error nobody foresaw.
     RunResult Stop(string problem, string? detail = null)
     {
-        view.Say(new RunLine(RunMark.Failed, $"Stopped: {problem} · the next task did not start · {Went()}") { Detail = detail });
-        machine.Notify($"Stopped: {problem}");
-        return Ended(RunEnd.Problem, problem);
+        lock (gate)
+        {
+            halted = true;
+            view.Say(new RunLine(RunMark.Failed, $"Stopped: {problem} · {(going.Count > 1 ? "the sessions beside it finish, and the next task does not start" : "the next task did not start")} · {Went()}") { Detail = detail });
+            machine.Notify($"Stopped: {problem}");
+            return Ended(RunEnd.Problem, problem);
+        }
     }
 
     // What nobody foresaw, in a line: its kind and its words, for a report of the bug.
@@ -432,11 +495,44 @@ public sealed class Supervisor(
 
     RunResult Ended(RunEnd end, string? why = null) => new(end, done, why) { Partial = partial };
 
-    void Say(RunMark mark, string text) => view.Say(new RunLine(mark, text));
-
-    void Show(RunStatus next)
+    void Say(RunMark mark, string text)
     {
-        status = next with { Limits = limits, Behind = taken, Stopping = stopping && !aborting, Aborting = aborting, Available = Available(next) };
+        lock (gate)
+            view.Say(new RunLine(mark, text));
+    }
+
+    void Notify(string text)
+    {
+        lock (gate)
+            machine.Notify(text);
+    }
+
+    void Show(Flow flow, RunStatus next)
+    {
+        lock (gate)
+        {
+            flow.Status = next;
+            Publish();
+        }
+    }
+
+    // What the run shows: the one flow it has between tasks and in a run of one session, and otherwise the tasks it
+    // works on, the first of them with what is said of the run as a whole.
+    RunStatus Shown()
+    {
+        if (going.Count == 0)
+            return Stamped(Main.Status);
+
+        List<RunStatus> beside = [.. going.Skip(1).Select(flow => Stamped(flow.Status))];
+        return Stamped(going[0].Status with { Beside = beside, Queued = ahead });
+    }
+
+    RunStatus Stamped(RunStatus status) =>
+        status with { Limits = limits, Behind = taken, Stopping = (stopping || halted) && !aborting, Aborting = aborting, Available = Available(status) };
+
+    void Publish()
+    {
+        var status = Shown();
         view.Show(status);
         var now = RunSign.Of(status);
         if (shown is null || now == shown)
@@ -455,18 +551,21 @@ public sealed class Supervisor(
         }
     }
 
-    // The commands that mean something at the moment: the run shows them, and does nothing for any other.
+    // The commands that mean something at the moment, of any of the tasks that are shown: the run shows them, and does
+    // nothing for any other.
     RunCommands Available(RunStatus at)
     {
         if (at.Phase == RunPhase.Ended)
             return RunCommands.None;
 
         var limit = at is { Phase: RunPhase.WaitingForLimit, Task: not null };
-        return (aborting ? RunCommands.None : RunCommands.Abort)
-            | (!aborting && (!stopping || limit) ? RunCommands.Stop : RunCommands.None)
-            | (stopping && !aborting ? RunCommands.Continue : RunCommands.None)
-            | (at.Phase == RunPhase.WaitingForOwner && !aborting ? RunCommands.Nudge : RunCommands.None)
-            | (at is { Phase: RunPhase.WaitingForOwner, Until: not null } ? RunCommands.Hold : RunCommands.None);
+        return at.Beside.Aggregate(
+            (aborting ? RunCommands.None : RunCommands.Abort)
+                | (!aborting && (!stopping || limit) ? RunCommands.Stop : RunCommands.None)
+                | (stopping && !aborting ? RunCommands.Continue : RunCommands.None)
+                | (at.Phase == RunPhase.WaitingForOwner && !aborting ? RunCommands.Nudge : RunCommands.None)
+                | (at is { Phase: RunPhase.WaitingForOwner, Until: not null } ? RunCommands.Hold : RunCommands.None),
+            (all, beside) => all | Available(beside));
     }
 
     // Stops the session of a task, so that nothing works on with nobody watching. A session that the assistant still
@@ -496,58 +595,118 @@ public sealed class Supervisor(
         }
     }
 
-    (bool Nudge, bool Hold) ITaskHost.Hear()
+    // What one task goes on: what it asks of the run, and what is known of it for what the run shows. Everything it
+    // touches of the run it touches under the gate.
+    sealed class Flow(Supervisor run) : ITaskHost
     {
-        Drain();
-        var heard = (nudge, hold);
-        (nudge, hold) = (false, false);
-        return heard;
+        // The session that waits is to be told now, or never.
+        bool nudge;
+        bool hold;
+
+        // The number of the task, in a run of several sessions; what is being done with it, and what the flow came to.
+        public int? Number { get; init; }
+
+        public RunStatus Status { get; set; } = new(RunPhase.Preparing, "");
+
+        public Task<RunResult?> Doing { get; set; } = Task.FromResult<RunResult?>(null);
+
+        public bool Waits => Status.Phase == RunPhase.WaitingForOwner;
+
+        public void Nudge() => nudge = true;
+
+        public void Hold() => hold = true;
+
+        public (bool Nudge, bool Hold) Hear()
+        {
+            run.Drain();
+            lock (run.gate)
+            {
+                var heard = (nudge, hold);
+                (nudge, hold) = (false, false);
+                return heard;
+            }
+        }
+
+        public bool Stopping
+        {
+            get
+            {
+                lock (run.gate)
+                    return run.stopping;
+            }
+        }
+
+        public bool Aborting
+        {
+            get
+            {
+                lock (run.gate)
+                    return run.aborting;
+            }
+        }
+
+        public string? Left { get; set; }
+
+        public string Went
+        {
+            get
+            {
+                lock (run.gate)
+                    return run.Went();
+            }
+        }
+
+        public void Say(RunMark mark, string text) => run.Say(mark, text);
+
+        public void SayUnfollowed(string branch)
+        {
+            lock (run.gate)
+            {
+                if (!run.unfollowed)
+                    run.Say(RunMark.Note, $"{branch} has no upstream, so there is nothing to bring it up to date with");
+                run.unfollowed = true;
+            }
+        }
+
+        public void Trace(string text)
+        {
+            lock (run.gate)
+                run.view.Trace(text);
+        }
+
+        public void Show(RunStatus status) => run.Show(this, status);
+
+        public void Report(TaskEnd ended)
+        {
+            lock (run.gate)
+                run.view.Report(ended);
+        }
+
+        public void Notify(string text) => run.Notify(text);
+
+        public UsageLimits ReadLimits() => run.ReadLimits();
+
+        public void Count(OutcomeKind kind)
+        {
+            lock (run.gate)
+            {
+                if (kind == OutcomeKind.Partial)
+                    run.partial++;
+                else
+                    run.done++;
+            }
+        }
+
+        public RunResult Stop(string problem) => run.Stop(problem);
+
+        public RunResult Ended(RunEnd end, string? why = null)
+        {
+            lock (run.gate)
+                return run.Ended(end, why);
+        }
+
+        public Task StopAsync(int number, IAssistantSession session, CancellationToken cancellationToken) => run.StopAsync(number, session, cancellationToken);
     }
-
-    bool ITaskHost.Stopping => stopping;
-
-    bool ITaskHost.Aborting => aborting;
-
-    string? ITaskHost.Left
-    {
-        get => left;
-        set => left = value;
-    }
-
-    string ITaskHost.Went => Went();
-
-    void ITaskHost.Say(RunMark mark, string text) => Say(mark, text);
-
-    void ITaskHost.SayUnfollowed(string branch)
-    {
-        if (!unfollowed)
-            Say(RunMark.Note, $"{branch} has no upstream, so there is nothing to bring it up to date with");
-        unfollowed = true;
-    }
-
-    void ITaskHost.Trace(string text) => view.Trace(text);
-
-    void ITaskHost.Show(RunStatus status) => Show(status);
-
-    void ITaskHost.Report(TaskEnd ended) => view.Report(ended);
-
-    void ITaskHost.Notify(string text) => machine.Notify(text);
-
-    UsageLimits ITaskHost.ReadLimits() => limits = assistant.ReadLimits().At(clock.Now);
-
-    void ITaskHost.Count(OutcomeKind kind)
-    {
-        if (kind == OutcomeKind.Partial)
-            partial++;
-        else
-            done++;
-    }
-
-    RunResult ITaskHost.Stop(string problem) => Stop(problem);
-
-    RunResult ITaskHost.Ended(RunEnd end, string? why) => Ended(end, why);
-
-    Task ITaskHost.StopAsync(int number, IAssistantSession session, CancellationToken cancellationToken) => StopAsync(number, session, cancellationToken);
 
     sealed class Silent : IRunView
     {

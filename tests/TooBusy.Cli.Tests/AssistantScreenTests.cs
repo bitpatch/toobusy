@@ -9,6 +9,16 @@ public sealed class AssistantScreenTests : IDisposable
     public void Dispose() => terminal.Dispose();
 
     [Fact]
+    public void TheSessionsAreOfferedWithWhatIsChosen()
+    {
+        terminal.Keys.Until("❯ Sessions", Keys.Down).Press(Keys.Enter);
+        using var page = terminal.Open();
+
+        Assert.Equal(AssistantAction.Sessions, AssistantScreen.Ask(page, "opus", "high", sessions: "3 sessions"));
+        terminal.AssertSaw("Sessions  3 sessions");
+    }
+
+    [Fact]
     public void TheModelAndTheEffortAreOfferedWithWhatIsChosen()
     {
         terminal.Keys.Press(Keys.Down, Keys.Enter);
@@ -16,9 +26,10 @@ public sealed class AssistantScreenTests : IDisposable
         Assert.Equal(AssistantAction.Effort, Ask());
         terminal.AssertSaw("""
              Assistant
-             ❯ Model   opus
-               Effort  high
-               Back    esc
+             ❯ Model     opus
+               Effort    high
+               Sessions  1
+               Back      esc
              ↑↓ move · enter choose · ctrl+c exit
             """.ReplaceLineEndings("\n").TrimEnd(' '));
     }

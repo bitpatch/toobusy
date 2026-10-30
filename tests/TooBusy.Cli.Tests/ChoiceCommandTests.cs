@@ -112,6 +112,49 @@ public sealed class ChoiceCommandTests : CliAppTests
     }
 
     [Fact]
+    public async Task HowManySessionsWorkAtOnceIsChosenFromAScript()
+    {
+        GitRepository();
+        Assert.Equal("Sessions: 1 session" + Environment.NewLine, (await RunAsync("sessions")).Output);
+
+        var (exit, output, error) = await RunAsync("sessions", "3");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal("Sessions: 3" + Environment.NewLine, output);
+        Assert.Equal("Sessions: 3 sessions" + Environment.NewLine, (await RunAsync("sessions")).Output);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public async Task ANumberOfSessionsThatIsNoneIsRefused(string count)
+    {
+        GitRepository();
+
+        var (exit, _, error) = await RunAsync("sessions", "--", count);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("`sessions` takes a number of sessions, which is 1 or more", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InATerminalTheSessionsAreChosenFromAList()
+    {
+        GitRepository();
+
+        var (exit, output, _) = await RunWithKeysAsync(new Keys().Press(Keys.Down, Keys.Down, Keys.Enter), "sessions");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("in the working copy, one task after another", output, StringComparison.Ordinal);
+        Assert.Contains("each in a git worktree of its own", output, StringComparison.Ordinal);
+        Assert.Equal(
+            $"toobusy · ~{Path.DirectorySeparatorChar}{folder.Name}{Environment.NewLine}✔ Sessions         3 sessions{Environment.NewLine}",
+            Report(output));
+        Assert.Equal("Sessions: 3 sessions", (await RunAsync("sessions")).Output.Trim());
+    }
+
+    [Fact]
     public async Task AnEffortIsChosenByItsLevelFromAScript()
     {
         GitRepository();

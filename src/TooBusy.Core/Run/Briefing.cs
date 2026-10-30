@@ -16,8 +16,9 @@ public static class Briefing
     // `lost` is a task that a session worked on before whose conversation is gone, with no report of it.
     // `ground` is what the session needs to make a new task: its own task stays the run's, and new ones are its.
     // `skill` is the skill of the project the session starts with: the message begins with its command, which the
-    // assistant loads the skill by, and goes on as it does in a project that names none.
-    public static string Task(QueueTask task, NewTasks ground, bool interrupted, bool lost = false, string? skill = null)
+    // assistant loads the skill by, and goes on as it does in a project that names none. `landing` is how the work
+    // comes back from a git worktree, for a session that works in one.
+    public static string Task(QueueTask task, NewTasks ground, bool interrupted, bool lost = false, string? skill = null, Landing? landing = null)
     {
         // A task that waits for the owner must be one a run takes once the owner has answered: it gets the labels
         // of this task that let a task in.
@@ -50,6 +51,8 @@ public static class Briefing
             - Keep a plan of the work in your task list. Before you start, lay the work out there as a list of steps; mark a step when you begin it and when it is done, and change the list when the plan changes. toobusy shows the list to the owner as the progress of the task.
 
             """);
+        if (landing is not null)
+            message.Append(LandingRule(landing)).Append('\n');
         if (interrupted)
             message.Append(InterruptedRule).Append('\n');
         if (lost)
@@ -79,6 +82,10 @@ public static class Briefing
             """);
         return message.ToString();
     }
+
+    // The rule a first message adds for a session in a git worktree: it pushes to another branch than the one it is on,
+    // which a plain `git push` refuses, and which `git push origin develop` does without a word of what is its own.
+    public static string LandingRule(Landing landing) => $"- Other sessions work on tasks of this project at the same time, each in a git worktree of its own. This working copy is one: it stands on the branch `{landing.Branch}`, which follows `{landing.Onto.Name}`. Your work goes to `{landing.Onto.Branch}`: push it with `git push {landing.Onto.Remote} HEAD:{landing.Onto.Branch}`, as a plain `git push` is refused here and `git push {landing.Onto.Remote} {landing.Onto.Branch}` pushes nothing of yours. It is pushed when `{landing.Onto.Name}` has your commits, and the other sessions push there too: when your push is refused, bring your branch up to date with `{landing.Onto.Name}` as the instructions of the project say, and push again.";
 
     // The rule a first message adds for a task that was interrupted before, and the one for a task whose session
     // before is lost, as `Task` adds them.

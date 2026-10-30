@@ -102,6 +102,8 @@ public sealed class ImitatedMilestones : IMilestones
 // The choices of the user in a demo: they are remembered until the demo ends, and nowhere else.
 public sealed class UnsavedChoice(MilestoneChoice? milestone, ModelChoice? model, string? level) : IPersonalSettings
 {
+    int? sessions;
+
     public MilestoneChoice? LoadMilestone() => milestone;
 
     public void SaveMilestone(MilestoneChoice choice) => milestone = choice;
@@ -113,6 +115,10 @@ public sealed class UnsavedChoice(MilestoneChoice? milestone, ModelChoice? model
     public string? LoadEffort() => level;
 
     public void SaveEffort(string effort) => level = effort;
+
+    public int? LoadSessions() => sessions;
+
+    public void SaveSessions(int sessions) => this.sessions = sessions;
 }
 
 // The settings of a demo: there is no file, and what the demo saves is remembered until it ends, so that the demo goes

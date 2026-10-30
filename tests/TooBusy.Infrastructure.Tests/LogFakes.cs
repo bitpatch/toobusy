@@ -45,7 +45,7 @@ sealed class FakeRun(Func<IRunView, Task<RunResult>> play) : IQueueRun
 
     public Task<RunResult> RunAsync(IRunView view, CancellationToken kill) => play(view);
 
-    public void Send(RunCommand command) => Sent.Add(command);
+    public void Send(RunCommand command, int? task = null) => Sent.Add(command);
 }
 
 static class Logged

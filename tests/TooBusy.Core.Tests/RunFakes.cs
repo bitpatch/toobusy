@@ -38,6 +38,75 @@ sealed class FakeClock : IClock
     }
 }
 
+// Time for what goes on side by side: the flows of a run take turns on one thread, so that the fakes need no locks and a
+// test comes out the same every time. Whatever can go on goes on, and the clock moves only when everything waits, to the
+// first moment something waits for; what is planned for a moment happens then. A run that never ends is stopped after
+// two days of its own time.
+sealed class TurnClock : SynchronizationContext, IClock
+{
+    sealed record Sleeper(DateTimeOffset At, TaskCompletionSource Done, CancellationToken Token);
+
+    readonly Queue<(SendOrPostCallback Callback, object? State)> ready = new();
+    readonly List<Sleeper> asleep = [];
+    readonly List<(DateTimeOffset At, Action Do)> planned = [];
+
+    public DateTimeOffset Now { get; private set; } = FakeClock.Start;
+
+    // Plans something for the moment that is this long after the start.
+    public void At(TimeSpan after, Action action) => planned.Add((FakeClock.Start + after, action));
+
+    public override void Post(SendOrPostCallback d, object? state) => ready.Enqueue((d, state));
+
+    public Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var done = new TaskCompletionSource();
+        asleep.Add(new Sleeper(Now + time, done, cancellationToken));
+        return done.Task;
+    }
+
+    // Goes on with what `doing` starts until it is over.
+    public T Run<T>(Func<Task<T>> doing)
+    {
+        var before = Current;
+        SetSynchronizationContext(this);
+        try
+        {
+            var task = doing();
+            while (!task.IsCompleted)
+            {
+                if (ready.TryDequeue(out var next))
+                {
+                    next.Callback(next.State);
+                    continue;
+                }
+
+                Assert.True(asleep.Count > 0, "The run waits for something that does not come.");
+                var first = asleep.MinBy(sleeper => sleeper.At)!;
+                asleep.Remove(first);
+                Now = first.At > Now ? first.At : Now;
+                Assert.True(Now - FakeClock.Start < TimeSpan.FromDays(2), "The run did not end in two days of its own time.");
+                foreach (var due in planned.Where(plan => plan.At <= Now).OrderBy(plan => plan.At).ToList())
+                {
+                    planned.Remove(due);
+                    due.Do();
+                }
+
+                if (first.Token.IsCancellationRequested)
+                    first.Done.SetCanceled(first.Token);
+                else
+                    first.Done.SetResult();
+            }
+
+            return task.GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SetSynchronizationContext(before);
+        }
+    }
+}
+
 // What ends a run that goes round without waiting, which the two days of the clock do not: a call that a run makes
 // again and again, as a reading of the queue, a look at a session or a wait that does not move the clock, fails the
 // test once it is made far more often than any test needs, instead of keeping the whole run of the tests from ending.
@@ -504,7 +573,7 @@ sealed class FakeWorkspace : IWorkspace
 
 // The shell of the machine: every command passes, but for those the test gives another end. A command takes as long
 // of the clock as the test says, and what is planned for that time happens while it runs.
-sealed class FakeCommands(FakeClock clock) : IProjectCommands
+sealed class FakeCommands(IClock clock) : IProjectCommands
 {
     // The commands that were run, each with the number of the task it was told and the time it was given.
     public List<(string Command, string Task, TimeSpan Time)> Ran { get; } = [];
@@ -578,6 +647,79 @@ sealed class FakeState : IRunState
             throw Unclearable;
         if (Record is not null)
             Written.Add(Record = null);
+    }
+}
+
+// The git worktrees of a run: what is made and what is taken away, and the working copies as the test says they are,
+// each with a fake of its own. The assistant is one, as it is one account.
+sealed class FakeCopies(FakeAssistant assistant, IClock clock) : IWorkingCopies
+{
+    readonly Dictionary<int, WorkingCopy> copies = [];
+
+    // What the branch of the tasks follows; null for a branch without an upstream.
+    public Upstream? Followed { get; set; } = new("origin", "develop");
+
+    // The branches that were asked for what they follow.
+    public List<string> Asked { get; } = [];
+
+    public List<int> Made { get; } = [];
+
+    public List<int> Removed { get; } = [];
+
+    // What a worktree that cannot be made is refused with; null while they are made.
+    public string? Unmakeable { get; set; }
+
+    public FakeWorkspace Workspace(int task) => (FakeWorkspace)Copy(task).Workspace;
+
+    public FakeState State(int task) => (FakeState)Copy(task).State;
+
+    public FakeCommands Shell(int task) => (FakeCommands)Copy(task).Shell;
+
+    // A worktree an earlier run left.
+    public WorkingCopy Left(int task, TaskRecord? record = null)
+    {
+        State(task).Record = record;
+        Found.Add(Copy(task));
+        return Copy(task);
+    }
+
+    List<WorkingCopy> Found { get; } = [];
+
+    WorkingCopy Copy(int task)
+    {
+        if (!copies.TryGetValue(task, out var copy))
+        {
+            var folder = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"/worktrees/{task}");
+            copies.Add(task, copy = new WorkingCopy(folder, new FakeWorkspace(), new FakeState(), new FakeCommands(clock), assistant)
+            {
+                Landing = new Landing(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"toobusy/{task}"), Followed ?? new Upstream("origin", "develop")),
+            });
+        }
+
+        return copy;
+    }
+
+    public Task<IReadOnlyList<WorkingCopy>> FindAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<WorkingCopy>>([.. Found]);
+
+    public Task<Upstream?> FollowedAsync(string branch, CancellationToken cancellationToken)
+    {
+        Asked.Add(branch);
+        return Task.FromResult(Followed);
+    }
+
+    public Task<WorkingCopy> MakeAsync(int task, Upstream onto, CancellationToken cancellationToken)
+    {
+        if (Unmakeable is { } why)
+            throw new LocalStateException(why);
+
+        Made.Add(task);
+        return Task.FromResult(Copy(task));
+    }
+
+    public Task RemoveAsync(WorkingCopy copy, CancellationToken cancellationToken)
+    {
+        Removed.Add(int.Parse(copy.Folder.Split('/')[^1], System.Globalization.CultureInfo.InvariantCulture));
+        return Task.CompletedTask;
     }
 }
 

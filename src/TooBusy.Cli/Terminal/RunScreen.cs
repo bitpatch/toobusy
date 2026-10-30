@@ -25,6 +25,11 @@ namespace TooBusy.Cli.Terminal;
 // has changed. When the run is over the page writes how it went, rolls the tape up and gives the result: it does
 // not wait to be left. Ctrl+C, twice, kills the run: its session is stopped, and its task stays as it is. Until the
 // run has done what the kill does not cut, the foot says that it stops, and Ctrl+C is the terminal's own again.
+//
+// A run of several sessions has a block of those lines for each of them, in the order they were taken, and each session
+// that waits has `hold` and `send now` of its own in the menu, named by its task; the other commands are those of the
+// run. A window that has no room for the blocks gets a line for each session instead, but for those that wait. Under the
+// second rule stands how many work and how many follow them: `3 at work · 6 to go`.
 public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 {
     // How often the page is drawn anew for the times it shows.
@@ -32,6 +37,10 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
     // As many lines of what a session that waits said are shown at most.
     const int Quoted = 8;
+
+    // What Ctrl+C does, as the keys say it.
+    const string OneLeaving = "stop the session and exit";
+    const string ManyLeaving = "stop the sessions and exit";
 
     // The commands that are for a session that waits for the owner.
     const RunCommands ForOwner = RunCommands.Hold | RunCommands.Nudge;
@@ -60,7 +69,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     public async Task<RunResult> RunAsync(IQueueRun run, CancellationToken cancellationToken)
     {
         page.EscapeLeaves = false;
-        page.Leaving = "stop the session and exit";
+        page.Leaving = OneLeaving;
         var tape = page.Unroll();
         var started = now();
         var feed = new RunFeed();
@@ -88,9 +97,10 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
                 any |= settled.Count > 0;
                 var status = feed.Status;
                 var killed = kill.IsCancellationRequested;
-                var waits = status.Phase == RunPhase.WaitingForOwner;
+                var waits = status.Tasks.Any(task => task.Phase == RunPhase.WaitingForOwner);
                 away &= waits;
-                List<Entry> offered = [.. Commands.Where(entry => status.Available.HasFlag(entry.Flag))];
+                page.Leaving = status.Beside.Count > 0 ? ManyLeaving : OneLeaving;
+                List<Entry> offered = [.. Offered(status)];
                 var listed = killed ? [] : open ? offered : waits && !away ? [.. offered.Where(entry => ForOwner.HasFlag(entry.Flag))] : [];
                 at = Math.Clamp(at, 0, Math.Max(0, listed.Count - 1));
                 if (status.Task is not null)
@@ -181,8 +191,29 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     // Sends the command of the entry to the run; false, for the menu, which is closed by it.
     static bool Sent(IQueueRun run, Entry entry)
     {
-        run.Send(entry.Command);
+        run.Send(entry.Command, entry.Task);
         return false;
+    }
+
+    // The commands that mean something at the moment: those for a session that waits, of each such session, and those
+    // of the run. Where several sessions work, what is for one of them names its task.
+    static IEnumerable<Entry> Offered(RunStatus status)
+    {
+        if (status.Beside.Count == 0)
+        {
+            foreach (var entry in Commands.Where(entry => ForOwner.HasFlag(entry.Flag) && status.Available.HasFlag(entry.Flag)))
+                yield return entry;
+        }
+
+        // What the first task shows may be asked of any of them, so a command for a session goes by how that one stands.
+        foreach (var task in status.Beside.Count > 0 ? status.Tasks.Where(task => task.Phase == RunPhase.WaitingForOwner) : [])
+        {
+            foreach (var entry in Commands.Where(entry => ForOwner.HasFlag(entry.Flag) && task.Available.HasFlag(entry.Flag) && (entry.Flag != RunCommands.Hold || task.Until is not null)))
+                yield return entry with { Name = $"{entry.Name} #{task.Task!.Number}", Task = task.Task!.Number };
+        }
+
+        foreach (var entry in Commands.Where(entry => !ForOwner.HasFlag(entry.Flag) && status.Available.HasFlag(entry.Flag)))
+            yield return entry;
     }
 
     // What of what the run told stays on the tape: the tasks that are over, which are remembered, and what the run
@@ -215,14 +246,34 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
         if (spaced)
             lines.Add(Line.Empty);
 
-        var mark = new Caret(lines.Count, 0);
-        lines.AddRange(Doing(status));
+        // Each task is a block of its own, or a line where the window has no room for the blocks, and one that waits
+        // for the owner keeps its block.
+        List<RunStatus> tasks = status.Beside.Count == 0 ? [status] : [.. status.Tasks];
+        var below = 3 + Math.Max(1, listed.Count);
+        var folded = tasks.Count > 1 && lines.Count + tasks.Sum(task => 2 + Math.Min(1, task.Plan.Count)) + below > tape.Room;
+        var marks = new List<Caret>();
+        var lit = new List<Caret>();
+        for (var index = 0; index < tasks.Count; index++)
+        {
+            var task = tasks[index];
+            var mark = new Caret(lines.Count, 0);
+            marks.Add(mark);
+            if (folded && task.Phase != RunPhase.WaitingForOwner)
+            {
+                lines.Add(Folded(task, width));
+                continue;
+            }
 
-        // The bar of the plan is the third line of the task: the cells of the steps the session is at blink.
-        List<Caret> lit = status.Task is null ? [] : [.. RunLook.Active(status.Plan).Select(column => new Caret(mark.Line + 2, column))];
+            lines.AddRange(Doing(task));
 
-        // What the session said gets the lines the window has left over, the rest of the foot being what it is.
-        lines.AddRange(Asked(status, width, Math.Min(Quoted, tape.Room - lines.Count - 3 - Math.Max(1, listed.Count))));
+            // The bar of the plan is the third line of the task: the cells of the steps the session is at blink.
+            if (task.Task is not null)
+                lit.AddRange(RunLook.Active(task.Plan).Select(column => new Caret(mark.Line + 2, column)));
+
+            // What the session said gets the lines the window has left over, the rest of the foot being what it is.
+            lines.AddRange(Asked(task, width, Math.Min(Quoted, tape.Room - lines.Count - below - (tasks.Count - index - 1))));
+        }
+
         lines.Add(rule);
 
         int chosen;
@@ -241,7 +292,17 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
         lines.Add(rule);
         lines.Add(Edged(Keys(listed.Count > 0), width, counted));
-        return new Strip(lines, mark, Chosen: chosen, Lit: lit);
+        return new Strip(lines, marks[0], Chosen: chosen, Lit: lit, Marks: marks.Count > 1 ? marks[1..] : null);
+    }
+
+    // A task on one line, in a window that has no room for its block: what is done with it after the title, which
+    // gives way to it.
+    Line Folded(RunStatus task, int width)
+    {
+        var after = "  " + (task.Since is { } since ? RunLook.Clock(now() - since) : "") + (task.Step is { } step ? $" · {step}" : "");
+        var title = Spoken.Task(task.Task!);
+        var room = Math.Max(10, width - 4 - Math.Min(after.Length, width / 2));
+        return new Line(new Part("● ", Tone.Accent), new Part(title.Length > room ? title[..(room - 1)] + "…" : title), new Part(after, Tone.Muted));
     }
 
     // The foot of a run that is killed, while it does what the kill does not cut: that the run stops, after the
@@ -250,7 +311,8 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     {
         List<Line> lines = spaced ? [Line.Empty] : [];
         var mark = new Caret(lines.Count, 0);
-        var stopping = status.Task is { } task ? $"Stopping the run and leaving #{task.Number} as it should be…" : "Stopping the run…";
+        var named = string.Join(", ", status.Tasks.Select(task => $"#{task.Task!.Number}"));
+        var stopping = status.Task is null ? "Stopping the run…" : status.Beside.Count > 0 ? $"Stopping the run and leaving {named} as they should be…" : $"Stopping the run and leaving {named} as it should be…";
         lines.Add(new Line(new Part("● ", Tone.Accent), new Part(stopping, Tone.Warning)));
         return new Strip(lines, mark);
     }
@@ -317,7 +379,11 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     // or to abort, that it does.
     static Part Hint(RunStatus status) =>
         !status.Stopping && !status.Aborting ? new Part(" press / to show the menu", Tone.Muted)
-        : new Part(status.Task is null ? " stopping before the next task" : status.Aborting ? " aborting: the session is wrapping up" : " stopping after this task", Tone.Warning);
+        : new Part(
+            status.Task is null ? " stopping before the next task"
+                : status.Aborting ? (status.Beside.Count > 0 ? " aborting: the sessions are wrapping up" : " aborting: the session is wrapping up")
+                : status.Beside.Count > 0 ? " stopping after these tasks" : " stopping after this task",
+            Tone.Warning);
 
     // The keys under the second rule or, when a key that leaves was pressed once, what is asked. While no menu is
     // open they name `/`, which the line of the commands does not once the run stops or aborts.
@@ -334,9 +400,11 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
     }
 
     // The place of the task that is worked on among the tasks of the run: those that are over before it, it, and
-    // those that follow it as the queue was read before it.
-    static string Counted(RunStatus status) =>
-        string.Create(CultureInfo.InvariantCulture, $"task {status.Behind + 1} of {status.Behind + 1 + status.Queued}");
+    // those that follow it as the queue was read before it. Where several are worked on, how many that is and how many
+    // follow them.
+    static string Counted(RunStatus status) => status.Beside.Count > 0
+        ? string.Create(CultureInfo.InvariantCulture, $"{status.Tasks.Count()} at work · {status.Queued} to go")
+        : string.Create(CultureInfo.InvariantCulture, $"task {status.Behind + 1} of {status.Behind + 1 + status.Queued}");
 
     // The line with a text at its right edge, muted: the first of the texts that has room there, or none.
     static Line Edged(Line line, int width, params string[] rights)
@@ -354,6 +422,7 @@ public sealed class RunScreen(Page page, Func<DateTimeOffset> now)
 
     static string Told(Line line) => string.Concat(line.Parts.Select(part => part.Text));
 
-    // A command of the menu, known by the flag that tells whether it means something now.
-    sealed record Entry(string Name, string About, RunCommand Command, RunCommands Flag);
+    // A command of the menu, known by the flag that tells whether it means something now. Task is the task a command
+    // for a session that waits is meant for, where several sessions work.
+    sealed record Entry(string Name, string About, RunCommand Command, RunCommands Flag, int? Task = null);
 }

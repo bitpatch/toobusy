@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
@@ -15,9 +16,10 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
     const string Milestone = "milestone";
     const string Model = "model";
     const string Effort = "effort";
+    const string Sessions = "sessions";
 
     // The choices a table holds, in the order they are written.
-    static readonly string[] Keys = [Milestone, Model, Effort];
+    static readonly string[] Keys = [Milestone, Model, Effort, Sessions];
 
     // A toobusy that another one holds the lock of the file against waits a moment, as many times as this, two seconds
     // in all: saving a choice takes a few milliseconds.
@@ -48,6 +50,11 @@ public sealed class PersonalSettingsFile(string folder, string projectRoot) : IP
     public string? LoadEffort() => Load(Effort) is { } effort ? ClaudeCodeOptions.FindEffort(effort) : null;
 
     public void SaveEffort(string effort) => Save(Effort, effort);
+
+    // A number that is not 1 or more counts as one that is not chosen.
+    public int? LoadSessions() => int.TryParse(Load(Sessions), NumberStyles.None, CultureInfo.InvariantCulture, out var sessions) && sessions >= 1 ? sessions : null;
+
+    public void SaveSessions(int sessions) => Save(Sessions, sessions.ToString(CultureInfo.InvariantCulture));
 
     string? Load(string key) => Read().TryGetValue(projectRoot, out var choices) ? choices.GetValueOrDefault(key) : null;
 

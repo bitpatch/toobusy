@@ -51,27 +51,35 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
             if (living.At is { } started && JsonFields.Time(root, "processStarted") is { } written && (started - written).Duration() > Slack)
                 return null;
 
-            var phase = JsonFields.Text(root, "phase") switch
+            return new GoingRun(id, JsonFields.Time(root, "since") ?? DateTimeOffset.MinValue, Sign(root) with
             {
-                "working" => RunPhase.Working,
-                "waiting-for-owner" => RunPhase.WaitingForOwner,
-                "waiting-for-limit" => RunPhase.WaitingForLimit,
-                _ => RunPhase.Preparing,
-            };
-            var task = root.TryGetProperty("task", out var worked) && worked.TryGetInt32(out var taken) ? taken : (int?)null;
-            return new GoingRun(id, JsonFields.Time(root, "since") ?? DateTimeOffset.MinValue, new RunSign(phase)
-            {
-                Task = task,
-                Title = JsonFields.Text(root, "title"),
-                Url = JsonFields.Text(root, "url"),
-                Open = JsonFields.Text(root, "open"),
-                Until = JsonFields.Time(root, "until"),
+                Beside = root.TryGetProperty("beside", out var beside) && beside.ValueKind == JsonValueKind.Array ? [.. beside.EnumerateArray().Select(Sign)] : [],
             });
         }
         catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             return null;
         }
+    }
+
+    // What stands on the sign of one task.
+    static RunSign Sign(JsonElement element)
+    {
+        var phase = JsonFields.Text(element, "phase") switch
+        {
+            "working" => RunPhase.Working,
+            "waiting-for-owner" => RunPhase.WaitingForOwner,
+            "waiting-for-limit" => RunPhase.WaitingForLimit,
+            _ => RunPhase.Preparing,
+        };
+        return new RunSign(phase)
+        {
+            Task = element.TryGetProperty("task", out var worked) && worked.TryGetInt32(out var taken) ? taken : null,
+            Title = JsonFields.Text(element, "title"),
+            Url = JsonFields.Text(element, "url"),
+            Open = JsonFields.Text(element, "open"),
+            Until = JsonFields.Time(element, "until"),
+        };
     }
 
     // The sign of a run of this very process is its own: a run of the menu comes after another one of the same tool. The
@@ -145,17 +153,20 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
                 if (processStarted is { } started)
                     writer.WriteString("processStarted", JsonFields.Stamped(started));
                 writer.WriteString("since", JsonFields.Stamped(since));
-                writer.WriteString("phase", Name(sign.Phase));
-                if (sign.Task is { } task)
-                    writer.WriteNumber("task", task);
-                if (sign.Title is { } title)
-                    writer.WriteString("title", title);
-                if (sign.Url is { } url)
-                    writer.WriteString("url", url);
-                if (sign.Open is { } open)
-                    writer.WriteString("open", open);
-                if (sign.Until is { } until)
-                    writer.WriteString("until", JsonFields.Stamped(until));
+                Put(writer, sign);
+                if (sign.Beside.Count > 0)
+                {
+                    writer.WriteStartArray("beside");
+                    foreach (var beside in sign.Beside)
+                    {
+                        writer.WriteStartObject();
+                        Put(writer, beside);
+                        writer.WriteEndObject();
+                    }
+
+                    writer.WriteEndArray();
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -165,6 +176,21 @@ public sealed class RunSignFile(string folder, int process, Func<int, ProcessSta
         {
             throw new LocalStateException($"the sign of the run cannot be written: {unwritten.Message}", unwritten);
         }
+    }
+
+    static void Put(Utf8JsonWriter writer, RunSign sign)
+    {
+        writer.WriteString("phase", Name(sign.Phase));
+        if (sign.Task is { } task)
+            writer.WriteNumber("task", task);
+        if (sign.Title is { } title)
+            writer.WriteString("title", title);
+        if (sign.Url is { } url)
+            writer.WriteString("url", url);
+        if (sign.Open is { } open)
+            writer.WriteString("open", open);
+        if (sign.Until is { } until)
+            writer.WriteString("until", JsonFields.Stamped(until));
     }
 
     // The phase of a run by the name it has in the file, and in what `toobusy status --json` prints.

@@ -7,7 +7,9 @@ namespace TooBusy.Infrastructure.Git;
 
 // The working copy of a project, as git tells of it: the files that differ from what is committed, those it does
 // not know among them, the branch that is checked out, and the commits of the branch that its upstream does not have.
-public sealed partial class GitWorkspace(IProcessRunner processes, string root) : IWorkspace
+// The worktrees of a run share one repository, where two fetches at once get in each other's way, so they share
+// `fetching` too: a fetch waits for its turn.
+public sealed partial class GitWorkspace(IProcessRunner processes, string root, Turns? fetching = null) : IWorkspace
 {
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
@@ -26,7 +28,7 @@ public sealed partial class GitWorkspace(IProcessRunner processes, string root) 
         if (before.Upstream is not { } upstream)
             return new BranchSync(SyncStatus.NoUpstream);
 
-        var fetched = await processes.RunAsync("git", ["-C", root, "fetch", "--quiet"], FetchPatience, cancellationToken);
+        var fetched = await (fetching ?? new Turns()).TakeAsync(() => processes.RunAsync("git", ["-C", root, "fetch", "--quiet"], FetchPatience, cancellationToken), cancellationToken);
         if (fetched is not { Status: ProcessStatus.Exited, ExitCode: 0 })
             return new BranchSync(SyncStatus.Unreachable, upstream, Said: Said(fetched, FetchPatience)) { MayPass = Passing(fetched) };
 

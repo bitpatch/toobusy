@@ -29,6 +29,42 @@ public sealed class StatusCommandTests : CliAppTests
     }
 
     [Fact]
+    public async Task StatusNamesTheTasksAnEarlierRunLeftInItsWorktrees()
+    {
+        GitRepository();
+        foreach (var (name, state) in ((string, string)[])[("14", "paused"), ("15", "working")])
+        {
+            var local = Directory.CreateDirectory(Path.Combine(folder.FullName, ".toobusy", "local", "worktrees", name, ".toobusy", "local"));
+            File.WriteAllText(Path.Combine(local.FullName, "session.json"), $$"""{"task":{{name}},"session":"abc12345","since":"2030-01-01T09:00:00.0000000Z","state":"{{state}}"}""");
+        }
+
+        var (exit, output, _) = await RunAsync("status");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("An earlier run left #14 with a session", output, StringComparison.Ordinal);
+        Assert.Contains("An earlier run left #15 with a session", output, StringComparison.Ordinal);
+
+        var (_, json, _) = await RunAsync("status", "--json");
+        Assert.Equal(
+            """
+            {
+              "running": false,
+              "left": {
+                "task": 14,
+                "state": "paused"
+              },
+              "beside": [
+                {
+                  "task": 15,
+                  "state": "working"
+                }
+              ]
+            }
+            """.ReplaceLineEndings("\n"),
+            json.ReplaceLineEndings("\n").TrimEnd());
+    }
+
+    [Fact]
     public async Task StatusNamesTheTaskAnEarlierRunLeftWithASession()
     {
         GitRepository();

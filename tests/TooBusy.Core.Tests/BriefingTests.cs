@@ -5,6 +5,21 @@ namespace TooBusy.Core.Tests;
 
 public class BriefingTests
 {
+    [Fact]
+    public void ASessionInAWorktreeIsToldWhereItsWorkGoes()
+    {
+        var landing = new Landing("toobusy/12", new Upstream("upstream", "main"));
+        var task = new QueueTask(12, "Export", "https://example.com/12", [], BoardStatus.Todo, "Todo", [], []);
+        var ground = new NewTasks("manual", [], null, null);
+
+        var message = Briefing.Task(task, ground, interrupted: false, landing: landing);
+
+        Assert.Contains(Briefing.LandingRule(landing), message, StringComparison.Ordinal);
+        Assert.Contains("`git push upstream HEAD:main`", message, StringComparison.Ordinal);
+        Assert.Contains("`git push upstream main` pushes nothing of yours", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("git worktree", Briefing.Task(task, ground, interrupted: false), StringComparison.Ordinal);
+    }
+
     static readonly QueueTask Export = new(12, "Export the data", "https://github.com/acme/rocket/issues/12", ["feature"], BoardStatus.Todo, "Todo", [], []);
 
     static readonly NewTasks Ground = new("needs-owner", ["bug", "Feature"], "v0.2.0", "https://github.com/orgs/acme/projects/4");

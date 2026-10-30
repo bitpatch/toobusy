@@ -22,15 +22,17 @@ public sealed class Session(Page page, Workbench bench)
     // The last setup that was gone through; null when there was none.
     public SetupResult? Setup { get; private set; }
 
-    // The milestone, the model and the effort that were chosen on the page; null when none was.
+    // The milestone, the model, the effort and the number of sessions that were chosen on the page; null when none was.
     public MilestoneChoice? ChosenMilestone { get; private set; }
 
     public ModelChoice? ChosenModel { get; private set; }
 
     public string? ChosenEffort { get; private set; }
 
+    public int? ChosenSessions { get; private set; }
+
     // Whether anything was chosen on the page.
-    public bool Chose => ChosenMilestone is not null || ChosenModel is not null || ChosenEffort is not null;
+    public bool Chose => ChosenMilestone is not null || ChosenModel is not null || ChosenEffort is not null || ChosenSessions is not null;
 
     // How the runs that were on the page ended, in their order; null is one that never got to its end.
     public List<RunResult?> Runs { get; } = [];
@@ -305,6 +307,20 @@ public sealed class Session(Page page, Workbench bench)
         return true;
     }
 
+    // Asks how many sessions work at once and remembers the answer; false when the user went back instead.
+    public bool ChooseSessions(bool leavesPage)
+    {
+        Clear("Choosing the sessions", null);
+        page.EscapeLeaves = leavesPage;
+        page.Keys = leavesPage ? "esc exit" : "esc back";
+        if (SessionsScreen.Ask(page, bench.Personal.LoadSessions()) is not { } sessions)
+            return false;
+
+        bench.Personal.SaveSessions(sessions);
+        ChosenSessions = sessions;
+        return true;
+    }
+
     // Asks for the labels whose tasks the runs of the menu leave out, after they are read, and remembers the answer
     // for as long as the page is open; false when the user went back instead, before the labels were read too.
     async Task<bool> ChooseSkippedAsync(CancellationToken cancellationToken)
@@ -348,21 +364,22 @@ public sealed class Session(Page page, Workbench bench)
         while (true)
         {
             Clear("Assistant", note);
-            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", (int)at) is not { } action)
+            if (AssistantScreen.Ask(page, ModelScreen.Describe(bench.Personal.LoadModel()), bench.Personal.LoadEffort() ?? "not chosen", (int)at, SessionsScreen.Describe(bench.Personal.LoadSessions())) is not { } action)
                 return;
 
             at = action;
             note = action switch
             {
                 AssistantAction.Model => ChooseModel(leavesPage: false) ? null : "The model is left as it was.",
-                _ => ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.",
+                AssistantAction.Effort => ChooseEffort(leavesPage: false) ? null : "The effort is left as it was.",
+                _ => ChooseSessions(leavesPage: false) ? null : "The number of sessions is left as it was.",
             };
         }
     }
 
-    // The model and the effort in a few words, as the menu shows them.
+    // The model and the effort in a few words, as the menu shows them, with the sessions when there are several.
     string Assistant() =>
-        $"{(bench.Personal.LoadModel() is { Name: { } name } ? name : "own model")} · {bench.Personal.LoadEffort()}";
+        $"{(bench.Personal.LoadModel() is { Name: { } name } ? name : "own model")} · {bench.Personal.LoadEffort()}{(bench.Personal.LoadSessions() is > 1 ? $" · {SessionsScreen.Describe(bench.Personal.LoadSessions())} at once" : "")}";
 
     // Reads the open milestones, which the page cannot go on without: there is nowhere to go back to from here,
     // so Escape leaves the page. False when the user left instead of waiting.
@@ -419,6 +436,8 @@ public sealed class Session(Page page, Workbench bench)
             body.Add(Picker.Answer("Model", ModelScreen.Describe(model)));
         if (bench.Personal.LoadEffort() is { } effort)
             body.Add(Picker.Answer("Effort", effort));
+        if (bench.Personal.LoadSessions() is > 1)
+            body.Add(Picker.Answer("Sessions", SessionsScreen.Describe(bench.Personal.LoadSessions())));
         if (skipped.Count > 0)
             body.Add(Picker.Answer("Skipped labels", string.Join(", ", skipped)));
 

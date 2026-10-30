@@ -345,7 +345,7 @@ public static class Assist
             - **The model** the tasks are done with: {string.Join(", ", ClaudeCodeOptions.Models.Select(model => $"`{model}`"))}, any other name Claude Code takes, or the assistant's own default.
             - **The effort**: {string.Join(", ", ClaudeCodeOptions.Efforts.Select(effort => $"`{effort}`"))}.
             """);
-        Part(text, "Ask the owner", "all three: they are theirs, and none of them is yours to choose. Then show them what `toobusy queue` prints.");
+        Part(text, "Ask the owner", "all three: they are theirs, and none of them is yours to choose. One more is theirs and needs no answer now: how many sessions work at once, one unless they say otherwise, which `toobusy sessions 3` chooses for three. Then show them what `toobusy queue` prints.");
         Set(text,
         [
             "toobusy milestone \"<title>\"",

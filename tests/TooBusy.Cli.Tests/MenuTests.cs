@@ -24,6 +24,24 @@ public sealed class MenuTests : CliAppTests
     }
 
     [Fact]
+    public async Task TheAssistantOfTheMenuChangesTheSessionsAndTheRunTakesThem()
+    {
+        var keys = new Keys()
+            .Until("❯ Assistant", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Sessions", Keys.Down).Press(Keys.Enter)
+            .Until("❯ 2", Keys.Down).Press(Keys.Enter)
+            .Until("❯ Back", Keys.Down).Press(Keys.Enter)
+            .Until("2 sessions at once", Keys.Up)
+            .Until("❯ Run", Keys.Up).Press(Keys.Enter)
+            .Until("#102", Keys.Enter)
+            .Press(Keys.ControlC, Keys.ControlC);
+
+        var (_, output, _) = await RunLiveAsync(keys, null, "--demo");
+
+        Assert.Contains("own model · high · 2 sessions at once", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TheAssistantOfTheMenuChangesTheModelAndTheEffort()
     {
         GitRepository();
@@ -45,9 +63,9 @@ public sealed class MenuTests : CliAppTests
         var (exit, output, _) = await RunWithKeysAsync(keys, []);
 
         Assert.Equal(0, exit);
-        Assert.Contains("Model   the assistant's own", output, StringComparison.Ordinal);
-        Assert.Contains("Model   opus", output, StringComparison.Ordinal);
-        Assert.Contains("Effort  xhigh", output, StringComparison.Ordinal);
+        Assert.Contains("Model     the assistant's own", output, StringComparison.Ordinal);
+        Assert.Contains("Model     opus", output, StringComparison.Ordinal);
+        Assert.Contains("Effort    xhigh", output, StringComparison.Ordinal);
         Assert.Contains("Assistant    opus · xhigh", output, StringComparison.Ordinal);
         Assert.Contains("  haiku\u001b[K\r\n   Other…", output, StringComparison.Ordinal);
         Assert.Contains("Back", output, StringComparison.Ordinal);

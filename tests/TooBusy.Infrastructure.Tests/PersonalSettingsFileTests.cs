@@ -30,6 +30,28 @@ public sealed class PersonalSettingsFileTests : IDisposable
     }
 
     [Fact]
+    public void HowManySessionsWorkAtOnceIsAChoiceToo()
+    {
+        Assert.Null(Of("/work/rocket").LoadSessions());
+
+        Of("/work/rocket").SaveSessions(3);
+
+        Assert.Equal(3, Of("/work/rocket").LoadSessions());
+        Assert.Null(Of("/work/other").LoadSessions());
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-2")]
+    [InlineData("many")]
+    public void ANumberOfSessionsThatIsNoneCountsAsOneThatIsNotChosen(string written)
+    {
+        File.WriteAllText(Of("/work/rocket").Path, $"[\"/work/rocket\"]\nsessions = \"{written}\"\n");
+
+        Assert.Null(Of("/work/rocket").LoadSessions());
+    }
+
+    [Fact]
     public void AChoiceIsReadBackByAnotherRun()
     {
         Of("/work/rocket").SaveMilestone(new MilestoneChoice("v0.3.0 \"moon\""));

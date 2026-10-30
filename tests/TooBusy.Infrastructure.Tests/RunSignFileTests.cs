@@ -44,6 +44,21 @@ public sealed class RunSignFileTests : IDisposable
     }
 
     [Fact]
+    public void TheTasksBesideTheFirstStandOnTheSignToo()
+    {
+        var sign = Sign(100);
+        var waiting = new RunSign(RunPhase.WaitingForOwner) { Task = 13, Title = "Import the orders", Url = "https://github.com/acme/rocket/issues/13", Open = "claude attach 5e6f7a8b" };
+        sign.Raise(Working with { Beside = [waiting] });
+
+        var read = Sign(200).Read()?.Sign;
+
+        Assert.Equal(Working with { Beside = [waiting] }, read);
+        Assert.NotEqual(Working, read);
+        Assert.Contains("#12 Export the orders as a file", read!.Told, StringComparison.Ordinal);
+        Assert.Contains("#13 Import the orders · its session waits for the owner", read.Told, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheSignIsWrittenWithTheProcessAndTheTimes()
     {
         var sign = Sign(100);

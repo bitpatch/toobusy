@@ -62,6 +62,7 @@ public static class CliApp
         root.Subcommands.Add(CreateMilestoneCommand(context, demo));
         root.Subcommands.Add(CreateModelCommand(context, demo));
         root.Subcommands.Add(CreateEffortCommand(context, demo));
+        root.Subcommands.Add(CreateSessionsCommand(context, demo));
         root.Subcommands.Add(CreateRunCommand(context, demo));
         root.Subcommands.Add(CreateQueueCommand(context, demo));
         root.Subcommands.Add(CreateStatusCommand(context, demo));
@@ -525,6 +526,41 @@ public static class CliApp
         return command;
     }
 
+    // And so is how many sessions work at once. It is asked by nothing: a user who never chose works with one.
+    static Command CreateSessionsCommand(CliContext context, Option<bool> demo)
+    {
+        var count = new Argument<int?>("count") { Description = "How many sessions work at once: 1 works in the working copy, and more each in a git worktree of its own.", Arity = ArgumentArity.ZeroOrOne };
+        var command = new Command("sessions", "Chooses how many sessions work at once, or shows how many that is.");
+        command.Arguments.Add(count);
+        command.SetAction(async (result, cancellationToken) =>
+        {
+            if (await OpenAsync(context, result.GetValue(demo), ready: false, watched: context.Terminal is not null, cancellationToken) is not { } bench)
+                return ExitCode.NotReady;
+
+            if (result.GetValue(count) is { } given)
+            {
+                if (given < 1)
+                {
+                    Say(context, "toobusy: `sessions` takes a number of sessions, which is 1 or more");
+                    return ExitCode.Failed;
+                }
+
+                bench.Personal.SaveSessions(given);
+                context.Output.WriteLine($"Sessions: {given}");
+                return ExitCode.Done;
+            }
+
+            if (context.Terminal is not { } terminal)
+            {
+                context.Output.WriteLine($"Sessions: {SessionsScreen.Describe(bench.Personal.LoadSessions())}");
+                return ExitCode.Done;
+            }
+
+            return await ChooseOnPageAsync(context, terminal, bench, session => Task.FromResult(session.ChooseSessions(leavesPage: true)), "The number of sessions is left as it was.", cancellationToken);
+        });
+        return command;
+    }
+
     // A page that is opened for one question, and what is left in the terminal when it is closed: what was chosen,
     // or that nothing was.
     static async Task<int> ChooseOnPageAsync(CliContext context, TerminalDevice terminal, Workbench bench, Func<Session, Task<bool>> ask, string left, CancellationToken cancellationToken)
@@ -538,19 +574,22 @@ public static class CliApp
 
     // Takes the tasks of the queue one after another: on a tape in a terminal, which the tool leaves when the run is
     // over, and as plain lines without one. It does not start without a milestone to work on, a model and an effort.
-    // `--task` makes it a run of one task, and `--max` one of so many tasks at most.
+    // `--task` makes it a run of one task, `--max` one of so many tasks at most, and `--sessions` one of so many
+    // sessions at once.
     static Command CreateRunCommand(CliContext context, Option<bool> demo)
     {
         var task = new Option<int?>("--task") { Description = "Do this task and no other: the number of an open task that a run would take now.", HelpName = "number" };
         var max = new Option<int?>("--max") { Description = "Take so many tasks at most, then stop.", HelpName = "count" };
         var skip = SkipOption("Leave out the tasks with this label for this run, and the tasks that wait for them; give it again for every such label, or several names separated by commas.");
-        var command = new Command("run", "Takes the tasks of the queue one after another.") { task, max, skip };
+        var sessions = new Option<int?>("--sessions") { Description = "Work on so many tasks at once for this run, each in a git worktree of its own, over what `toobusy sessions` chose.", HelpName = "count" };
+        var command = new Command("run", "Takes the tasks of the queue one after another.") { task, max, skip, sessions };
         command.SetAction(async (result, cancellationToken) =>
         {
             var (only, most) = (result.GetValue(task), result.GetValue(max));
             if ((only is not null && most is not null ? "toobusy: give `--task` or `--max`, not both"
                 : only <= 0 ? "toobusy: `--task` takes the number of a task, which is 1 or more"
                 : most <= 0 ? "toobusy: `--max` takes a number of tasks, which is 1 or more"
+                : result.GetValue(sessions) <= 0 ? "toobusy: `--sessions` takes a number of sessions, which is 1 or more"
                 : null) is { } wrong)
             {
                 Say(context, wrong);
@@ -595,7 +634,7 @@ public static class CliApp
                 return ExitCode.Failed;
             }
 
-            if (bench.OpenRun(settings, milestone.Title, model, effort, only, most, Labels(result.GetValue(skip))) is not { } run)
+            if (bench.OpenRun(settings, milestone.Title, model, effort, only, most, Labels(result.GetValue(skip)), result.GetValue(sessions)) is not { } run)
             {
                 Say(context, NoTasks);
                 return ExitCode.Failed;
@@ -686,11 +725,11 @@ public static class CliApp
             {
                 if (result.GetValue(json))
                 {
-                    context.Output.WriteLine(StatusLook.Json(StatusLook.MadeUp, null));
+                    context.Output.WriteLine(StatusLook.Json(StatusLook.MadeUp, []));
                 }
                 else
                 {
-                    foreach (var line in StatusLook.Lines(StatusLook.MadeUp, null))
+                    foreach (var line in StatusLook.Lines(StatusLook.MadeUp, []))
                         context.Output.WriteLine(line);
                     context.Output.WriteLine(context.OutputPalette.Muted("Demo: the run is made up."));
                 }
@@ -702,7 +741,7 @@ public static class CliApp
                 return ExitCode.NotReady;
 
             var going = LocalFolder.Sign(root).Read();
-            var left = going is null ? LocalFolder.State(root).Load() : null;
+            var left = going is null ? LocalFolder.Records(root) : [];
             if (result.GetValue(json))
             {
                 context.Output.WriteLine(StatusLook.Json(going, left));
@@ -860,7 +899,7 @@ public static class CliApp
             context.Output.WriteLine(context.OutputPalette.Muted("`toobusy about` tells how a run works, for you and for your assistant."));
     }
 
-    // What was chosen on the page: the milestone, the model, the effort; false when nothing was.
+    // What was chosen on the page: the milestone, the model, the effort, the sessions; false when nothing was.
     static bool ReportChoices(CliContext context, Session session, bool demo)
     {
         (string Label, string? Value)[] choices =
@@ -868,6 +907,7 @@ public static class CliApp
             ("Milestone", session.ChosenMilestone is { } milestone ? milestone.Title ?? "none" : null),
             ("Model", session.ChosenModel is { } model ? ModelScreen.Describe(model) : null),
             ("Effort", session.ChosenEffort),
+            ("Sessions", session.ChosenSessions is { } sessions ? SessionsScreen.Describe(sessions) : null),
         ];
         var chosen = choices.Where(choice => choice.Value is not null).ToList();
         foreach (var (label, value) in chosen)

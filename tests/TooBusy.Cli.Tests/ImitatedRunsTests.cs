@@ -19,7 +19,7 @@ public class ImitatedRunsTests
         Assert.Contains(first!, task => task.Has("feature"));
         Assert.DoesNotContain(changed!, task => task.Has("feature"));
         Assert.Contains(changed!, task => task.Has("enhancement"));
-        Assert.Equal(ImitatedTasks.Killed, runs.State.Load()?.Number);
+        Assert.Equal(ImitatedTasks.Killed, Assert.Single(runs.Records()).Number);
     }
 
     [Fact]

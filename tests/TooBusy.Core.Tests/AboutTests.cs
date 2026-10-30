@@ -7,6 +7,16 @@ namespace TooBusy.Core.Tests;
 
 public class AboutTests
 {
+    [Fact]
+    public void SeveralSessionsAreToldOfWithTheRuleOfTheBranchOfTheProject()
+    {
+        var text = About.Text(null, RunPolicy.Default, branch: "develop");
+
+        Assert.Contains("`toobusy sessions <count>`", text, StringComparison.Ordinal);
+        Assert.Contains("`toobusy run --sessions <count>`", text, StringComparison.Ordinal);
+        Assert.Contains(Briefing.LandingRule(new Landing("toobusy/12", new Upstream("origin", "develop"))).TrimStart('-', ' '), text, StringComparison.Ordinal);
+    }
+
     static readonly QueueRules Rules = new(new LabelSettings(["manual", "draft"], ["feature", "bug"], "needs-owner", "interrupted"), Board: true);
 
     static readonly NewTasks Ground = new("needs-owner", [], "<the milestone the user works on>", "<the address of the board>");

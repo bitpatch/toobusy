@@ -13,7 +13,8 @@ namespace TooBusy.Core.Run;
 // at most. Commands are the commands of the project the run runs around a task. Branch is the branch the tasks are done
 // on, null where the project names none: the working copy is checked to be on it and brought up to date with its
 // upstream. PermissionMode is the permission mode of the assistant its sessions work in, the one of the settings or the
-// one a session is started in when they name none.
+// one a session is started in when they name none. Sessions is how many sessions work at once: one works in the working
+// copy itself, and more each in a git worktree of its own.
 public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Model, string Effort)
 {
     public string? Board { get; init; }
@@ -29,6 +30,8 @@ public sealed record RunPlan(string? Milestone, QueueRules Rules, ModelChoice Mo
     public string? Branch { get; init; }
 
     public string PermissionMode { get; init; } = ClaudeCodeOptions.DefaultPermissionMode;
+
+    public int Sessions { get; init; } = 1;
 }
 
 // What a session is told of the tracker to make a new task there: the manual label, the labels a task needs
@@ -180,8 +183,17 @@ public sealed record TaskEnd(QueueTask Task, RunMark Mark, TimeSpan Took);
 // the queue was read before it, and Behind how many tasks of the run came to an outcome before it.
 // Reply is what a session that waits for the owner said last, line by line; it is empty while nothing waits.
 // Plan is the plan the session keeps of the task, step by step; it is empty when it keeps none.
+//
+// In a run of several sessions this says so of the task that was taken first, what is said of the run as a whole among
+// it, and Beside is the same of each of the others, in the order they were taken. Queued is then how many tasks follow
+// all of them, Available what may be asked of any of them, and each of Beside has its own commands.
 public sealed record RunStatus(RunPhase Phase, string Text)
 {
+    public IReadOnlyList<RunStatus> Beside { get; init; } = [];
+
+    // The tasks that are worked on, each by what is shown of it.
+    public IEnumerable<RunStatus> Tasks => ((RunStatus[])[this, .. Beside]).Where(status => status.Task is not null);
+
     public QueueTask? Task { get; init; }
 
     public DateTimeOffset? Since { get; init; }

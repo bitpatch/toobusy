@@ -50,6 +50,98 @@ public sealed class RunScreenTests : IDisposable
     // What the terminal's own screen has at the moment: the one of the test, unless another is named.
     bool Has(string text, TestTerminal? on = null) => (on ?? terminal).Tape.Text.Contains(text, StringComparison.Ordinal);
 
+    // A run of two sessions as it is shown: the first task with what is said of the run, and the other beside it.
+    static readonly RunStatus Beside = Working with { Task = Total, Since = InstantClock.Start - TimeSpan.FromSeconds(31), Step = "Bash: dotnet test", Open = "claude attach 5e6f" };
+
+    [Fact]
+    public async Task EverySessionHasABlockOfItsOwnAndTheFootCountsThem()
+    {
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Plan = [PlanStep.Done, PlanStep.Active], Beside = [Beside with { Plan = [PlanStep.Active] }] });
+            return await run.ForEverAsync();
+        });
+        terminal.Keys
+            .Hold(() => Has("#3 Export the data") && Has("1:24 · Edit src/Export.cs") && Has("#2 Show the total") && Has("0:31 · Bash: dotnet test") && Has("2 at work · 2 to go") && Has("ctrl+c stop the sessions and exit"))
+            .Press(Keys.ControlC, Keys.ControlC);
+
+        using var page = terminal.Open();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ACommandForASessionNamesItsTaskAndGoesToIt()
+    {
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Available = ForOwner, Beside = [Waiting with { Task = Total }] });
+            Assert.Equal(RunCommand.Nudge, await run.NextAsync());
+            return new RunResult(RunEnd.Stopped, 0);
+        });
+        terminal.Keys.Hold(() => Has("❯ hold #2")).Press(Keys.Down).Hold(() => Has("❯ send now #2")).Press(Keys.Enter);
+
+        using var page = terminal.Open();
+        await new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, run.Aimed);
+    }
+
+    [Fact]
+    public async Task ASessionThatDoesNotWaitHasNoCommandOfItsOwn()
+    {
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Available = ForOwner, Beside = [Waiting with { Task = Total }] });
+            return await run.ForEverAsync();
+        });
+        var seen = false;
+        terminal.Keys
+            .Hold(() =>
+            {
+                seen = Has("❯ hold #2") && !Has("hold #3");
+                return seen;
+            })
+            .Press(Keys.ControlC, Keys.ControlC);
+
+        using var page = terminal.Open();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken));
+
+        Assert.True(seen);
+    }
+
+    [Fact]
+    public async Task AWindowWithoutRoomForTheBlocksGetsALineForEachSessionButForThoseThatWait()
+    {
+        using var low = Live(width: 100, height: 11);
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Plan = [PlanStep.Active], Beside = [Beside with { Plan = [PlanStep.Active] }, Waiting with { Task = Task(4, "Import the data") }] });
+            return await run.ForEverAsync();
+        });
+        low.Keys
+            .Hold(() => Has("#3 Export the data  1:24 · Edit src/Export.cs", low) && Has("#2 Show the total  0:31 · Bash: dotnet test", low) && Has("waits for you", low))
+            .Press(Keys.ControlC, Keys.ControlC);
+
+        using var page = low.Open();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task TheLineOfTheCommandsSpeaksOfAllTheTasks()
+    {
+        var run = new ScriptedRun(async (run, view) =>
+        {
+            view.Show(Working with { Stopping = true, Beside = [Beside] });
+            await run.NextAsync();
+            view.Show(Working with { Aborting = true, Beside = [Beside] });
+            return await run.ForEverAsync();
+        });
+        terminal.Keys.Hold(() => Has("stopping after these tasks")).Type("/").Hold(() => Has("❯ stop")).Press(Keys.Enter).Hold(() => Has("the sessions are wrapping up")).Press(Keys.ControlC, Keys.ControlC);
+
+        using var page = terminal.Open();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new RunScreen(page, () => now).RunAsync(run, TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task ATaskThatIsOverIsOneLineAndTheOneThatIsWorkedOnStandsUnderIt()
     {

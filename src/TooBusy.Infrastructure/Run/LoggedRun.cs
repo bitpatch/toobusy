@@ -29,7 +29,7 @@ public sealed class LoggedRun(IQueueRun inner, RunLogFile log) : IQueueRun
         }
     }
 
-    public void Send(RunCommand command) => inner.Send(command);
+    public void Send(RunCommand command, int? task = null) => inner.Send(command, task);
 
     public void Note(string text) => log.Write(text);
 }

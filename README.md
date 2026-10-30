@@ -40,6 +40,8 @@ If something goes wrong, you can always give the logs to your assistant and ask 
 
 If you want to set it up yourself, run `toobusy init` in your project folder.
 
+To have several tasks done at once, each in a git worktree of its own, choose how many sessions work side by side with `toobusy sessions 3`, or give `toobusy run --sessions 3` for one run. The sessions push to the branch of the tasks themselves, and they share the usage limits of your account.
+
 To see what it looks like first, add `--demo` to any command, for example `toobusy --demo` or `toobusy run --demo`. A demo shows a made-up project, a small online shop with its own board and fifteen tasks, and is the same in any folder: it reads nothing of the folder it is run in, starts no session and changes nothing.
 
 Once everything is ready, just run the `toobusy` command in your project folder. You will see how many tasks can be done in automatic mode, and choose Run.

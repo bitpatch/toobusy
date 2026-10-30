@@ -1,3 +1,5 @@
+using TooBusy.Core.Run;
+
 namespace TooBusy.Infrastructure.Run;
 
 // Where a project keeps what a run leaves on this machine: `.toobusy/local`. Nothing of it is committed: the folder
@@ -18,6 +20,27 @@ public static class LocalFolder
     public static RunStateFile State(string root) => new(Of(root));
 
     public static RunSignFile Sign(string root) => new(Of(root));
+
+    // Where the git worktrees of a run of several sessions are, one folder for each task: inside the local folder, out
+    // of git like all of it, with a local folder of its own in each that keeps the record of its task.
+    public static string Worktrees(string root) => Path.Combine(Of(root), "worktrees");
+
+    // The folders of the worktrees that are there.
+    public static IReadOnlyList<string> WorktreeFolders(string root)
+    {
+        try
+        {
+            return Directory.Exists(Worktrees(root)) ? [.. Directory.GetDirectories(Worktrees(root)).Order(StringComparer.Ordinal)] : [];
+        }
+        catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    // The records of the project at the root: that of its working copy and those of its worktrees, as a run finds them.
+    public static IReadOnlyList<TaskRecord> Records(string root) =>
+        [.. new[] { root }.Concat(WorktreeFolders(root)).Select(State).Select(state => state.Load()).OfType<TaskRecord>()];
 
     // The local folder at this path, made with its `.gitignore` when either is not there. Whatever writes into the
     // folder makes sure of it first: one that was taken away while a run goes on, by a `git clean -fdx` of a session

@@ -61,7 +61,14 @@ public sealed class ScriptedRun(Func<ScriptedRun, IRunView, Task<RunResult>> pla
         }
     }
 
-    public void Send(RunCommand command) => commands.Writer.TryWrite(command);
+    public void Send(RunCommand command, int? task = null)
+    {
+        Aimed = task;
+        commands.Writer.TryWrite(command);
+    }
+
+    // The task the last command was meant for.
+    public int? Aimed { get; private set; }
 
     readonly ConcurrentQueue<string> notes = new();
 

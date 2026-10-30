@@ -1,3 +1,4 @@
+using System.Globalization;
 using TooBusy.Core.Queue;
 using TooBusy.Core.Run;
 using TooBusy.Core.Settings;
@@ -12,7 +13,8 @@ namespace TooBusy.Cli.Imitation;
 // waited out, a task that opens after another, and tasks that are held; the others are done plainly. Nothing is
 // changed anywhere. The made-up tasks and the record are kept in memory for as long as the demo goes on, and nowhere
 // else: the menu and the next run see a task that an abort left interrupted. The menu counts the tasks and takes a
-// moment over it, as a tracker does, so that the count can be looked at, unless nobody watches.
+// moment over it, as a tracker does, so that the count can be looked at, unless nobody watches. A demo of several
+// sessions has made-up worktrees, which keep their records in memory too.
 public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
 {
     // A demo does not make anybody wait as a run does.
@@ -29,9 +31,10 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
     static readonly TimeSpan Wait = TimeSpan.FromSeconds(1);
 
     readonly UnwrittenState remembered = new();
+    readonly ImitatedWorktrees worktrees = new();
     ImitatedTasks? kept;
 
-    public IRunState State => remembered;
+    public IReadOnlyList<TaskRecord> Records() => [.. new[] { remembered.Load() }.OfType<TaskRecord>(), .. worktrees.Records];
 
     // A demo looks at no sign, as it puts none up.
     public GoingRun? Going() => null;
@@ -49,7 +52,8 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
     public IQueueRun Open(ProjectSettings settings, RunPlan plan)
     {
         var tasks = Tasks(plan.Rules, killed: plan.Only is null or ImitatedTasks.Killed);
-        return new Supervisor(tasks, new ImitatedAssistant(clock, tasks), new CleanWorkspace(), remembered, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None, Branch = null }, Pace);
+        var assistant = new ImitatedAssistant(clock, tasks);
+        return new Supervisor(tasks, assistant, new CleanWorkspace(), remembered, new NoSign(), new QuietMachine(), clock, new NoCommands(), plan with { Commands = TaskCommands.None, Branch = null }, Pace, worktrees.Over(assistant));
     }
 
     // The made-up tasks: those that were kept while one of them is interrupted or has a record, and otherwise tasks
@@ -63,6 +67,7 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
         {
             kept = null;
             remembered.Clear();
+            worktrees.Clear();
         }
 
         if (kept is null && !killed)
@@ -74,7 +79,7 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
             kept = new ImitatedTasks(rules, killed: true);
             remembered.Save(new TaskRecord(ImitatedTasks.Killed, ImitatedAssistant.Trace(ImitatedTasks.Killed, clock.Now)));
         }
-        else if (remembered.Load() is null && !kept.HasInterrupted(rules.Labels.Interrupted))
+        else if (remembered.Load() is null && worktrees.Records.Count == 0 && !kept.HasInterrupted(rules.Labels.Interrupted))
         {
             kept = new ImitatedTasks(rules, killed: false);
         }
@@ -82,7 +87,7 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
         return kept;
     }
 
-    sealed class NoCommands : IProjectCommands
+    internal sealed class NoCommands : IProjectCommands
     {
         public Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken) =>
             Task.FromResult(new CommandEnd(CommandStatus.NotStarted, 0, ""));
@@ -101,9 +106,9 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
         }
     }
 
-    sealed class CleanWorkspace : IWorkspace
+    internal sealed class CleanWorkspace : IWorkspace
     {
-        public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult<WorkspaceState?>(new WorkspaceState(0, 0));
+        public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult<WorkspaceState?>(new WorkspaceState(0, 0) { Branch = DemoProject.Branch });
 
         public Task<BranchSync> SyncAsync(CancellationToken cancellationToken) => Task.FromResult(new BranchSync(SyncStatus.Level));
     }
@@ -122,6 +127,63 @@ public sealed class ImitatedRuns(IClock clock, bool watched) : IProjectRuns
             {
             }
         }
+    }
+}
+
+// The worktrees of a demo: folders that are not there, always clean, each with its record in memory for as long as the
+// demo goes on, so that the next run finds what a kill or an abort left. Over is them for the sessions of one run.
+public sealed class ImitatedWorktrees
+{
+    readonly Lock gate = new();
+    readonly SortedDictionary<int, UnwrittenState> states = [];
+
+    public IReadOnlyList<TaskRecord> Records
+    {
+        get
+        {
+            lock (gate)
+                return [.. states.Values.Select(state => state.Load()).OfType<TaskRecord>()];
+        }
+    }
+
+    public void Clear()
+    {
+        lock (gate)
+            states.Clear();
+    }
+
+    public IWorkingCopies Over(IAssistant assistant) => new Copies(this, assistant);
+
+    sealed class Copies(ImitatedWorktrees worktrees, IAssistant assistant) : IWorkingCopies
+    {
+        static readonly Upstream Remote = new("origin", DemoProject.Branch);
+
+        public Task<IReadOnlyList<WorkingCopy>> FindAsync(CancellationToken cancellationToken)
+        {
+            lock (worktrees.gate)
+                return Task.FromResult<IReadOnlyList<WorkingCopy>>([.. worktrees.states.Select(left => Copy(left.Key, left.Value))]);
+        }
+
+        public Task<Upstream?> FollowedAsync(string branch, CancellationToken cancellationToken) => Task.FromResult<Upstream?>(Remote);
+
+        public Task<WorkingCopy> MakeAsync(int task, Upstream onto, CancellationToken cancellationToken)
+        {
+            lock (worktrees.gate)
+                return Task.FromResult(Copy(task, worktrees.states[task] = new UnwrittenState()));
+        }
+
+        public Task RemoveAsync(WorkingCopy copy, CancellationToken cancellationToken)
+        {
+            lock (worktrees.gate)
+                worktrees.states.Remove(int.Parse(copy.Folder.Split('/')[^1], CultureInfo.InvariantCulture));
+            return Task.CompletedTask;
+        }
+
+        WorkingCopy Copy(int task, UnwrittenState state) =>
+            new(string.Create(CultureInfo.InvariantCulture, $".toobusy/local/worktrees/{task}"), new ImitatedRuns.CleanWorkspace(), state, new ImitatedRuns.NoCommands(), assistant)
+            {
+                Landing = new Landing(string.Create(CultureInfo.InvariantCulture, $"toobusy/{task}"), Remote),
+            };
     }
 }
 
@@ -148,6 +210,8 @@ public sealed class ImitatedTasks : ITaskTracker
 
     static readonly string[] Types = ["feature", "bug", "chore", "docs"];
 
+    // The sessions of a demo of several work side by side.
+    readonly Lock gate = new();
     readonly List<QueueTask> open = [];
     readonly QueueRules made;
     readonly string manual;
@@ -189,12 +253,19 @@ public sealed class ImitatedTasks : ITaskTracker
     // label and the labels of the first one, and stands as that one does. It is made once.
     public void Leave(int number, string title, int from)
     {
-        if (open.Find(task => task.Number == from) is { } first && open.TrueForAll(task => task.Number != number))
-            open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [manual, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = statuses.Todo, BlockedBy = [], Parts = [] });
+        lock (gate)
+        {
+            if (open.Find(task => task.Number == from) is { } first && open.TrueForAll(task => task.Number != number))
+                open.Add(first with { Number = number, Title = title, Url = Address(number), Labels = [manual, .. first.Labels], Status = first.Status == BoardStatus.Missing ? BoardStatus.Missing : BoardStatus.Todo, StatusName = statuses.Todo, BlockedBy = [], Parts = [] });
+        }
     }
 
     // Whether a task carries the label that a run puts on one it had to stop.
-    public bool HasInterrupted(string label) => open.Any(task => task.Has(label));
+    public bool HasInterrupted(string label)
+    {
+        lock (gate)
+            return open.Any(task => task.Has(label));
+    }
 
     // Whether the tasks were made up for rules such as these: the same labels, the same board and the same statuses
     // on it. The labels a run skips do not make other tasks.
@@ -206,8 +277,11 @@ public sealed class ImitatedTasks : ITaskTracker
         && rules.Labels.Blocking.SequenceEqual(made.Labels.Blocking)
         && rules.Labels.Take.SequenceEqual(made.Labels.Take);
 
-    public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);
+    public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken)
+    {
+        lock (gate)
+            return Task.FromResult<IReadOnlyList<QueueTask>>([.. open]);
+    }
 
     // No commit of a made-up session closes its task.
     public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken) => Task.FromResult<QueueTask?>(null);
@@ -236,9 +310,13 @@ public sealed class ImitatedTasks : ITaskTracker
 
     public Task CloseAsync(int number, CancellationToken cancellationToken)
     {
-        open.RemoveAll(task => task.Number == number);
-        foreach (var waiting in open.ToList())
-            Change(waiting.Number, task => task with { BlockedBy = [.. task.BlockedBy.Where(before => before != number)] });
+        lock (gate)
+        {
+            open.RemoveAll(task => task.Number == number);
+            foreach (var waiting in open.ToList())
+                Change(waiting.Number, task => task with { BlockedBy = [.. task.BlockedBy.Where(before => before != number)] });
+        }
+
         return Task.CompletedTask;
     }
 
@@ -246,9 +324,12 @@ public sealed class ImitatedTasks : ITaskTracker
 
     void Change(int number, Func<QueueTask, QueueTask> change)
     {
-        var index = open.FindIndex(task => task.Number == number);
-        if (index >= 0)
-            open[index] = change(open[index]);
+        lock (gate)
+        {
+            var index = open.FindIndex(task => task.Number == number);
+            if (index >= 0)
+                open[index] = change(open[index]);
+        }
     }
 }
 
@@ -342,13 +423,18 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
 
     readonly IClock clock = clock;
     readonly ImitatedTasks tasks = tasks;
+    readonly Lock gate = new();
     UsageWindow near = new("5-hour", 41, null);
     double far = 12;
 
     public Task<IAssistantSession> StartAsync(SessionStart start, CancellationToken cancellationToken)
     {
-        near = near with { Used = Math.Min(95, near.Used + 6) };
-        far += 1;
+        lock (gate)
+        {
+            near = near with { Used = Math.Min(95, near.Used + 6) };
+            far += 1;
+        }
+
         return Task.FromResult<IAssistantSession>(new MadeUpSession(this, start.Task, Plays.GetValueOrDefault(start.Task, Plain)));
     }
 
@@ -365,9 +451,22 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
     // The near window starts anew a few seconds after a session ran into it.
     public UsageLimits ReadLimits()
     {
-        if (near.ResetsAt is { } reset && reset <= clock.Now)
-            near = new UsageWindow("5-hour", 3, null);
-        return new UsageLimits(near, new UsageWindow("weekly", far, null));
+        lock (gate)
+        {
+            if (near.ResetsAt is { } reset && reset <= clock.Now)
+                near = new UsageWindow("5-hour", 3, null);
+            return new UsageLimits(near, new UsageWindow("weekly", far, null));
+        }
+    }
+
+    // A session that runs into the limit uses the near window up; it starts anew a little later.
+    void Spend()
+    {
+        lock (gate)
+        {
+            if (near.Used < 100)
+                near = new UsageWindow("5-hour", 100, clock.Now + Reset);
+        }
     }
 
     static SessionLook Ended(string reply) => new(SessionPhase.Ended, Reply: reply, Reported: Outcome.Ends(reply));
@@ -432,9 +531,8 @@ public sealed class ImitatedAssistant(IClock clock, ImitatedTasks tasks) : IAssi
             if (act.Leaves is var (number, title))
                 assistant.tasks.Leave(number, title, task);
 
-            // A session that runs into the limit uses the near window up; it starts anew a little later.
-            if (act.End.Limit is not null && assistant.near.Used < 100)
-                assistant.near = new UsageWindow("5-hour", 100, assistant.clock.Now + Reset);
+            if (act.End.Limit is not null)
+                assistant.Spend();
             return Task.FromResult(act.End with { Steps = steps + act.Steps.Length, Context = Context(steps + act.Steps.Length), Plan = Plan(act.Steps.Length) });
         }
 

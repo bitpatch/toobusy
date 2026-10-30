@@ -27,7 +27,7 @@ The folder lives in the project's repository and holds everything that is specif
 - the commands of the project a run runs before a task and after it;
 - local state of a run, which is not committed.
 
-What is one person's own is not in the folder: the milestone to work on, and the model and the effort the tasks are done with by default, are chosen by each user and kept on their machine.
+What is one person's own is not in the folder: the milestone to work on, the model and the effort the tasks are done with by default, and how many sessions work at once, are chosen by each user and kept on their machine.
 
 ## What it does during a run
 
@@ -46,8 +46,8 @@ What is one person's own is not in the folder: the milestone to work on, and the
 
 - **Nothing project-specific in the code.** The repository is the one the project is cloned from; the board, what it calls its statuses, the labels, the branch the tasks are done on, the commands around a task and the permission mode of a session come from `.toobusy/`, and later the prompts do.
 - **Trackers and assistants are replaceable.** The first version supports GitHub Issues with GitHub Projects, and Claude Code. Codex, OpenCode and other trackers come later behind the same interfaces.
-- **One task at a time in the shared working copy** in the first version. The design must not prevent running several sessions in parallel in separate git worktrees later.
-- **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it.
+- **One task at a time in the shared working copy, unless the owner chooses more.** Several sessions work side by side, each in a git worktree of its own, and push to the branch of the tasks themselves. How many is the owner's to choose, as the usage limits they share are those of the account.
+- **Never continue past a doubt.** A task that did not end cleanly stops the run; the next task is not built on it. Sessions that work beside it finish, in their own worktrees, as nothing of theirs is built on it, and no other task is started.
 - **The owner can always look inside.** Every message names the session and how to open it.
 - **A single native binary.** Built with Native AOT for macOS and Linux; macOS is the first platform, and Windows comes later.
 

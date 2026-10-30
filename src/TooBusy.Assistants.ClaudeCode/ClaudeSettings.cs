@@ -6,7 +6,8 @@ namespace TooBusy.Assistants.ClaudeCode;
 // The settings a session is started with, beside those of the user and of the project. A hook prints the request of
 // the run, when there is one, after every step, so that it reaches a session that works without cutting its turn.
 // The status line, which Claude Code feeds with the state of the session, writes that state to a file, where the run
-// reads the usage limits. And the session works in the working copy itself: a run takes one task at a time there.
+// reads the usage limits. And the session works in the folder it is started in, Claude Code makes no worktree for it:
+// that is the working copy, or the git worktree a run of several sessions made for the task.
 public static class ClaudeSettings
 {
     public static string Json(ClaudeFolders folders)

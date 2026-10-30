@@ -12,25 +12,27 @@ namespace TooBusy.Assistants.ClaudeCode;
 // earlier run too.
 //
 // The list of the sessions is a command that starts Claude Code, so a look at a session takes it from a list read no
-// longer than `listAge` ago, twenty seconds unless a test says otherwise; whatever changes a session, and whatever
-// must know how a session is now, reads it anew.
+// longer than a while ago, as `SessionList` says; whatever changes a session, and whatever must know how a session is
+// now, reads it anew. The working copies of a run of several sessions each have a `ClaudeCode` and share one list.
 //
 // What Claude Code answers, lists and writes is read as `ClaudeCodeProtocol` says, and no further: a state of the
 // list that it does not know is not taken for work, and a conversation that is nowhere to be found is said.
-public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, TimeSpan? listAge = null) : IAssistant
+public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, SessionList sessions) : IAssistant
 {
     readonly IClock clock = clock;
     readonly ClaudeFolders folders = folders;
     readonly string root = root;
     readonly string permissionMode = permissionMode;
-    readonly TimeSpan listAge = listAge ?? TimeSpan.FromSeconds(20);
+    readonly SessionList sessions = sessions;
 
-    // The last list that was read, and when; null when there is none to go by.
-    List<Listed>? cached;
-    DateTimeOffset cachedAt;
+    // A `ClaudeCode` with a list of its own, in a project with one working copy.
+    public ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFolders folders, string root, string permissionMode, TimeSpan? listAge = null)
+        : this(processes, clock, folders, root, permissionMode, new SessionList(processes, clock, listAge))
+    {
+    }
 
     // How long a command of Claude Code is waited for.
-    static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
+    static readonly TimeSpan Patience = SessionList.Patience;
 
     // For how long the list of the sessions may be silent, may lack a session or have it in a state that is not
     // known, and for how long the conversation of a session that it has may be nowhere, before that is told of.
@@ -54,7 +56,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         // The session may have said something by the time Claude Code answers: what counts starts now.
         var since = clock.Now;
         Forget();
-        cached = null;
+        sessions.Forget();
         string[] model = start.Model.Name is { } named ? ["--model", named] : [];
         var result = await processes.RunAsync(
             "claude",
@@ -77,7 +79,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
     // Code any more. While the list cannot be read nothing is known, and the session says so when it is looked at.
     public async Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken)
     {
-        var listed = await ListAsync(cancellationToken);
+        var listed = await sessions.ReadAsync(cancellationToken);
         var found = listed is null ? null : Session.Find(listed, trace.Id, trace.Conversation);
         var conversation = trace.Conversation ?? found?.Conversation;
         if (listed is not null && found is not { Alive: true } && (conversation is null || folders.Find(conversation) is null))
@@ -93,7 +95,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
     {
         for (var look = 1; ; look++)
         {
-            var listed = await ListAsync(cancellationToken);
+            var listed = await sessions.ReadAsync(cancellationToken);
             if (listed?.LastOrDefault(entry => entry.Name == start.Name && entry.Started >= since.ToUnixTimeMilliseconds()) is { } found)
                 return new Session(this, found.Id, found.Conversation, since);
             if (look == StartLooks)
@@ -147,49 +149,6 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         }
     }
 
-    // The list of a look: the last one that was read, while it is younger than `listAge`, and a new one otherwise.
-    async Task<List<Listed>?> RecentAsync(CancellationToken cancellationToken) =>
-        cached is { } recent && clock.Now - cachedAt < listAge ? recent : await ListAsync(cancellationToken);
-
-    // The sessions Claude Code knows, by what is asked of them, read anew; null when the list cannot be read, and
-    // such a list is not kept.
-    async Task<List<Listed>?> ListAsync(CancellationToken cancellationToken)
-    {
-        var listed = await ReadListAsync(cancellationToken);
-        (cached, cachedAt) = (listed, clock.Now);
-        return listed;
-    }
-
-    async Task<List<Listed>?> ReadListAsync(CancellationToken cancellationToken)
-    {
-        var result = await processes.RunAsync("claude", ["agents", "--json", "--all"], Patience, cancellationToken);
-        if (result is not { Status: ProcessStatus.Exited, ExitCode: 0 })
-            return null;
-
-        try
-        {
-            using var document = JsonDocument.Parse(result.Output);
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
-                return null;
-
-            return
-            [
-                .. document.RootElement.EnumerateArray().Where(entry => entry.ValueKind == JsonValueKind.Object).Select(entry => new Listed(
-                    JsonFields.Text(entry, "id") ?? "",
-                    JsonFields.Text(entry, "sessionId"),
-                    JsonFields.Text(entry, "state"),
-                    JsonFields.Text(entry, "waitingFor"),
-                    entry.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number || JsonFields.Text(entry, "status") is not null,
-                    JsonFields.Text(entry, "name"),
-                    entry.TryGetProperty("startedAt", out var started) && started.ValueKind == JsonValueKind.Number && started.TryGetInt64(out var at) ? at : null)),
-            ];
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
     Task<ProcessResult> AskAsync(string[] arguments, CancellationToken cancellationToken) => processes.RunAsync("claude", arguments, Patience, cancellationToken);
 
     static string First(string said) =>
@@ -203,10 +162,6 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         ProcessStatus.NotStarted => $"Claude Code could not be started: {result.Error}",
         _ => null,
     };
-
-    // A session of the list. Alive tells that a process still has it; Name is what its start called it, and Started
-    // when it was started, in Unix milliseconds.
-    sealed record Listed(string Id, string? Conversation, string? State, string? WaitingFor, bool Alive, string? Name, long? Started);
 
     // A background session. It is known by the short name Claude Code gave it; its conversation, which later runs go
     // on with it by, is learnt from the list of the sessions.
@@ -237,7 +192,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             var phase = SessionPhase.Working;
             string? asks = null;
             string? odd = null;
-            var listed = await claude.RecentAsync(cancellationToken);
+            var listed = await claude.sessions.RecentAsync(cancellationToken);
             var found = listed is null ? null : Find(listed, id, Conversation);
             if (listed is null)
             {
@@ -301,7 +256,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             claude.Forget();
             for (var attempt = 0; attempt < Tries; attempt++)
             {
-                var listed = await claude.ListAsync(cancellationToken);
+                var listed = await claude.sessions.ReadAsync(cancellationToken);
                 var found = listed is null ? null : Find(listed, id, Conversation);
                 if (found is not null)
                 {
@@ -330,7 +285,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
                 {
                     // The list says whether something still has the session; one that cannot be read does not say
                     // that nothing has it.
-                    var after = await claude.ListAsync(cancellationToken);
+                    var after = await claude.sessions.ReadAsync(cancellationToken);
                     if (after is null || Find(after, id, known) is { Alive: true })
                     {
                         await claude.AskAsync(["stop", woken], cancellationToken);
@@ -356,7 +311,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         // The session is the one that woke from here on, and what it said before the message does not count.
         void GoOn(string woken, DateTimeOffset told)
         {
-            claude.cached = null;
+            claude.sessions.Forget();
             id = woken;
             silent = null;
             missing = null;
@@ -389,7 +344,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
         public async Task StopAsync(CancellationToken cancellationToken)
         {
             claude.Forget();
-            claude.cached = null;
+            claude.sessions.Forget();
             if (id is { } running && !await StopAndWaitAsync(running, cancellationToken))
                 throw new AssistantException($"Claude Code still lists the session {running} as working {Spoken.Time(StopPause * StopLooks)} after it was stopped");
         }
@@ -404,7 +359,7 @@ public sealed class ClaudeCode(IProcessRunner processes, IClock clock, ClaudeFol
             await claude.AskAsync(["stop", running], cancellationToken);
             for (var look = 0; look < StopLooks; look++)
             {
-                if (await claude.ListAsync(cancellationToken) is not { } listed || listed.FirstOrDefault(entry => entry.Id == running) is not { Alive: true })
+                if (await claude.sessions.ReadAsync(cancellationToken) is not { } listed || listed.FirstOrDefault(entry => entry.Id == running) is not { Alive: true })
                     return true;
 
                 await claude.clock.DelayAsync(StopPause, cancellationToken);

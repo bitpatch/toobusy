@@ -7,7 +7,7 @@ using TooBusy.Core.Queue;
 namespace TooBusy.Cli.Terminal;
 
 // What the queue looks like when it is shown without a run: three lists, each under its name, a task a line with
-// what is to be said of it after its title, and the same as JSON. `recorded` is the task an earlier run left with a
+// what is to be said of it after its title, and the same as JSON. `recorded` are the tasks earlier runs left with a
 // session, which a run goes on with first.
 public static class QueueLook
 {
@@ -18,7 +18,7 @@ public static class QueueLook
     // A title that is longer gives way, so that what is said of the task stays near it.
     const int Longest = 60;
 
-    public static IEnumerable<string> Lines(TaskLineup lineup, QueueTask? recorded, QueueRules rules, Palette palette)
+    public static IEnumerable<string> Lines(TaskLineup lineup, IReadOnlyList<QueueTask> recorded, QueueRules rules, Palette palette)
     {
         (string Name, List<(QueueTask Task, string Note, Tone Tone)> Tasks)[] lists =
         [
@@ -50,7 +50,7 @@ public static class QueueLook
     // The three lists for an assistant: each task with its number, its title, its address and its labels; a task
     // that is ready with what it is taken first for, when it is, `session` or `interrupted`, one that opens later
     // with the numbers of the tasks it waits for, and one that is held with the reason.
-    public static string Json(TaskLineup lineup, QueueTask? recorded, QueueRules rules)
+    public static string Json(TaskLineup lineup, IReadOnlyList<QueueTask> recorded, QueueRules rules)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
@@ -106,8 +106,8 @@ public static class QueueLook
     }
 
     // Why a run takes the task before the others; null for a task it takes in its turn.
-    static string? Mark(QueueTask task, QueueTask? recorded, QueueRules rules) =>
-        task.Number == recorded?.Number ? Left : task.Has(rules.Labels.Interrupted) ? Interrupted : null;
+    static string? Mark(QueueTask task, IReadOnlyList<QueueTask> recorded, QueueRules rules) =>
+        recorded.Any(left => left.Number == task.Number) ? Left : task.Has(rules.Labels.Interrupted) ? Interrupted : null;
 
     static string Number(QueueTask task) => string.Create(CultureInfo.InvariantCulture, $"#{task.Number}");
 

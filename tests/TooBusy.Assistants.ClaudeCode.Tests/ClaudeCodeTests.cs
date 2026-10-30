@@ -800,6 +800,37 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.Equal("Imported.", (await beside.LookAsync(token)).Reply);
     }
 
+    // The working copies of a run of several sessions read one list of the sessions, and a look of one takes what the
+    // look of the other read a moment ago.
+    [Fact]
+    public async Task TheAssistantsOfARunShareOneList()
+    {
+        var sessions = new SessionList(claude, clock);
+        var one = new ClaudeCode(claude, clock, folders, "/work/rocket", "auto", sessions);
+        var other = new ClaudeCode(claude, clock, folders, "/work/rocket-beside", "auto", sessions);
+        claude.Sessions = Listing(Entry(Id, Conversation, "working", "busy"), Entry("bbbb2222", "bbbb2222-0c7f", "working", "busy"));
+        var token = TestContext.Current.CancellationToken;
+        var first = await one.FindAsync(new SessionTrace(Id, Conversation, clock.Now), token);
+        var second = await other.FindAsync(new SessionTrace("bbbb2222", "bbbb2222-0c7f", clock.Now), token);
+        claude.Asked.Clear();
+
+        await first!.LookAsync(token);
+        await second!.LookAsync(token);
+
+        Assert.Empty(claude.Asked);
+    }
+
+    // The limits are those of the account: a session in a worktree tells of them where the run reads them, and asks for
+    // nothing else of the folder of the run.
+    [Fact]
+    public void TheStatusLineOfAWorktreeWritesWhereTheRunReadsTheLimits()
+    {
+        var shared = folders with { Local = folder.CreateSubdirectory("worktree-local").FullName, UsageFolder = folders.Local };
+
+        Assert.Equal(folders.Usage, shared.Usage);
+        Assert.NotEqual(folders.Request, shared.Request);
+    }
+
     // The commands of the hook and of the status line that the settings of a session give it, by the files they are made
     // for or as a start has them.
     static (string Hook, string StatusLine) Files(ClaudeFolders of) =>

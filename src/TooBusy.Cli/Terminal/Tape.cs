@@ -6,8 +6,9 @@ namespace TooBusy.Cli.Terminal;
 // The foot of a tape: the lines under what the tape has said for good, drawn again and again. Like a frame of a
 // screen it may have a cursor at a caret and a chosen line, which blink. Its mark is where something goes on: the
 // line and the column of a sign that turns: a full cell of dots with a gap that runs around it. Its lit cells are
-// those of a bar that are being filled: each blinks between the accent and the muted colour of an empty one.
-public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret? Caret = null, int? Chosen = null, IReadOnlyList<Caret>? Lit = null)
+// those of a bar that are being filled: each blinks between the accent and the muted colour of an empty one. Marks are
+// the marks of more that goes on beside it, each a sign that turns as the mark does.
+public sealed record Strip(IReadOnlyList<Line> Lines, Caret? Mark = null, Caret? Caret = null, int? Chosen = null, IReadOnlyList<Caret>? Lit = null, IReadOnlyList<Caret>? Marks = null)
 {
     public static Strip Empty { get; } = new([]);
 }
@@ -109,7 +110,8 @@ public sealed class Tape
                 Moved(foot.Mark),
                 Moved(foot.Caret),
                 foot.Chosen >= cut ? foot.Chosen - cut : null,
-                foot.Lit is null ? null : [.. foot.Lit.Select(cell => Moved(cell)).OfType<Caret>()]);
+                foot.Lit is null ? null : [.. foot.Lit.Select(cell => Moved(cell)).OfType<Caret>()],
+                foot.Marks is null ? null : [.. foot.Marks.Select(mark => Moved(mark)).OfType<Caret>()]);
 
             var text = new StringBuilder(Screen.HideCursor);
             text.Append(anew ? "\u001b[H\u001b[2J\u001b[3J" + Bar(width) : "\r" + Up(above));
@@ -200,6 +202,9 @@ public sealed class Tape
 
         if (foot.Mark is var (marked, sign))
             Put(marked, sign, palette.Accent(Sign(step)));
+
+        foreach (var (line, column) in foot.Marks ?? [])
+            Put(line, column, palette.Accent(Sign(step)));
 
         foreach (var (line, column) in foot.Lit ?? [])
             Put(line, column, palette.Spark(Full, glow));

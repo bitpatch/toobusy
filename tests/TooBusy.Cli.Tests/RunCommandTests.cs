@@ -38,6 +38,7 @@ public sealed class RunCommandTests : CliAppTests
     [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max", "0")]
     [InlineData("toobusy: `--max` takes a number of tasks, which is 1 or more", "--max=-2")]
     [InlineData("--task", "--task", "twelve")]
+    [InlineData("toobusy: `--sessions` takes a number of sessions, which is 1 or more", "--sessions", "0")]
     public async Task ARunOfATaskAndOfANumberOfTasksTogetherOrWithANumberThatIsNotPositiveIsAWrongCommandLine(string said, params string[] options)
     {
         GitRepository();
@@ -48,6 +49,16 @@ public sealed class RunCommandTests : CliAppTests
         Assert.Equal(2, exit);
         Assert.Contains(said, error, StringComparison.Ordinal);
         Assert.DoesNotContain("✻", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADemoOfSeveralSessionsDoesTheTasksSideBySide()
+    {
+        var (exit, output, _) = await RunAsync("run", "--demo", "--sessions", "3");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("· auto mode · 3 sessions at once", output, StringComparison.Ordinal);
+        Assert.Contains("No task is left · 11 done · 1 done in part", output, StringComparison.Ordinal);
     }
 
     [Fact]

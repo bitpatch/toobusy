@@ -21,8 +21,9 @@ public interface IProjectRuns
     // GitHub repository. Throws TrackerException when the tracker refuses.
     Task<IReadOnlyList<QueueTask>?> ReadOpenAsync(ProjectSettings settings, string? milestone, CancellationToken cancellationToken);
 
-    // What the last run left for the next one.
-    IRunState State { get; }
+    // What the last run left for the next one: the record of the working copy, and those of the worktrees of a run of
+    // several sessions.
+    IReadOnlyList<TaskRecord> Records();
 
     // The run that goes on in the working copy, by its sign; null when none does.
     GoingRun? Going();
@@ -38,7 +39,7 @@ public interface IProjectRuns
 // keeps its conversations unless `CLAUDE_CONFIG_DIR` among the Variables of the environment puts them elsewhere.
 public sealed class ProjectRuns(string root, string? repository, IProcessRunner processes, IClock clock, string home, Func<string, string?> variables) : IProjectRuns
 {
-    public IRunState State { get; } = LocalFolder.State(root);
+    public IReadOnlyList<TaskRecord> Records() => LocalFolder.Records(root);
 
     public GoingRun? Going() => LocalFolder.Sign(root).Read();
 
@@ -55,19 +56,43 @@ public sealed class ProjectRuns(string root, string? repository, IProcessRunner 
         var local = LocalFolder.Ensure(root);
         var log = new RunLogFile(local, clock);
         var logged = new LoggedProcesses(processes, log);
+
+        // A session in a worktree is one of the same account: there is one list of the sessions, and the status line
+        // of each writes what it tells of the limits into the local folder of the working copy.
+        var sessions = new SessionList(logged, clock);
+        var fetching = new Turns();
+        var worktrees = new GitWorktrees(logged, root, (folder, landing) => Copy(folder, landing, local, plan, logged, log, sessions, fetching));
         return new LoggedRun(
             new Supervisor(
                 Tasks(repository, settings, logged),
-                new ClaudeCode(logged.Inside(root), clock, ClaudeFolders.Of(root, local, () => LocalFolder.Make(local), home, variables), root, plan.PermissionMode),
-                new GitWorkspace(logged, root),
-                State,
+                new ClaudeCode(logged.Inside(root), clock, ClaudeFolders.Of(root, local, () => LocalFolder.Make(local), home, variables), root, plan.PermissionMode, sessions),
+                new GitWorkspace(logged, root, fetching),
+                LocalFolder.State(root),
                 LocalFolder.Sign(root),
                 new LocalMachine(logged),
                 clock,
                 new LoggedCommands(new ShellCommands(root), log),
                 plan,
-                RunPolicy.Default),
+                RunPolicy.Default,
+                worktrees),
             log);
+    }
+
+    // The ports of a worktree: they are those of the working copy, bound to its folder. It keeps a local folder of its
+    // own, which is where its changes are.
+    WorkingCopy Copy(string folder, Landing landing, string usage, RunPlan plan, LoggedProcesses logged, RunLogFile log, SessionList sessions, Turns fetching)
+    {
+        var local = LocalFolder.Ensure(folder);
+        var folders = ClaudeFolders.Of(folder, local, () => LocalFolder.Make(local), home, variables) with { UsageFolder = usage };
+        return new WorkingCopy(
+            folder,
+            new GitWorkspace(logged, folder, fetching),
+            LocalFolder.State(folder),
+            new LoggedCommands(new ShellCommands(folder), log),
+            new ClaudeCode(logged.Inside(folder), clock, folders, folder, plan.PermissionMode, sessions))
+        {
+            Landing = landing,
+        };
     }
 
     // The issues of the repository, with their statuses on the board of the settings.

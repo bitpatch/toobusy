@@ -114,9 +114,10 @@ public sealed class Workbench(
     // A run of the queue over the settings and the choices of the user as they are now; the milestone is null for
     // tasks whatever their milestone. Null when the project has no tasks to take: its `origin` remote is not a GitHub
     // repository. `only` is the one task the run does and `most` how many it takes at most; without them it is a run
-    // of the whole queue. `skip` are the labels whose tasks the run leaves out.
-    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null) =>
-        Runs.Open(settings, new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Session.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Workspace.Branch, PermissionMode = settings.Assistant.SessionMode });
+    // of the whole queue. `skip` are the labels whose tasks the run leaves out, and `sessions` how many work at once,
+    // for this run; without it the number the user chose.
+    public IQueueRun? OpenRun(ProjectSettings settings, string? milestone, ModelChoice model, string effort, int? only = null, int? most = null, IReadOnlyList<string>? skip = null, int? sessions = null) =>
+        Runs.Open(settings, new RunPlan(milestone, QueueRules.Of(settings) with { Skip = skip ?? [] }, model, effort) { Board = settings.Tracker.Board, Skill = settings.Session.Skill, Only = only, Most = most, Commands = settings.Commands, Branch = settings.Workspace.Branch, PermissionMode = settings.Assistant.SessionMode, Sessions = sessions ?? Personal.LoadSessions() ?? 1 });
 
     // The run that goes on in the working copy; null when none does.
     public GoingRun? Going() => Runs.Going();
@@ -133,7 +134,7 @@ public sealed class Workbench(
                 return null;
 
             var outlook = lineup.Outlook(QueueRules.Of(settings));
-            return recorded is null ? outlook : outlook with { Interrupted = recorded };
+            return recorded is [var first, ..] ? outlook with { Interrupted = first } : outlook;
         }
         catch (Exception refused) when (refused is TrackerException or OperationCanceledException)
         {
@@ -142,19 +143,18 @@ public sealed class Workbench(
     }
 
     // The queue as a run over these settings and this milestone reads it before a task, and nothing is changed by
-    // it: the lineup, with the task an earlier run left with a session before the others, and that task, null when
-    // there is none or the run would not go on with it. `skip` are the labels whose tasks the run leaves out. Null
+    // it: the lineup, with the tasks earlier runs left with a session before the others, and those tasks, without one
+    // the run would not go on with. `skip` are the labels whose tasks the run leaves out. Null
     // when the project has no tasks to read: its `origin` remote is not a GitHub repository. Throws TrackerException
     // when the tracker refuses.
-    public async Task<(TaskLineup Lineup, QueueTask? Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
+    public async Task<(TaskLineup Lineup, IReadOnlyList<QueueTask> Recorded)?> ReadQueueAsync(ProjectSettings settings, string? milestone, IReadOnlyList<string> skip, CancellationToken cancellationToken)
     {
         if (await Runs.ReadOpenAsync(settings, milestone, cancellationToken) is not { } open)
             return null;
 
         var rules = QueueRules.Of(settings) with { Skip = skip };
-        var recorded = Runs.State.Load() is { } record ? TaskLineup.Recorded(open, rules, record.Number).Task : null;
-        var lineup = TaskLineup.Arrange(open, rules);
-        return (recorded is null ? lineup : lineup.Taking(recorded), recorded);
+        List<QueueTask> recorded = [.. Runs.Records().Select(record => TaskLineup.Recorded(open, rules, record.Number).Task).OfType<QueueTask>()];
+        return (Enumerable.Reverse(recorded).Aggregate(TaskLineup.Arrange(open, rules), (lineup, task) => lineup.Taking(task)), recorded);
     }
 
     // How the project stands for a step of `toobusy init --assist`: the settings, the choices of the user, the skill

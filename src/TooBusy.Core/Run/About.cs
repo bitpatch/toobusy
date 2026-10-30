@@ -54,6 +54,9 @@ public static class About
             _ => "This project names none: its tasks are done on whatever is checked out, as it stands. `toobusy init --branch <name>` names one.",
         };
 
+        // The rule of a session in a git worktree, for the branch of this project.
+        var landing = new Landing("toobusy/12", new Upstream("origin", branch ?? "<the branch of the tasks>"));
+
         // What is said of the permission mode a session of this project is started in.
         var mode = (rules, permissionMode) switch
         {
@@ -109,9 +112,23 @@ public static class About
             - `toobusy run --skip-label design` leaves the tasks with the `design` label out of that run, as if it were a label that keeps a task out, and with them the tasks that wait for them; the option is given again for another label, or takes several names separated by commas, `Skip labels` in the menu of `toobusy` chooses the same for the runs it opens, and `toobusy queue --skip-label design` shows the queue as such a run reads it. A task that an earlier run left with a session is gone on with whatever its labels. A session is told nothing of it.
             - `toobusy queue` shows which tasks a run takes as things are, in the order it takes them, those that open later and those that are held, each with the reason, and changes nothing. `toobusy queue --json` prints the same for an assistant.
             - `toobusy status` says whether a run is going on in the working copy, with the task it works on and the command that opens its session, and changes nothing. A run works in the working copy itself, so a commit made beside it lands in the middle of its task: the instructions of a project can tell an assistant that works with the owner to look before it commits. The session of a run commits while its run goes on, so such a rule is not for a session that toobusy started. It exits with 0 when no run is going on and with 3 while one is, and `toobusy status --json` prints the same for an assistant. A second run does not start in a working copy while one goes on.
-            - One task is done at a time, in the working copy of the project itself. The working copy must be clean before a task, and it must be clean after it.
+            - One task is done at a time, in the working copy of the project itself, unless the owner chose more sessions, as told below. The working copy must be clean before a task, and it must be clean after it.
             - Each task is done by a session of the assistant of its own, which goes on by itself in the background. Nobody answers its questions or its permission prompts. {mode} What a session is allowed and refused in particular is said where Claude Code keeps it, in the settings of the project in `.claude/`, and toobusy does not say it again.
             - A task is gone on with by the same session whatever stopped the run over it, as told under “When a run goes on with a session”.
+
+            ## Several sessions at once
+
+            `toobusy sessions <count>` chooses how many sessions work at once, on this machine for this project, and `toobusy run --sessions <count>` does so for one run. One is the default. With more:
+
+            - Each task is done in a git worktree of its own, `.toobusy/local/worktrees/<task>`, on a branch `toobusy/<task>` that follows the branch of the tasks on the remote. {tasksBranch} A project that names none starts from what is checked out; the branch must have an upstream. The working copy itself is left alone, and may even be worked in meanwhile.
+            - A session pushes to the branch of the tasks itself, and bringing its branch up to date when the push is refused is its business, as ever. It is told so with one rule more in its first message, shown here for `{landing.Onto.Branch}`:
+
+            > {Briefing.LandingRule(landing).TrimStart('-', ' ')}
+
+            - The commands of the project run at the root of the worktree of the task, and for several tasks at the same time. Commands that hold something of the machine, as the port of a server, are not fit for that.
+            - A worktree whose task is over, with everything on the remote, is taken away with its branch. One with a record stays for the next run, and one with work that is not pushed stays for the owner, and the run says where it is.
+            - What stops a run of one session stops this one from taking other tasks: the sessions that work beside it finish first. `/stop` and `/abort` are for all of them, as a kill is, and `hold` and `send now` name the task of the session that waits. No task is started while one waits for a usage limit.
+            - The usage limits are those of the account, for all the sessions together.
 
             ## The task of a session is kept by toobusy
 

@@ -3,8 +3,8 @@ using TooBusy.Core.Queue;
 
 namespace TooBusy.Core.Run;
 
-// What a task asks of the run it is a part of. The run has one task at a time, on its own flow, so nothing here is
-// shared between threads.
+// What a task asks of the run it is a part of. A task goes on a flow of its own, which is what this is, and tasks that
+// go on side by side never see each other: what they share is kept behind it.
 interface ITaskHost
 {
     // Takes what the owner asked for, and gives what is meant for the session that waits: to be told now, or never.
@@ -48,7 +48,11 @@ interface ITaskHost
 }
 
 // What a task of a run is done with.
-sealed record TaskTools(RunTracker Calls, IAssistant Assistant, IWorkspace Workspace, IRunState State, IProjectCommands Shell, IClock Clock, RunPlan Plan, RunPolicy Policy);
+sealed record TaskTools(RunTracker Calls, IAssistant Assistant, IWorkspace Workspace, IRunState State, IProjectCommands Shell, IClock Clock, RunPlan Plan, RunPolicy Policy)
+{
+    // How the work comes back from a git worktree; null in the working copy itself.
+    public Landing? Landing { get; init; }
+}
 
 // One task of a run: from the command before it to what the tracker is told of it, whether its session is new, is gone
 // on with or ended while nobody watched. What it knows it keeps for itself, and a new task is a new one of these.
@@ -348,7 +352,7 @@ sealed class TaskRun(QueueTask task, int queued, ITaskHost host, TaskTools tools
             return (null, host.Stop($"{unready} · #{number} is not taken"));
 
         begun = true;
-        var start = Start(Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp }, skill: plan.Skill));
+        var start = Start(Briefing.Task(task, NewTasks.Of(plan), again && before?.State != RecordState.Paused, lost: before is { State: not RecordState.WrappedUp }, skill: plan.Skill, landing: tools.Landing));
         DateTimeOffset? starting = null;
         IAssistantSession session;
         try
