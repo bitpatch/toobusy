@@ -765,6 +765,54 @@ public sealed class ClaudeCodeTests : IDisposable
         Assert.StartsWith("the request for the session cannot be written: ", unwritten.Message, StringComparison.Ordinal);
     }
 
+    // Sessions in two working copies have an assistant each, over the folders of its copy: neither reaches what is the
+    // other's, the list of the sessions, which both read, being the only thing they share.
+    [Fact]
+    public async Task TheAssistantsOfTwoWorkingCopiesLeaveTheSessionOfTheOtherAlone()
+    {
+        const string besideId = "bbbb2222";
+        const string besideConversation = "bbbb2222-0c7f-4efb-a0a0-211c72424c97";
+        var local = folder.CreateSubdirectory("beside-local").FullName;
+        var besideFolders = new ClaudeFolders(local, () => MakeLocal(local), folder.CreateSubdirectory("beside-transcripts").FullName);
+        var besideClaude = new FakeClaude { Answer = _ => Exited($"backgrounded · {besideId}\n") };
+        var besideAssistant = new ClaudeCode(besideClaude, clock, besideFolders, "/work/rocket-beside", "auto", TimeSpan.Zero);
+        claude.Sessions = besideClaude.Sessions = Listing(Entry(Id, Conversation, "working"), Entry(besideId, besideConversation, "working", name: "#13 Import the data"));
+        var token = TestContext.Current.CancellationToken;
+
+        var session = await Assistant().StartAsync(Start, token);
+        var beside = await besideAssistant.StartAsync(Start with { Task = 13, Name = "#13 Import the data" }, token);
+
+        // Each session prints the request of its copy and writes its state there, for as long as it lives.
+        Assert.Equal(Files(folders), Files(claude.Asked[0]));
+        Assert.Equal(Files(besideFolders), Files(besideClaude.Asked[0]));
+
+        // A request stays for the session it is meant for, whatever the other session is told.
+        await session.AskAsync("Wrap up.", token);
+        Assert.Equal(Telling.WentOn, await beside.TellAsync("Go on alone.", token));
+        await beside.StopAsync(token);
+        Assert.True(File.Exists(folders.Request));
+        Assert.False(File.Exists(besideFolders.Request));
+
+        // Each conversation is read by the session it belongs to.
+        File.WriteAllText(folders.Transcript(Conversation), Said("Exported.") + "\n");
+        File.WriteAllText(besideFolders.Transcript(besideConversation), Said("Imported.") + "\n");
+        Assert.Equal("Exported.", (await session.LookAsync(token)).Reply);
+        Assert.Equal("Imported.", (await beside.LookAsync(token)).Reply);
+    }
+
+    // The commands of the hook and of the status line that the settings of a session give it, by the files they are made
+    // for or as a start has them.
+    static (string Hook, string StatusLine) Files(ClaudeFolders of) =>
+        ($"cat '{of.Request}' 2>/dev/null || true", $"cat > '{of.Usage}.tmp' && mv '{of.Usage}.tmp' '{of.Usage}'");
+
+    static (string Hook, string StatusLine) Files(IReadOnlyList<string> start)
+    {
+        using var settings = JsonDocument.Parse(start[6]);
+        return (
+            settings.RootElement.GetProperty("hooks").GetProperty("PostToolUse")[0].GetProperty("hooks")[0].GetProperty("command").GetString()!,
+            settings.RootElement.GetProperty("statusLine").GetProperty("command").GetString()!);
+    }
+
     [Fact]
     public async Task ASessionOfAnEarlierRunThatStillWorksIsFoundAndReadFromWhereItWasStarted()
     {

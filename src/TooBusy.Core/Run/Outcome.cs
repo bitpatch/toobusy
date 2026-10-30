@@ -32,6 +32,11 @@ public sealed record Outcome(OutcomeKind Kind, string Report, string? Reason = n
     // What a session may write around the line without meaning anything by it.
     static readonly char[] Decoration = [' ', '\t', '\r', '*', '_', '`', '>'];
 
+    // How the task went, as the session says: null unless it has reported, its reply ending with a line for toobusy
+    // and nothing done after it. A line with a question after it says nothing: it may be one the session wrote before
+    // it went on, and a session lost after such a reply has not said how the task went.
+    public static Outcome? Of(SessionLook look) => look.Reported ? Outcome.Read(look.Reply) : null;
+
     // Null when the reply has no line for toobusy, or one that says nothing toobusy knows.
     public static Outcome? Read(string? reply)
     {
