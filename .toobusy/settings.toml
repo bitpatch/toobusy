@@ -1,0 +1,19 @@
+version = 1
+
+# Where the tasks are.
+[tracker]
+type = "github"
+board = "https://github.com/orgs/bitpatch/projects/4"
+
+# A task with a blocking label is never taken. A task needs one of the labels to take; an empty list means any task.
+# A run puts `owner` on a task that waits for the owner, which is not taken while it has it,
+# and `interrupted` on a task it had to stop, which is taken first.
+[queue.labels]
+blocking = ["help wanted", "invalid", "manual", "dependencies", "github_actions"]
+take = ["bug", "feature", "chore", "docs"]
+owner = "help wanted"
+interrupted = "interrupted"
+
+# Who does the tasks.
+[assistant]
+type = "claude-code"

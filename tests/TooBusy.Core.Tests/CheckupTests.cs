@@ -1,0 +1,473 @@
+using TooBusy.Core.Assistant;
+using TooBusy.Core.Doctor;
+using TooBusy.Core.Queue;
+using TooBusy.Core.Settings;
+
+namespace TooBusy.Core.Tests;
+
+public class CheckupTests
+{
+    const string Rocket = "https://github.com/orgs/acme/projects/7";
+
+    readonly FakeCheckupMachine machine = new();
+    readonly FakeSettingsStore store = new() { Current = Project(Rocket) };
+    readonly Watched view = new();
+
+    [Fact]
+    public async Task OnAMachineThatHasItAllEveryCheckPasses()
+    {
+        var checks = await RunAsync();
+
+        Assert.Equal(
+            [
+                new CheckResult("git", CheckState.Passed),
+                new CheckResult("GitHub CLI", CheckState.Passed),
+                new CheckResult("GitHub login", CheckState.Passed),
+                new CheckResult("Claude Code", CheckState.Passed),
+                new CheckResult("Claude Code login", CheckState.Passed),
+                new CheckResult("settings", CheckState.Passed, ".toobusy/settings.toml"),
+                new CheckResult("repository", CheckState.Passed, "acme/rocket"),
+                new CheckResult("board", CheckState.Passed, Rocket),
+                new CheckResult("statuses", CheckState.Passed, "Todo, In Progress, Done"),
+                new CheckResult("labels", CheckState.Passed),
+                new CheckResult("skill", CheckState.Skipped, "the project names no skill"),
+            ],
+            checks.Select(check => check with { Details = [] }));
+        Assert.All(checks, check => Assert.Empty(check.Details));
+        Assert.Equal(Checkup.Names, checks.Select(check => check.Name));
+
+        // Every check starts before it ends, and they come one after another.
+        Assert.Equal(checks.SelectMany(check => check.State == CheckState.Skipped ? (string[])[$"done {check.Name}"] : [$"start {check.Name}", $"done {check.Name}"]), view.Told);
+    }
+
+    [Theory]
+    [InlineData(Tool.Git, "git", "`git` is not installed.", "xcode-select --install")]
+    [InlineData(Tool.GitHubCli, "GitHub CLI", "The GitHub command-line tool `gh` is not installed.", "brew install gh")]
+    [InlineData(Tool.ClaudeCode, "Claude Code", "Claude Code is not installed: `claude` is not on the path.", "curl -fsSL https://claude.ai/install.sh | bash")]
+    public async Task AToolThatIsMissingFailsItsCheckWithTheFixOfThePlatform(Tool tool, string name, string text, string fix)
+    {
+        machine.Missing.Add(tool);
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult(name, CheckState.Failed, text, fix), Of(checks, name));
+    }
+
+    // Installing it again would not help a tool that is there.
+    [Theory]
+    [InlineData(Tool.Git, "git", "`git` could not be started: Permission denied.")]
+    [InlineData(Tool.GitHubCli, "GitHub CLI", "The GitHub command-line tool `gh` could not be started: Permission denied.")]
+    [InlineData(Tool.ClaudeCode, "Claude Code", "Claude Code could not be started: Permission denied.")]
+    public async Task AToolThatCouldNotBeStartedFailsItsCheckWithWhyAndNoFix(Tool tool, string name, string text)
+    {
+        machine.Unstarted[tool] = "Permission denied";
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult(name, CheckState.Failed, text), Of(checks, name));
+        Assert.Equal(0, machine.ManagerAsked);
+    }
+
+    [Fact]
+    public async Task WithoutAToolItsLoginIsSkippedAndSoIsWhatNeedsTheLogin()
+    {
+        machine.Missing.Add(Tool.GitHubCli);
+        machine.Missing.Add(Tool.ClaudeCode);
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult("GitHub login", CheckState.Skipped, "waits for the GitHub CLI"), Of(checks, "GitHub login"));
+        Assert.Equal(new CheckResult("Claude Code login", CheckState.Skipped, "waits for Claude Code"), Of(checks, "Claude Code login"));
+        Assert.Equal(new CheckResult("repository", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "repository"));
+        Assert.Equal(new CheckResult("board", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "board"));
+        Assert.Equal(new CheckResult("labels", CheckState.Skipped, "waits for the repository"), Of(checks, "labels"));
+        Assert.Equal(CheckState.Passed, Of(checks, "settings").State);
+
+        // A check that is skipped never starts.
+        Assert.DoesNotContain("start GitHub login", view.Told);
+        Assert.Contains("done GitHub login", view.Told);
+    }
+
+    [Fact]
+    public async Task ALoginThatIsMissingFailsWithTheCommandThatLogsIn()
+    {
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
+        machine.AssistantLoggedIn = false;
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult("GitHub login", CheckState.Failed, "`gh` is not logged in to github.com.", "gh auth login"), Of(checks, "GitHub login"));
+        Assert.Equal(new CheckResult("Claude Code login", CheckState.Failed, "Claude Code is not logged in.", "claude, then /login"), Of(checks, "Claude Code login"));
+        Assert.Equal(CheckState.Skipped, Of(checks, "repository").State);
+    }
+
+    // `gh auth status` asks GitHub: one that did not answer in time says nothing of the login, and the check says so.
+    [Fact]
+    public async Task ALoginThatGitHubDidNotAnswerForIsNotToldAsMissing()
+    {
+        machine.TrackerLogin = TrackerLoginState.NoAnswer;
+
+        var checks = await RunAsync();
+
+        Assert.Equal(
+            new CheckResult("GitHub login", CheckState.Failed, "GitHub did not answer in time, so the login could not be checked.", "try again; GitHub is slow or unreachable"),
+            Of(checks, "GitHub login"));
+        Assert.Equal(new CheckResult("repository", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "repository"));
+        Assert.Equal(new CheckResult("board", CheckState.Skipped, "waits for the GitHub login"), Of(checks, "board"));
+    }
+
+    // A Claude Code newer than the one toobusy was written against runs, and may print otherwise: it is warned of,
+    // and what needs it goes on.
+    [Fact]
+    public async Task AClaudeCodeNewerThanTheOneToobusyWasWrittenAgainstIsWarnedOf()
+    {
+        machine.WrittenAgainst[Tool.ClaudeCode] = "2.1.303";
+
+        var checks = await RunAsync();
+
+        Assert.Equal(new CheckResult("Claude Code", CheckState.Warned, "toobusy was written against Claude Code 2.1.303; what it prints may have changed"), Of(checks, "Claude Code"));
+        Assert.Equal(new CheckResult("Claude Code login", CheckState.Passed), Of(checks, "Claude Code login"));
+        Assert.DoesNotContain(checks, check => check.State == CheckState.Failed);
+    }
+
+    [Fact]
+    public async Task WithoutSettingsTheToolsAreCheckedAndTheSettingsFailAsNotSetUp()
+    {
+        store.Current = null;
+
+        var checks = await RunAsync();
+
+        Assert.All(checks.Take(5), check => Assert.Equal(CheckState.Passed, check.State));
+        Assert.Equal(new CheckResult("settings", CheckState.Failed, "This project is not set up yet.", "toobusy init"), Of(checks, "settings"));
+        Assert.Equal(CheckState.Passed, Of(checks, "repository").State);
+        Assert.Equal(new CheckResult("board", CheckState.Skipped, "waits for the settings"), Of(checks, "board"));
+        Assert.Equal(new CheckResult("labels", CheckState.Skipped, "waits for the settings"), Of(checks, "labels"));
+    }
+
+    [Fact]
+    public async Task SettingsThatDoNotValidateFailWithEveryErrorOfTheFile()
+    {
+        store.Errors = [new SettingsError("version", 1, "must be 1"), new SettingsError("assistant.type", null, "is missing")];
+
+        var settings = Of(await RunAsync(), "settings");
+
+        Assert.Equal(CheckState.Failed, settings.State);
+        Assert.Equal(".toobusy/settings.toml does not validate:", settings.Text);
+        Assert.Equal([".toobusy/settings.toml:1: version: must be 1", ".toobusy/settings.toml: assistant.type: is missing"], settings.Details);
+        Assert.Null(settings.Fix);
+    }
+
+    [Fact]
+    public async Task ARepositoryFailsWhenTheOriginIsNotOnGitHubOrCannotBeRead()
+    {
+        Assert.Equal(
+            new CheckResult("repository", CheckState.Failed, "The `origin` remote is not a GitHub repository."),
+            Of(await RunAsync(origin: null), "repository"));
+
+        machine.RepositoryReadable = false;
+        var checks = await RunAsync();
+
+        Assert.Equal(
+            new CheckResult("repository", CheckState.Failed, "acme/rocket cannot be read on GitHub: it does not exist, or you have no access to it."),
+            Of(checks, "repository"));
+        Assert.Equal(new CheckResult("labels", CheckState.Skipped, "waits for the repository"), Of(checks, "labels"));
+    }
+
+    [Fact]
+    public async Task WithoutGitTheRepositoryWaitsForIt()
+    {
+        machine.Missing.Add(Tool.Git);
+
+        Assert.Equal(new CheckResult("repository", CheckState.Skipped, "waits for git"), Of(await RunAsync(origin: null), "repository"));
+    }
+
+    [Fact]
+    public async Task AProjectWithoutABoardHasNoneToCheck()
+    {
+        store.Current = Project(board: null);
+
+        Assert.Equal(new CheckResult("board", CheckState.Skipped, "the project has no board"), Of(await RunAsync(), "board"));
+        Assert.Empty(machine.Boards);
+    }
+
+    [Theory]
+    [InlineData(BoardAccess.LacksScope, "Your GitHub login cannot work with projects.", "gh auth refresh -s project")]
+    [InlineData(BoardAccess.Unreadable, Rocket + " cannot be read: it does not exist, or you have no access to it.", null)]
+    [InlineData(BoardAccess.NoAnswer, "GitHub did not answer, so the board could not be checked.", null)]
+    public async Task ABoardThatCannotBeReadFailsForItsReason(BoardAccess access, string text, string? fix)
+    {
+        machine.Board = access;
+
+        Assert.Equal(new CheckResult("board", CheckState.Failed, text, fix), Of(await RunAsync(), "board"));
+        Assert.Equal([Rocket], machine.Boards);
+    }
+
+    [Fact]
+    public async Task TheStatusesOfTheBoardAreKnownWhateverTheirCaseAndWhatStandsBetweenTheirLetters()
+    {
+        machine.Statuses = ["Backlog", "to do", "IN-PROGRESS", "✅ Done"];
+
+        Assert.Equal(new CheckResult("statuses", CheckState.Passed, "Backlog, to do, IN-PROGRESS, ✅ Done"), Of(await RunAsync(), "statuses"));
+        Assert.Equal([Rocket], machine.StatusesOf);
+    }
+
+    [Theory]
+    [InlineData("In Progress, Done", "The board has no status “Todo”: it has In Progress, Done.")]
+    [InlineData("Todo, Doing, Done", "The board has no status “In Progress”: it has Todo, Doing, Done.")]
+    [InlineData("Todo, In Progress, Shipped", "The board has no status “Done”: it has Todo, In Progress, Shipped.")]
+    [InlineData("Backlog, Ready, Done", "The board has no statuses “Todo”, “In Progress”: it has Backlog, Ready, Done.")]
+    [InlineData("", "The board has no statuses “Todo”, “In Progress”, “Done”: it has no statuses.")]
+    public async Task ABoardThatLacksAStatusOfARunFailsAndSaysWhichAndWhatItHas(string has, string text)
+    {
+        machine.Statuses = has.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Equal(
+            new CheckResult("statuses", CheckState.Failed, text, "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board"),
+            Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task TheStatusesAreCheckedByTheNamesOfTheSettings()
+    {
+        store.Current = Project(Rocket) with { Tracker = new TrackerSettings("github", Rocket) { Statuses = new BoardStatuses("Ready", "Doing", "Done") } };
+
+        machine.Statuses = ["Backlog", "READY", "doing", "Done"];
+        Assert.Equal(new CheckResult("statuses", CheckState.Passed, "Backlog, READY, doing, Done"), Of(await RunAsync(), "statuses"));
+
+        machine.Statuses = ["Todo", "In Progress", "Done"];
+        Assert.Equal(
+            new CheckResult("statuses", CheckState.Failed, "The board has no statuses “Ready”, “Doing”: it has Todo, In Progress, Done.", "say which status of the board is which: toobusy init, or work without a board: toobusy init --no-board"),
+            Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task StatusesThatCannotBeReadFailTheirCheck()
+    {
+        machine.Statuses = null;
+
+        Assert.Equal(new CheckResult("statuses", CheckState.Failed, "The statuses of the board cannot be read."), Of(await RunAsync(), "statuses"));
+    }
+
+    [Fact]
+    public async Task TheStatusesAreNotReadWithoutABoardThatPassedItsCheck()
+    {
+        machine.Board = BoardAccess.Unreadable;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
+
+        machine.Board = BoardAccess.Readable;
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the board"), Of(await RunAsync(), "statuses"));
+
+        store.Current = Project(board: null);
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "the project has no board"), Of(await RunAsync(), "statuses"));
+
+        store.Current = null;
+        Assert.Equal(new CheckResult("statuses", CheckState.Skipped, "waits for the settings"), Of(await RunAsync(), "statuses"));
+        Assert.Empty(machine.StatusesOf);
+    }
+
+    [Fact]
+    public async Task EveryLabelOfTheSettingsMustBeInTheRepositoryWhateverItsCase()
+    {
+        machine.Labels = ["Manual", "feature", "needs-owner", "INTERRUPTED", "bug"];
+        Assert.Equal(new CheckResult("labels", CheckState.Passed), Of(await RunAsync(), "labels"));
+
+        machine.Labels = ["manual", "needs-owner"];
+        Assert.Equal(
+            new CheckResult(
+                "labels",
+                CheckState.Failed,
+                "acme/rocket has no labels “feature”, “interrupted”.",
+                "gh label create \"feature\" --repo acme/rocket && gh label create \"interrupted\" --repo acme/rocket"),
+            Of(await RunAsync(), "labels"));
+
+        machine.Labels = ["manual", "needs-owner", "feature"];
+        Assert.Equal(
+            new CheckResult("labels", CheckState.Failed, "acme/rocket has no label “interrupted”.", "gh label create \"interrupted\" --repo acme/rocket"),
+            Of(await RunAsync(), "labels"));
+
+        machine.Labels = null;
+        Assert.Equal(new CheckResult("labels", CheckState.Failed, "The labels of acme/rocket cannot be read."), Of(await RunAsync(), "labels"));
+    }
+
+    [Fact]
+    public async Task TheChecksOfTheMachineAreTheFiveThatNeedNoSettings()
+    {
+        machine.TrackerLogin = TrackerLoginState.LoggedOut;
+
+        var checks = await Checkup.MachineAsync(machine, view, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["git", "GitHub CLI", "GitHub login", "Claude Code", "Claude Code login"], checks.Select(check => check.Name));
+        Assert.Equal(CheckState.Failed, Of(checks, "GitHub login").State);
+    }
+
+    [Theory]
+    [InlineData(Platform.MacOS, true, "brew install gh")]
+    [InlineData(Platform.MacOS, false, "https://github.com/cli/cli#installation")]
+    [InlineData(Platform.Windows, true, "winget install GitHub.cli")]
+    [InlineData(Platform.Windows, false, "https://github.com/cli/cli#installation")]
+    [InlineData(Platform.Linux, false, "https://github.com/cli/cli#installation")]
+    public async Task APackageManagerIsNamedOnlyWhenItIsOnThePath(Platform platform, bool manager, string fix)
+    {
+        (machine.Platform, machine.HasManager) = (platform, manager);
+        machine.Missing.Add(Tool.GitHubCli);
+
+        Assert.Equal(fix, Of(await RunAsync(), "GitHub CLI").Fix);
+    }
+
+    [Theory]
+    [InlineData(Tool.Git, Platform.MacOS, false, "xcode-select --install")]
+    [InlineData(Tool.Git, Platform.MacOS, true, "xcode-select --install")]
+    [InlineData(Tool.Git, Platform.Linux, false, "https://git-scm.com/download/linux")]
+    [InlineData(Tool.Git, Platform.Windows, true, "winget install Git.Git")]
+    [InlineData(Tool.Git, Platform.Windows, false, "https://git-scm.com/download/win")]
+    [InlineData(Tool.GitHubCli, Platform.MacOS, true, "brew install gh")]
+    [InlineData(Tool.GitHubCli, Platform.MacOS, false, "https://github.com/cli/cli#installation")]
+    [InlineData(Tool.GitHubCli, Platform.Linux, false, "https://github.com/cli/cli#installation")]
+    [InlineData(Tool.GitHubCli, Platform.Windows, true, "winget install GitHub.cli")]
+    [InlineData(Tool.GitHubCli, Platform.Windows, false, "https://github.com/cli/cli#installation")]
+    [InlineData(Tool.ClaudeCode, Platform.MacOS, true, "curl -fsSL https://claude.ai/install.sh | bash")]
+    [InlineData(Tool.ClaudeCode, Platform.Linux, false, "curl -fsSL https://claude.ai/install.sh | bash")]
+    [InlineData(Tool.ClaudeCode, Platform.Windows, true, "irm https://claude.ai/install.ps1 | iex")]
+    [InlineData(Tool.ClaudeCode, Platform.Windows, false, "irm https://claude.ai/install.ps1 | iex")]
+    public void EveryToolHasItsFixOnEveryPlatform(Tool tool, Platform platform, bool manager, string fix) =>
+        Assert.Equal(fix, Fixes.Install(tool, platform, manager));
+
+    [Fact]
+    public async Task AManagerIsLookedForOnlyWhereTheFixDependsOnIt()
+    {
+        machine.Missing.Add(Tool.Git);
+        machine.Missing.Add(Tool.ClaudeCode);
+
+        await RunAsync();
+
+        Assert.Equal(0, machine.ManagerAsked);
+    }
+
+    [Fact]
+    public async Task TheSkillOfTheSettingsMustBeThere()
+    {
+        store.Current = Project(Rocket) with { Session = new SessionSettings("task-auto") };
+        Assert.Equal(
+            new CheckResult(
+                "skill",
+                CheckState.Failed,
+                "There is no skill “task-auto”: a session that starts with it would do nothing.",
+                "write .claude/skills/task-auto/SKILL.md, as `toobusy about` tells, or name no skill: toobusy init --no-skill"),
+            Of(await RunAsync(), "skill"));
+
+        machine.Skills!.Add("task-auto");
+        Assert.Equal(new CheckResult("skill", CheckState.Passed, ".claude/skills/task-auto/SKILL.md"), Of(await RunAsync(), "skill"));
+        Assert.Contains("start skill", view.Told);
+    }
+
+    [Fact]
+    public async Task ASkillThatCannotBeLookedForPassesAndSaysSo()
+    {
+        store.Current = Project(Rocket) with { Session = new SessionSettings("toolbox:task-auto") };
+        machine.Skills = null;
+
+        Assert.Equal(new CheckResult("skill", CheckState.Passed, "toolbox:task-auto, a skill of a plugin: it is not looked for"), Of(await RunAsync(), "skill"));
+    }
+
+    [Fact]
+    public async Task WithoutSettingsTheSkillWaitsForThem()
+    {
+        store.Current = null;
+
+        Assert.Equal(new CheckResult("skill", CheckState.Skipped, "waits for the settings"), Of(await RunAsync(), "skill"));
+    }
+
+    Task<IReadOnlyList<CheckResult>> RunAsync(string? origin = "acme/rocket") =>
+        new Checkup(machine, store, origin).RunAsync(view, TestContext.Current.CancellationToken);
+
+    static CheckResult Of(IReadOnlyList<CheckResult> checks, string name)
+    {
+        var check = Assert.Single(checks, check => check.Name == name);
+        return check;
+    }
+
+    static ProjectSettings Project(string? board) => new(
+        new TrackerSettings(SettingsKeys.GitHubTracker, board),
+        new QueueSettings(new LabelSettings(["manual"], ["feature"], "needs-owner", "interrupted")),
+        new AssistantSettings(SettingsKeys.ClaudeCodeAssistant));
+
+    // A Mac with Homebrew where everything is installed, logged in and readable, until a test says otherwise.
+    sealed class FakeCheckupMachine : ICheckupMachine
+    {
+        public Platform Platform { get; set; } = Platform.MacOS;
+
+        public HashSet<Tool> Missing { get; } = [];
+
+        // The tools that are there and could not be started, with why.
+        public Dictionary<Tool, string> Unstarted { get; } = [];
+
+        // The tools that run and are newer than toobusy was written against, with the version it was.
+        public Dictionary<Tool, string> WrittenAgainst { get; } = [];
+
+        public bool HasManager { get; set; } = true;
+
+        public int ManagerAsked { get; private set; }
+
+        public TrackerLoginState TrackerLogin { get; set; } = TrackerLoginState.LoggedIn;
+
+        public bool AssistantLoggedIn { get; set; } = true;
+
+        public bool RepositoryReadable { get; set; } = true;
+
+        public BoardAccess Board { get; set; } = BoardAccess.Readable;
+
+        public List<string> Boards { get; } = [];
+
+        // What the board calls its statuses; null is a board whose statuses cannot be read.
+        public IReadOnlyList<string>? Statuses { get; set; } = ["Todo", "In Progress", "Done"];
+
+        // The boards whose statuses were asked for.
+        public List<string> StatusesOf { get; } = [];
+
+        public IReadOnlyList<string>? Labels { get; set; } = ["manual", "feature", "needs-owner", "interrupted"];
+
+        public Task<ToolLook> FindAsync(Tool tool, CancellationToken cancellationToken) =>
+            Task.FromResult(new ToolLook(!Missing.Contains(tool) && !Unstarted.ContainsKey(tool), Unstarted.GetValueOrDefault(tool)) { WrittenAgainst = WrittenAgainst.GetValueOrDefault(tool) });
+
+        public Task<bool> HasManagerAsync(CancellationToken cancellationToken)
+        {
+            ManagerAsked++;
+            return Task.FromResult(HasManager);
+        }
+
+        public Task<TrackerLoginState> CheckTrackerLoginAsync(CancellationToken cancellationToken) => Task.FromResult(TrackerLogin);
+
+        public Task<bool> AssistantLoggedInAsync(CancellationToken cancellationToken) => Task.FromResult(AssistantLoggedIn);
+
+        public Task<bool> CanReadRepositoryAsync(string repository, CancellationToken cancellationToken) => Task.FromResult(RepositoryReadable);
+
+        public Task<BoardAccess> CheckBoardAsync(string board, CancellationToken cancellationToken)
+        {
+            Boards.Add(board);
+            return Task.FromResult(Board);
+        }
+
+        public Task<IReadOnlyList<string>?> ReadStatusesAsync(string board, CancellationToken cancellationToken)
+        {
+            StatusesOf.Add(board);
+            return Task.FromResult(Statuses);
+        }
+
+        public Task<IReadOnlyList<string>?> ReadLabelsAsync(string repository, CancellationToken cancellationToken) => Task.FromResult(Labels);
+
+        // The skills that are written; null is a skill that cannot be looked for.
+        public HashSet<string>? Skills { get; set; } = [];
+
+        public SkillLook FindSkill(string name) => new(Skills?.Contains(name), $".claude/skills/{name}/SKILL.md");
+    }
+
+    sealed class Watched : ICheckupView
+    {
+        public List<string> Told { get; } = [];
+
+        public void Start(string name) => Told.Add($"start {name}");
+
+        public void Done(CheckResult result) => Told.Add($"done {result.Name}");
+    }
+}

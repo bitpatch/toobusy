@@ -1,21 +1,10 @@
 # Contributing
 
-toobusy is at an early stage: the design is still being written down, so please open an issue to discuss a change before you start on it.
+toobusy is a small project, and help is always welcome.
 
-## Setting up
+- Have an idea of what it lacks or what it should do differently? Open an issue and tell.
+- Found a bug? Open an issue. Know how to fix it? Open a pull request.
+- Have Linux at hand? Only macOS is tried by hand. Build toobusy there, try it and write what came of it.
+- Want toobusy on Windows? It does not run there yet: [#89](https://github.com/bitpatch/toobusy/issues/89) lists what it needs.
 
-Install the [.NET 10 SDK](https://dotnet.microsoft.com/download), then:
-
-```sh
-dotnet build
-dotnet test
-```
-
-## Before you open a pull request
-
-- `dotnet build` passes; warnings are errors.
-- `dotnet test` passes, and new behaviour has tests.
-- `dotnet format --verify-no-changes` passes.
-- The change follows [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), the dependency rules and the Native AOT constraints in particular.
-
-Everything in the repository is written in English.
+Development happens on `develop`: branch from it and open pull requests against it. `main` holds released code only.

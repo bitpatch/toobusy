@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/TooBusy.Assistants.ClaudeCode/TooBusy.Assistants.ClaudeCode.csproj" />
+  </ItemGroup>
+
+</Project>

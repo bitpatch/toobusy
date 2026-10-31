@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/TooBusy.Core/TooBusy.Core.csproj" />
+  </ItemGroup>
+
+</Project>

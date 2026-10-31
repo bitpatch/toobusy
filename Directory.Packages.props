@@ -4,10 +4,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.14" />
+    <PackageVersion Include="Tomlyn" Version="2.10.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
 </Project>

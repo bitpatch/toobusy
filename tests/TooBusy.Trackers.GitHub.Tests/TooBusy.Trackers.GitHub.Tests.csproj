@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/TooBusy.Trackers.GitHub/TooBusy.Trackers.GitHub.csproj" />
+  </ItemGroup>
+
+</Project>

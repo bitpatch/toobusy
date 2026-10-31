@@ -6,7 +6,9 @@ TestResults/
 *.suo
 .vs/
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .DS_Store
 
 # Local assistant state

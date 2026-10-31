@@ -1,0 +1,73 @@
+using System.Runtime.InteropServices;
+using TooBusy.Cli.Terminal;
+using TooBusy.Core.Processes;
+using TooBusy.Core.Run;
+using TooBusy.Infrastructure.Machine;
+using TooBusy.Infrastructure.Processes;
+using TooBusy.Infrastructure.Settings;
+
+namespace TooBusy.Cli;
+
+// Where the tool runs: the folder it is started in and the streams it talks through.
+// The defaults are those of a run without a terminal and without the machine around it: no colour, nobody to ask,
+// no commands to run and no variables of the environment.
+public sealed record CliContext(string Folder, TextWriter Output, TextWriter Error)
+{
+    public Palette OutputPalette { get; init; } = Palette.None;
+
+    public Palette ErrorPalette { get; init; } = Palette.None;
+
+    // The terminal to open a screen in; null when the tool does not talk to one.
+    public TerminalDevice? Terminal { get; init; }
+
+    // The home folder of the user, to show folders from `~`; empty when it is not known.
+    public string Home { get; init; } = "";
+
+    // Runs the commands of the machine; null when there are none to run.
+    public IProcessRunner? Processes { get; init; }
+
+    // The folder of the user's own settings, where the choices of the user are kept; null when there is none.
+    public string? PersonalFolder { get; init; }
+
+    // The time a run goes by; a test gives one that does not make it wait.
+    public IClock Clock { get; init; } = new SystemClock();
+
+    // The variables of the environment by their names, such as `CLAUDE_CONFIG_DIR`, where Claude Code keeps its
+    // folder; null for one that is not set.
+    public Func<string, string?> Variables { get; init; } = _ => null;
+
+    // Whether an error the tool did not foresee is printed with where it happened, for a report of the bug:
+    // `TOOBUSY_TRACE=1` asks for it.
+    public bool Trace { get; init; }
+
+    // The tool as the process has it; `terminal` is what writes to the terminal, which says when it went away.
+    public static CliContext OfProcess(TerminalWriter? terminal) => new(Environment.CurrentDirectory, Console.Out, Console.Error)
+    {
+        OutputPalette = Palette.Detect(!Console.IsOutputRedirected, Environment.GetEnvironmentVariable),
+        ErrorPalette = Palette.Detect(!Console.IsErrorRedirected, Environment.GetEnvironmentVariable),
+        Terminal = Console.IsInputRedirected || Console.IsOutputRedirected
+            ? null
+            : new TerminalDevice(
+                () => Console.ReadKey(intercept: true),
+                () => (Console.WindowWidth is > 0 and var width ? width : 80, Console.WindowHeight is > 0 and var height ? height : 24))
+            {
+                KeyWaiting = () => Console.KeyAvailable,
+                TakeControlC = taken => Console.TreatControlCAsInput = taken,
+                WatchSize = changed => OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGWINCH, _ => changed()),
+                Every = (time, tick) => new Timer(_ => tick(), null, time, time),
+                Lost = () => terminal?.Lost,
+            },
+        Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Processes = new ProcessRunner(),
+        PersonalFolder = PersonalSettingsFile.FindFolder(Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+        Variables = Environment.GetEnvironmentVariable,
+        Trace = Environment.GetEnvironmentVariable("TOOBUSY_TRACE") == "1",
+    };
+
+    // The folder as people write it: from `~` when it is under the home folder.
+    public string Shorten(string path) =>
+        Home.Length == 0 ? path
+        : path == Home ? "~"
+        : path.StartsWith(Home + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? "~" + path[Home.Length..]
+        : path;
+}

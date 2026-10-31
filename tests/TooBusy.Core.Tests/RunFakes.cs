@@ -1,0 +1,803 @@
+using TooBusy.Core.Queue;
+using TooBusy.Core.Run;
+
+namespace TooBusy.Core.Tests;
+
+// A clock that moves only when somebody waits: a delay takes no time of the test, and what is planned for a moment
+// happens when the clock passes it. A run that never ends is stopped after two days of its own time; one that goes
+// round waiting for no time never gets there, and the budget stops it.
+sealed class FakeClock : IClock
+{
+    public static readonly DateTimeOffset Start = new(2030, 1, 1, 9, 0, 0, TimeSpan.Zero);
+
+    readonly List<(DateTimeOffset At, Action Do)> planned = [];
+
+    // How many waits in a row did not move the clock.
+    int still;
+
+    public DateTimeOffset Now { get; private set; } = Start;
+
+    // Plans something for the moment that is this long after the start.
+    public void At(TimeSpan after, Action action) => planned.Add((Start + after, action));
+
+    public Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        still = time > TimeSpan.Zero ? 0 : still + 1;
+        Budget.Spend(still, "waits in a row for no time");
+        Now += time;
+        Assert.True(Now - Start < TimeSpan.FromDays(2), "The run did not end in two days of its own time.");
+        foreach (var due in planned.Where(plan => plan.At <= Now).OrderBy(plan => plan.At).ToList())
+        {
+            planned.Remove(due);
+            due.Do();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
+}
+
+// Time for what goes on side by side: the flows of a run take turns on one thread, so that the fakes need no locks and a
+// test comes out the same every time. Whatever can go on goes on, and the clock moves only when everything waits, to the
+// first moment something waits for; what is planned for a moment happens then. A run that never ends is stopped after
+// two days of its own time.
+sealed class TurnClock : SynchronizationContext, IClock
+{
+    sealed record Sleeper(DateTimeOffset At, TaskCompletionSource Done, CancellationToken Token);
+
+    readonly Queue<(SendOrPostCallback Callback, object? State)> ready = new();
+    readonly List<Sleeper> asleep = [];
+    readonly List<(DateTimeOffset At, Action Do)> planned = [];
+
+    public DateTimeOffset Now { get; private set; } = FakeClock.Start;
+
+    // Plans something for the moment that is this long after the start.
+    public void At(TimeSpan after, Action action) => planned.Add((FakeClock.Start + after, action));
+
+    public override void Post(SendOrPostCallback d, object? state) => ready.Enqueue((d, state));
+
+    public Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var done = new TaskCompletionSource();
+        asleep.Add(new Sleeper(Now + time, done, cancellationToken));
+        return done.Task;
+    }
+
+    // Goes on with what `doing` starts until it is over.
+    public T Run<T>(Func<Task<T>> doing)
+    {
+        var before = Current;
+        SetSynchronizationContext(this);
+        try
+        {
+            var task = doing();
+            while (!task.IsCompleted)
+            {
+                if (ready.TryDequeue(out var next))
+                {
+                    next.Callback(next.State);
+                    continue;
+                }
+
+                Assert.True(asleep.Count > 0, "The run waits for something that does not come.");
+                var first = asleep.MinBy(sleeper => sleeper.At)!;
+                asleep.Remove(first);
+                Now = first.At > Now ? first.At : Now;
+                Assert.True(Now - FakeClock.Start < TimeSpan.FromDays(2), "The run did not end in two days of its own time.");
+                foreach (var due in planned.Where(plan => plan.At <= Now).OrderBy(plan => plan.At).ToList())
+                {
+                    planned.Remove(due);
+                    due.Do();
+                }
+
+                if (first.Token.IsCancellationRequested)
+                    first.Done.SetCanceled(first.Token);
+                else
+                    first.Done.SetResult();
+            }
+
+            return task.GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SetSynchronizationContext(before);
+        }
+    }
+}
+
+// What ends a run that goes round without waiting, which the two days of the clock do not: a call that a run makes
+// again and again, as a reading of the queue, a look at a session or a wait that does not move the clock, fails the
+// test once it is made far more often than any test needs, instead of keeping the whole run of the tests from ending.
+static class Budget
+{
+    const int Calls = 100_000;
+
+    public static void Spend(int made, string what)
+    {
+        if (made > Calls)
+            Assert.Fail($"The run did not end: {made} {what}.");
+    }
+}
+
+// The tasks of a project in memory. What a run changes is changed here, so that the next reading of the queue shows
+// it, and is remembered in the order it was done.
+sealed class FakeTracker : ITaskTracker
+{
+    public List<QueueTask> Open { get; } = [];
+
+    // What was done, as `status 12 InProgress`, `assign 12`, `label 12 +manual`, `comment 12`, `close 12`.
+    public List<string> Did { get; } = [];
+
+    // What was done to one task, in its order.
+    public IEnumerable<string> DidTo(int number) => Did.Where(did => did.Split(' ')[1] == number.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    public List<(int Number, string Text)> Comments { get; } = [];
+
+    public List<string?> Read { get; } = [];
+
+    // The tasks that are closed, and the numbers of those that were asked for as closed ones.
+    public List<QueueTask> Closed { get; } = [];
+
+    public List<int> Looked { get; } = [];
+
+    // What the tracker refuses, by the first word of what is done: `status`, `assign`, `close`, `read`, or `status 12 Done`.
+    public HashSet<string> Refused { get; } = [];
+
+    // What the tracker does not answer, as GitHub that is away for a moment, by the first word of what is done or by
+    // the whole of it as Refused, with how many times in a row. Such a failure may pass, and says how many there were.
+    public Dictionary<string, int> Unanswered { get; } = [];
+
+    public int Silences { get; private set; }
+
+    // Everything that was asked, answered or not, in its order: a call that is made again is here once for each try.
+    public List<string> Asked { get; } = [];
+
+    // What happens as something is done, before it is: a kill that comes in the middle of it, for one. A call whose
+    // token the kill cancels is cut then, and neither asked nor done.
+    public Action<string>? Doing { get; set; }
+
+    // A tracker that says a task is closed and goes on listing it among the open ones.
+    public bool ForgetsClosing { get; set; }
+
+    public QueueTask Add(int number, string[]? labels = null, BoardStatus status = BoardStatus.Todo, int[]? blockedBy = null, string? title = null, string? milestone = null)
+    {
+        var task = new QueueTask(number, title ?? $"Task {number}", $"https://example.com/{number}", labels ?? ["feature"], status, NameOf(status), blockedBy ?? [], [], milestone);
+        Open.Add(task);
+        return task;
+    }
+
+    public Task<IReadOnlyList<QueueTask>> ReadOpenAsync(string? milestone, CancellationToken cancellationToken)
+    {
+        Read.Add(milestone);
+        Budget.Spend(Read.Count, "readings of the queue");
+        Do("read", cancellationToken);
+        return Task.FromResult<IReadOnlyList<QueueTask>>([.. Open]);
+    }
+
+    public Task<QueueTask?> ReadClosedAsync(int number, CancellationToken cancellationToken)
+    {
+        Looked.Add(number);
+        cancellationToken.ThrowIfCancellationRequested();
+        Ask($"look {number}");
+        if (Refused.Contains("look"))
+            throw new TrackerException($"The tracker refused: look {number}.");
+        return Task.FromResult(Closed.Find(task => task.Number == number));
+    }
+
+    // Closes a task as something else than the run does: a commit of its session, or its owner.
+    public void Shut(int number)
+    {
+        Closed.AddRange(Open.Where(task => task.Number == number));
+        Open.RemoveAll(task => task.Number == number);
+    }
+
+    public Task SetStatusAsync(int number, BoardStatus status, CancellationToken cancellationToken)
+    {
+        Do($"status {number} {status}", cancellationToken);
+        Change(number, task => task with { Status = status, StatusName = NameOf(status) });
+        return Task.CompletedTask;
+    }
+
+    public Task AssignAsync(int number, CancellationToken cancellationToken)
+    {
+        Do($"assign {number}", cancellationToken);
+        return Task.CompletedTask;
+    }
+
+    public Task AddLabelAsync(int number, string label, CancellationToken cancellationToken)
+    {
+        Do($"label {number} +{label}", cancellationToken);
+        Change(number, task => task with { Labels = [.. task.Labels, label] });
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveLabelAsync(int number, string label, CancellationToken cancellationToken)
+    {
+        Do($"label {number} -{label}", cancellationToken);
+        Change(number, task => task with { Labels = [.. task.Labels.Where(has => has != label)] });
+        return Task.CompletedTask;
+    }
+
+    public Task CommentAsync(int number, string text, CancellationToken cancellationToken)
+    {
+        Do($"comment {number}", cancellationToken);
+        Comments.Add((number, text));
+        return Task.CompletedTask;
+    }
+
+    // A closed task blocks no other one any more, as GitHubTasks reads only the open tasks that block a task, and the
+    // test of the filter in GitHubTasksTests pins.
+    public Task CloseAsync(int number, CancellationToken cancellationToken)
+    {
+        Do($"close {number}", cancellationToken);
+        if (ForgetsClosing)
+            return Task.CompletedTask;
+
+        Shut(number);
+        foreach (var task in Open.ToList())
+            Change(task.Number, waiting => waiting with { BlockedBy = [.. waiting.BlockedBy.Where(blocker => blocker != number)] });
+        return Task.CompletedTask;
+    }
+
+    // What a board that GitHub made calls the status, as the tracker reads it: a task that is not on the board has no
+    // status, and one that is in none of the three a run knows is in the backlog.
+    static string NameOf(BoardStatus status) => status switch
+    {
+        BoardStatus.Missing => "",
+        BoardStatus.Other => "Backlog",
+        _ => BoardStatuses.Default.NameOf(status),
+    };
+
+    void Do(string what, CancellationToken cancellationToken)
+    {
+        Doing?.Invoke(what);
+        cancellationToken.ThrowIfCancellationRequested();
+        Ask(what);
+        if (Refused.Contains(what) || Refused.Contains(what.Split(' ')[0]))
+            throw new TrackerException($"The tracker refused: {what}.");
+        if (what != "read")
+            Did.Add(what);
+    }
+
+    void Ask(string what)
+    {
+        Asked.Add(what);
+        foreach (var key in (string[])[what, what.Split(' ')[0]])
+        {
+            if (Unanswered.TryGetValue(key, out var left) && left > 0)
+            {
+                Unanswered[key] = left - 1;
+                throw new TrackerException($"The tracker did not answer: {what} ({++Silences}).", mayPass: true);
+            }
+        }
+    }
+
+    void Change(int number, Func<QueueTask, QueueTask> change)
+    {
+        foreach (var tasks in (List<QueueTask>[])[Open, Closed])
+        {
+            var index = tasks.FindIndex(task => task.Number == number);
+            if (index >= 0)
+                tasks[index] = change(tasks[index]);
+        }
+    }
+}
+
+// An assistant whose sessions are written by the test: what each look at a session shows, act by act.
+sealed class FakeAssistant : IAssistant
+{
+    readonly Dictionary<int, FakeSession> sessions = [];
+
+    public List<SessionStart> Started { get; } = [];
+
+    // The sessions of earlier runs that were asked for, each by what was kept of it.
+    public List<SessionTrace> Found { get; } = [];
+
+    public UsageLimits Limits { get; set; } = UsageLimits.Unknown;
+
+    public string? RefuseToStart { get; set; }
+
+    // What happens as a session is started, before it is: a kill that comes in the middle of it, for one. A start
+    // whose token the kill cancels is cut then.
+    public Action<SessionStart>? Starting { get; set; }
+
+    // Whether a start that was cut off started its session all the same: it is found by the name of the start then.
+    public bool StartsAnyway { get; set; }
+
+    // The starts that were cut off and looked for, each with the moment its session was looked for since.
+    public List<(SessionStart Start, DateTimeOffset Since)> LookedFor { get; } = [];
+
+    // An assistant that has nothing left of the sessions of earlier runs.
+    public bool Gone { get; set; }
+
+    public IEnumerable<FakeSession> Sessions => sessions.Values;
+
+    // The session of a task; one that is not written works for a look and ends with the task done.
+    public FakeSession Session(int task)
+    {
+        if (!sessions.TryGetValue(task, out var session))
+            sessions.Add(task, session = new FakeSession(task));
+        return session;
+    }
+
+    public Task<IAssistantSession> StartAsync(SessionStart start, CancellationToken cancellationToken)
+    {
+        if (RefuseToStart is not null)
+            throw new AssistantException(RefuseToStart);
+
+        Starting?.Invoke(start);
+        cancellationToken.ThrowIfCancellationRequested();
+        Started.Add(start);
+        return Task.FromResult<IAssistantSession>(Session(start.Task).Begin());
+    }
+
+    // A session of an earlier run is the one of the task its conversation is named after, `conversation-5`.
+    public Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken)
+    {
+        Found.Add(trace);
+        return Task.FromResult<IAssistantSession?>(Gone ? null : Session(int.Parse(trace.Conversation!.Split('-')[^1], System.Globalization.CultureInfo.InvariantCulture)).Begin());
+    }
+
+    public Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        LookedFor.Add((start, since));
+        return Task.FromResult<IAssistantSession?>(StartsAnyway ? Session(start.Task).Begin() : null);
+    }
+
+    public UsageLimits ReadLimits() => Limits;
+}
+
+// A session as a play, written by the test with `Works`, `Asks`, `Ends`, `Limit`, `Lost` and `Unseen`, each one or
+// more looks. The rules of the play:
+// - An act is what the looks at the session show one after another. The last look of an act is shown again and
+//   again for as long as the act lasts: `Works()` alone is a session that works until something else happens.
+// - `Then()` opens the act that telling the session something starts. A session that is told something while no
+//   act follows stays in the act it is in.
+// - `WhenAsked()` opens the act that asking the session something starts, wherever the play is; telling it
+//   something never starts that act. A play has one such act at most.
+// - The play starts from its first act whenever the session is started or found: a second run that goes on with
+//   the session sees it from the beginning. A play that the test did not write is a session that works for a look
+//   and ends with the task done.
+// - `Unplayed` says what of the play the run did not come to: an act that was never looked at, or the last look of
+//   the last act. An act may be left before its last look, as when the session is asked to wrap up; the last act
+//   may not. The tests of the run fail over it, so that a play that no longer says what happened cannot pass
+//   unnoticed.
+sealed class FakeSession(int task) : IAssistantSession
+{
+    readonly List<List<(SessionLook Look, Action? Do)>> acts = [[]];
+
+    // The acts that were looked at, whichever run looked, and whether the last look of the play was.
+    readonly HashSet<int> seen = [];
+    bool ended;
+    int? onAsk;
+    int act;
+    int at;
+    int steps;
+
+    // Whether the play is the one a session gets when the test wrote none.
+    bool unwritten;
+
+    // What the session is known by: another name once it went on as a copy.
+    public string Id { get; private set; } = $"fake-{task}";
+
+    public string Open => $"fake attach {Id["fake-".Length..]}";
+
+    public string? Conversation { get; set; } = $"conversation-{task}";
+
+    public SessionTrace Trace => new(Id, Conversation, FakeClock.Start);
+
+    public List<string> Told { get; } = [];
+
+    public List<string> Asked { get; } = [];
+
+    public int Stopped { get; private set; }
+
+    // What happens as the session is stopped, before it is: a kill that comes in the middle of it, for one. A stop
+    // whose token the kill cancels is cut then, and not counted.
+    public Action? Stopping { get; set; }
+
+    // What the assistant says of the session when it still has it as working after it was stopped; null for one that
+    // stops.
+    public string? Unstoppable { get; set; }
+
+    // Why the session does not go on when it is told something; null for one that goes on.
+    public string? Deaf { get; set; }
+
+    // A session that goes on as a copy the next time it is told something: it is known by another name from then
+    // on, with a conversation of its own.
+    public bool Copies { get; set; }
+
+    public int Looks { get; private set; }
+
+    // `odd` is what the assistant cannot make of how the session stands, as a state it does not know.
+    public FakeSession Works(int looks = 1, string step = "Editing a file", Action? and = null, PlanStep[]? plan = null, string? odd = null)
+    {
+        for (var index = 0; index < looks; index++)
+            Add(new SessionLook(SessionPhase.Working, Step: step, Steps: ++steps, Context: 1000 * steps, Plan: plan, Odd: odd), and);
+        return this;
+    }
+
+    // A session that the assistant marks as waiting for an answer; it has reported when its reply ends with the line
+    // for toobusy, as a conversation that the assistant reads says.
+    public FakeSession Asks(string? what = "input needed", string? reply = "Which of the two?") =>
+        Add(new SessionLook(SessionPhase.Asking, Asks: what, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply)));
+
+    public FakeSession Ends(string reply) => Add(new SessionLook(SessionPhase.Ended, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply)));
+
+    public FakeSession Limit(string refusal = "You have hit your usage limit.", SessionPhase phase = SessionPhase.Ended, string? reply = null) =>
+        Add(new SessionLook(phase, Steps: steps, Reply: reply, Limit: refusal, Reported: Outcome.Ends(reply)));
+
+    public FakeSession Lost(string? reply = null, string? odd = null) => Add(new SessionLook(SessionPhase.Lost, Steps: steps, Reply: reply, Reported: Outcome.Ends(reply), Odd: odd));
+
+    public FakeSession Unseen(int looks = 1, Action? and = null)
+    {
+        for (var index = 0; index < looks; index++)
+            Add(new SessionLook(SessionPhase.Unseen), and);
+        return this;
+    }
+
+    // What follows is shown after the session is told something.
+    public FakeSession Then()
+    {
+        acts.Add([]);
+        return this;
+    }
+
+    // What follows is shown after the session is asked something.
+    public FakeSession WhenAsked()
+    {
+        acts.Add([]);
+        onAsk = acts.Count - 1;
+        return this;
+    }
+
+    public FakeSession Begin()
+    {
+        if (acts[0].Count == 0)
+        {
+            unwritten = true;
+            Works().Ends("Did it.\nTOOBUSY: done");
+        }
+
+        (act, at) = (0, 0);
+        return this;
+    }
+
+    // What of the play was not shown, in words; null for a play that was shown to its end, and for one the test did
+    // not write.
+    public string? Unplayed
+    {
+        get
+        {
+            if (unwritten || acts[0].Count == 0)
+                return null;
+            if (Enumerable.Range(0, acts.Count).FirstOrDefault(index => !seen.Contains(index), -1) is var missed and >= 0)
+                return $"act {missed + 1} of {acts.Count} of the session of #{task} was never looked at";
+            return ended ? null : $"the last look of the session of #{task} was never shown";
+        }
+    }
+
+    public Task<SessionLook> LookAsync(CancellationToken cancellationToken)
+    {
+        Budget.Spend(++Looks, $"looks at the session of #{task}");
+        seen.Add(act);
+        var (look, and) = acts[act][Math.Min(at++, acts[act].Count - 1)];
+        ended |= act == acts.Count - 1 && at >= acts[act].Count;
+        and?.Invoke();
+        return Task.FromResult(look);
+    }
+
+    public Task<Telling> TellAsync(string message, CancellationToken cancellationToken)
+    {
+        Told.Add(message);
+        if (Deaf is { } why)
+            return Task.FromResult(new Telling(why));
+
+        var copied = Copies;
+        if (copied)
+        {
+            Id = $"fake-{task}-copy";
+            Conversation = $"copy-{task}";
+            Copies = false;
+        }
+
+        // The acts written for a question that is asked are not those of a session that is told.
+        var next = act + 1;
+        if (next < acts.Count && next != onAsk)
+            (act, at) = (next, 0);
+        return Task.FromResult(copied ? Telling.Copied : Telling.WentOn);
+    }
+
+    public Task AskAsync(string message, CancellationToken cancellationToken)
+    {
+        Asked.Add(message);
+        if (onAsk is { } asked)
+            (act, at) = (asked, 0);
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        Stopping?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
+        Stopped++;
+        return Unstoppable is { } working ? Task.FromException(new AssistantException(working)) : Task.CompletedTask;
+    }
+
+    FakeSession Add(SessionLook look, Action? and = null)
+    {
+        acts[^1].Add((look, and));
+        return this;
+    }
+}
+
+// The working copy as the test says it is: the states that are waiting are given one after another, and after them
+// the one that stands. A sync of its branch comes out as the test says, in the same way, and is counted.
+sealed class FakeWorkspace : IWorkspace
+{
+    public WorkspaceState? State { get; set; } = new(0, 0);
+
+    public Queue<WorkspaceState?> Next { get; } = new();
+
+    public int Read { get; private set; }
+
+    public BranchSync Sync { get; set; } = new(SyncStatus.Level, "origin/develop");
+
+    public Queue<BranchSync> Syncs { get; } = new();
+
+    public int Synced { get; private set; }
+
+    // What happens when the branch is brought up to date, for a test that looks at what was done before it.
+    public Action? Syncing { get; set; }
+
+    // What a reading of the working copy throws, as a bug would; null while it reads.
+    public Exception? Failure { get; set; }
+
+    public Task<WorkspaceState?> ReadAsync(CancellationToken cancellationToken)
+    {
+        Read++;
+        if (Failure is not null)
+            throw Failure;
+        return Task.FromResult(Next.Count > 0 ? Next.Dequeue() : State);
+    }
+
+    public Task<BranchSync> SyncAsync(CancellationToken cancellationToken)
+    {
+        Synced++;
+        Syncing?.Invoke();
+        return Task.FromResult(Syncs.Count > 0 ? Syncs.Dequeue() : Sync);
+    }
+}
+
+// The shell of the machine: every command passes, but for those the test gives another end. A command takes as long
+// of the clock as the test says, and what is planned for that time happens while it runs.
+sealed class FakeCommands(IClock clock) : IProjectCommands
+{
+    // The commands that were run, each with the number of the task it was told and the time it was given.
+    public List<(string Command, string Task, TimeSpan Time)> Ran { get; } = [];
+
+    public List<IReadOnlyDictionary<string, string>> Told { get; } = [];
+
+    public Dictionary<string, CommandEnd> Ends { get; } = [];
+
+    public TimeSpan Takes { get; set; } = TimeSpan.FromSeconds(2);
+
+    // Something that happens as a command starts.
+    public Action<string>? Running { get; set; }
+
+    public async Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken)
+    {
+        Ran.Add((command, environment["TOOBUSY_TASK"], time));
+        Told.Add(environment);
+        Running?.Invoke(command);
+        await clock.DelayAsync(Takes, cancellationToken);
+        return Ends.GetValueOrDefault(command, new CommandEnd(CommandStatus.Exited, 0, ""));
+    }
+}
+
+sealed class FakeMachine : IMachine
+{
+    public bool Awake { get; private set; }
+
+    public int Kept { get; private set; }
+
+    public List<string> Notified { get; } = [];
+
+    public IDisposable KeepAwake()
+    {
+        Kept++;
+        Awake = true;
+        return new Release(this);
+    }
+
+    public void Notify(string text) => Notified.Add(text);
+
+    sealed class Release(FakeMachine machine) : IDisposable
+    {
+        public void Dispose() => machine.Awake = false;
+    }
+}
+
+sealed class FakeState : IRunState
+{
+    public TaskRecord? Record { get; set; }
+
+    // Every record that was written, in its order; null is a record that was forgotten.
+    public List<TaskRecord?> Written { get; } = [];
+
+    // What a record that is written, and one that is forgotten, fails with, as a full disk; null while it works.
+    public LocalStateException? Unwritable { get; set; }
+
+    public LocalStateException? Unclearable { get; set; }
+
+    public TaskRecord? Load() => Record;
+
+    public void Save(TaskRecord record)
+    {
+        if (Unwritable is not null)
+            throw Unwritable;
+        Written.Add(Record = record);
+    }
+
+    public void Clear()
+    {
+        if (Unclearable is not null)
+            throw Unclearable;
+        if (Record is not null)
+            Written.Add(Record = null);
+    }
+}
+
+// The git worktrees of a run: what is made and what is taken away, and the working copies as the test says they are,
+// each with a fake of its own. The assistant is one, as it is one account.
+sealed class FakeCopies(FakeAssistant assistant, IClock clock) : IWorkingCopies
+{
+    readonly Dictionary<int, WorkingCopy> copies = [];
+
+    // What the branch of the tasks follows; null for a branch without an upstream.
+    public Upstream? Followed { get; set; } = new("origin", "develop");
+
+    // The branches that were asked for what they follow.
+    public List<string> Asked { get; } = [];
+
+    public List<int> Made { get; } = [];
+
+    public List<int> Removed { get; } = [];
+
+    // What a worktree that cannot be made is refused with; null while they are made.
+    public string? Unmakeable { get; set; }
+
+    public FakeWorkspace Workspace(int task) => (FakeWorkspace)Copy(task).Workspace;
+
+    public FakeState State(int task) => (FakeState)Copy(task).State;
+
+    public FakeCommands Shell(int task) => (FakeCommands)Copy(task).Shell;
+
+    // A worktree an earlier run left.
+    public WorkingCopy Left(int task, TaskRecord? record = null)
+    {
+        State(task).Record = record;
+        Found.Add(Copy(task));
+        return Copy(task);
+    }
+
+    List<WorkingCopy> Found { get; } = [];
+
+    WorkingCopy Copy(int task)
+    {
+        if (!copies.TryGetValue(task, out var copy))
+        {
+            var folder = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"/worktrees/{task}");
+            copies.Add(task, copy = new WorkingCopy(folder, new FakeWorkspace(), new FakeState(), new FakeCommands(clock), assistant)
+            {
+                Landing = new Landing(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"toobusy/{task}"), Followed ?? new Upstream("origin", "develop")),
+            });
+        }
+
+        return copy;
+    }
+
+    public Task<IReadOnlyList<WorkingCopy>> FindAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<WorkingCopy>>([.. Found]);
+
+    public Task<Upstream?> FollowedAsync(string branch, CancellationToken cancellationToken)
+    {
+        Asked.Add(branch);
+        return Task.FromResult(Followed);
+    }
+
+    public Task<WorkingCopy> MakeAsync(int task, Upstream onto, CancellationToken cancellationToken)
+    {
+        if (Unmakeable is { } why)
+            throw new LocalStateException(why);
+
+        Made.Add(task);
+        return Task.FromResult(Copy(task));
+    }
+
+    public Task RemoveAsync(WorkingCopy copy, CancellationToken cancellationToken)
+    {
+        Removed.Add(int.Parse(copy.Folder.Split('/')[^1], System.Globalization.CultureInfo.InvariantCulture));
+        return Task.CompletedTask;
+    }
+}
+
+// What a run said and showed.
+// The sign of a run: what stood on it, in its order, null where it was taken down. `Other` is the sign of another
+// run that goes on.
+sealed class FakeSign : IRunSign
+{
+    public RunSign? Other { get; set; }
+
+    public List<RunSign?> Written { get; } = [];
+
+    // What putting the sign up, saying anew what it says and taking it down fail with; null while they work. A
+    // change that fails is counted.
+    public LocalStateException? Unraisable { get; set; }
+
+    public LocalStateException? Unwritable { get; set; }
+
+    public LocalStateException? Unlowerable { get; set; }
+
+    public int Refused { get; private set; }
+
+    public RunSign? Raise(RunSign sign)
+    {
+        if (Other is not null)
+            return Other;
+        if (Unraisable is not null)
+            throw Unraisable;
+
+        Written.Add(sign);
+        return null;
+    }
+
+    public void Change(RunSign sign)
+    {
+        if (Unwritable is not null)
+        {
+            Refused++;
+            throw Unwritable;
+        }
+
+        Written.Add(sign);
+    }
+
+    public void Lower()
+    {
+        if (Unlowerable is not null)
+            throw Unlowerable;
+        Written.Add(null);
+    }
+}
+
+sealed class Log : IRunView
+{
+    public List<string> Lines { get; } = [];
+
+    public List<RunStatus> Statuses { get; } = [];
+
+    // The tasks that were told to be over, each as its number, its mark and the seconds it took.
+    public List<(int Task, RunMark Mark, int Seconds)> Ends { get; } = [];
+
+    public string Text => string.Join('\n', Lines);
+
+    // The lines as they were said, with what a screen does not show of them.
+    public List<RunLine> Said { get; } = [];
+
+    public void Say(RunLine line)
+    {
+        Lines.Add(line.ToString());
+        Said.Add(line);
+    }
+
+    public void Report(TaskEnd ended) => Ends.Add((ended.Task.Number, ended.Mark, (int)ended.Took.TotalSeconds));
+
+    public void Show(RunStatus status) => Statuses.Add(status);
+
+    // What only the log on disk keeps.
+    public List<string> Traces { get; } = [];
+
+    public void Trace(string text) => Traces.Add(text);
+}

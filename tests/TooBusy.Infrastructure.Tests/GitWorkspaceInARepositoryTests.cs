@@ -1,0 +1,315 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using TooBusy.Core.Processes;
+using TooBusy.Core.Run;
+using TooBusy.Infrastructure.Git;
+using TooBusy.Infrastructure.Processes;
+using TooBusy.Infrastructure.Run;
+
+namespace TooBusy.Infrastructure.Tests;
+
+// The working copy through the real `git`: a remote that is a bare repository of the test, the working copy of a
+// run cloned from it, and another clone that pushes to it meanwhile. Neither git of the test nor that of the tool
+// reads the configuration of the machine, so that a global `url.<base>.insteadOf`, `fetch.*`, `core.fsmonitor` or
+// `init.templateDir` changes nothing here. A machine without git skips these tests and says why.
+public sealed class GitWorkspaceInARepositoryTests : IDisposable
+{
+    static readonly (string Name, string Value)[] Unconfigured = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1")];
+
+    static readonly bool Installed = CanStart();
+
+    readonly DirectoryInfo folder;
+    readonly string remote;
+    readonly string work;
+    readonly string other;
+    readonly GitWorkspace workspace;
+
+    public GitWorkspaceInARepositoryTests()
+    {
+        Assert.SkipUnless(Installed, "git cannot be started, and these tests run the real one.");
+
+        folder = Directory.CreateTempSubdirectory("toobusy-git-");
+        remote = Path.Combine(folder.FullName, "remote.git");
+        work = Path.Combine(folder.FullName, "work");
+        other = Path.Combine(folder.FullName, "other");
+
+        Git(folder.FullName, "init", "--quiet", "--bare", "--initial-branch=develop", remote);
+        Git(folder.FullName, "init", "--quiet", "--initial-branch=develop", other);
+        Configure(other);
+        Commit(other, "first");
+        Git(other, "remote", "add", "origin", remote);
+        Git(other, "push", "--quiet", "--set-upstream", "origin", "develop");
+        Git(folder.FullName, "clone", "--quiet", remote, work);
+        Configure(work);
+        workspace = new GitWorkspace(new UnconfiguredProcesses(new ProcessRunner()), work);
+    }
+
+    public void Dispose() => folder.Delete(recursive: true);
+
+    [Fact]
+    public async Task ABranchThatHasWhatItsUpstreamHasStaysAsItIs()
+    {
+        var sync = await workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new BranchSync(SyncStatus.Level, "origin/develop"), sync);
+        Assert.Equal(new WorkspaceState(0, 0) { Branch = "develop" }, await workspace.ReadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ABranchThatLacksWhatWasPushedIsMovedForwardToIt()
+    {
+        Commit(other, "second");
+        Commit(other, "third");
+        Git(other, "push", "--quiet");
+
+        var sync = await workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new BranchSync(SyncStatus.Moved, "origin/develop", 0, 2), sync);
+        Assert.Equal(Git(other, "rev-parse", "HEAD"), Git(work, "rev-parse", "HEAD"));
+        Assert.Equal(new WorkspaceState(0, 0) { Branch = "develop" }, await workspace.ReadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ABranchWithCommitsOfItsOwnIsNotMoved()
+    {
+        Commit(work, "mine");
+        var head = Git(work, "rev-parse", "HEAD");
+
+        var sync = await workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new BranchSync(SyncStatus.Ahead, "origin/develop", 1, 0), sync);
+        Assert.Equal(head, Git(work, "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public async Task ABranchThatPartedFromItsUpstreamIsNotMoved()
+    {
+        Commit(work, "mine");
+        var head = Git(work, "rev-parse", "HEAD");
+        Commit(other, "theirs");
+        Commit(other, "theirs again");
+        Git(other, "push", "--quiet");
+
+        var sync = await workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new BranchSync(SyncStatus.Parted, "origin/develop", 1, 2), sync);
+        Assert.Equal(head, Git(work, "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public async Task ABranchWithoutAnUpstreamHasNothingToBeBroughtUpToDateWith()
+    {
+        Git(work, "switch", "--quiet", "--create", "scratch");
+
+        Assert.Equal(new BranchSync(SyncStatus.NoUpstream), await workspace.SyncAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(new WorkspaceState(0, 0) { Branch = "scratch" }, await workspace.ReadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ARemoteThatIsNotThereLeavesTheBranchAsItIsAndSaysWhatGitSaid()
+    {
+        Directory.Delete(remote, recursive: true);
+
+        var sync = await workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(SyncStatus.Unreachable, sync.Status);
+        Assert.Equal("origin/develop", sync.Upstream);
+        Assert.NotEqual("", sync.Said);
+    }
+
+    [Fact]
+    public async Task ADetachedHeadIsOnNoBranch()
+    {
+        Git(work, "switch", "--quiet", "--detach");
+
+        Assert.Null((await workspace.ReadAsync(TestContext.Current.CancellationToken))!.Branch);
+    }
+
+    // The worktrees of a run of several sessions, over the same repositories.
+    GitWorktrees Worktrees() =>
+        new(new UnconfiguredProcesses(new ProcessRunner()), work, (path, landing) => new WorkingCopy(path, new GitWorkspace(new UnconfiguredProcesses(new ProcessRunner()), path), LocalFolder.State(path), new NoCommands(), new NoAssistant()) { Landing = landing });
+
+    static readonly Upstream Develop = new("origin", "develop");
+
+    [Fact]
+    public async Task ABranchSaysWhatItFollowsOnTheRemote()
+    {
+        Assert.Equal(Develop, await Worktrees().FollowedAsync("develop", TestContext.Current.CancellationToken));
+
+        Git(work, "switch", "--quiet", "--create", "scratch");
+        Assert.Null(await Worktrees().FollowedAsync("scratch", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AWorktreeStandsOnABranchOfItsOwnThatFollowsTheBranchOfTheTasks()
+    {
+        var copy = await Worktrees().MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new Landing("toobusy/12", Develop), copy.Landing);
+        Assert.Equal(Path.Combine(work, ".toobusy", "local", "worktrees", "12"), copy.Folder);
+        Assert.Equal(new WorkspaceState(0, 0) { Branch = "toobusy/12" }, await copy.Workspace.ReadAsync(TestContext.Current.CancellationToken));
+
+        // The branch of the tasks stays checked out in the working copy, whose tree stays clean.
+        Assert.Equal(new WorkspaceState(0, 0) { Branch = "develop" }, await workspace.ReadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AWorktreeIsBroughtUpToDateWithWhatWasPushedSince()
+    {
+        var copy = await Worktrees().MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+        Commit(other, "second");
+        Git(other, "push", "--quiet");
+
+        var sync = await copy.Workspace.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new BranchSync(SyncStatus.Moved, "origin/develop", 0, 1), sync);
+        Assert.Equal(Git(other, "rev-parse", "HEAD"), Git(copy.Folder, "rev-parse", "HEAD"));
+    }
+
+    [Fact]
+    public async Task WhatASessionPushesToTheBranchOfTheTasksIsPushedForTheWorktree()
+    {
+        var copy = await Worktrees().MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+        Commit(copy.Folder, "the work");
+        Assert.Equal(1, (await copy.Workspace.ReadAsync(TestContext.Current.CancellationToken))!.Unpushed);
+
+        // As the first message of the session says: a plain push is refused, and this one pushes nothing of its.
+        Assert.ThrowsAny<Exception>(() => Git(copy.Folder, "push", "--quiet"));
+        Git(copy.Folder, "push", "--quiet", "origin", "develop");
+        Assert.Equal(1, (await copy.Workspace.ReadAsync(TestContext.Current.CancellationToken))!.Unpushed);
+
+        Git(copy.Folder, "push", "--quiet", "origin", "HEAD:develop");
+        Assert.Equal(0, (await copy.Workspace.ReadAsync(TestContext.Current.CancellationToken))!.Unpushed);
+    }
+
+    [Fact]
+    public async Task AWorktreeIsTakenAwayWithItsBranchAndWhatARunKeepsInIt()
+    {
+        var worktrees = Worktrees();
+        var copy = await worktrees.MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+        LocalFolder.Ensure(copy.Folder);
+        File.WriteAllText(Path.Combine(LocalFolder.Of(copy.Folder), "usage.json"), "{}");
+
+        await worktrees.RemoveAsync(copy, TestContext.Current.CancellationToken);
+
+        Assert.False(Directory.Exists(copy.Folder));
+        Assert.DoesNotContain("toobusy/12", Git(work, "branch", "--list"), StringComparison.Ordinal);
+        Assert.Empty(await worktrees.FindAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AWorktreeWithChangesIsNotTakenAway()
+    {
+        var worktrees = Worktrees();
+        var copy = await worktrees.MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+        File.WriteAllText(Path.Combine(copy.Folder, "changed.txt"), "work");
+
+        var refused = await Assert.ThrowsAsync<LocalStateException>(() => worktrees.RemoveAsync(copy, TestContext.Current.CancellationToken));
+
+        Assert.Contains("cannot be taken away", refused.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(copy.Folder, "changed.txt")));
+    }
+
+    [Fact]
+    public async Task AWorktreeAnEarlierRunLeftIsFoundWithItsRecord()
+    {
+        var made = await Worktrees().MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+        LocalFolder.Ensure(made.Folder);
+        var record = new TaskRecord(12, new SessionTrace("1a2b", "1a2b-c", DateTimeOffset.UnixEpoch), RecordState.Paused);
+        made.State.Save(record);
+
+        var found = Assert.Single(await Worktrees().FindAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(new Landing("toobusy/12", Develop), found.Landing);
+        Assert.Equal(record, found.State.Load());
+        Assert.Equal([record], LocalFolder.Records(work));
+    }
+
+    [Fact]
+    public async Task AWorktreeThatIsThereAlreadyIsNotMadeOver()
+    {
+        var worktrees = Worktrees();
+        await worktrees.MakeAsync(12, Develop, TestContext.Current.CancellationToken);
+
+        var refused = await Assert.ThrowsAsync<LocalStateException>(() => worktrees.MakeAsync(12, Develop, TestContext.Current.CancellationToken));
+
+        Assert.Contains("the worktree of #12 is there already", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AWorktreeThatCannotBeMadeSaysWhatGitSaid()
+    {
+        var refused = await Assert.ThrowsAsync<LocalStateException>(() => Worktrees().MakeAsync(12, new Upstream("origin", "gone"), TestContext.Current.CancellationToken));
+
+        Assert.StartsWith("the worktree of #12 cannot be made: ", refused.Message, StringComparison.Ordinal);
+    }
+
+    sealed class NoCommands : IProjectCommands
+    {
+        public Task<CommandEnd> RunAsync(string command, IReadOnlyDictionary<string, string> environment, TimeSpan time, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(command);
+    }
+
+    sealed class NoAssistant : IAssistant
+    {
+        public Task<IAssistantSession> StartAsync(SessionStart start, CancellationToken cancellationToken) => throw new InvalidOperationException();
+
+        public Task<IAssistantSession?> FindAsync(SessionTrace trace, CancellationToken cancellationToken) => throw new InvalidOperationException();
+
+        public Task<IAssistantSession?> FindStartedAsync(SessionStart start, DateTimeOffset since, CancellationToken cancellationToken) => throw new InvalidOperationException();
+
+        public UsageLimits ReadLimits() => UsageLimits.Unknown;
+    }
+
+    void Configure(string repository)
+    {
+        Git(repository, "config", "user.name", "toobusy");
+        Git(repository, "config", "user.email", "toobusy@example.com");
+        Git(repository, "config", "commit.gpgsign", "false");
+        Git(repository, "config", "core.hooksPath", Path.Combine(folder.FullName, "no-hooks"));
+    }
+
+    static void Commit(string repository, string message) => Git(repository, "commit", "--quiet", "--allow-empty", "--message", message);
+
+    // Runs git and gives what it printed, without the line break at its end; a git that fails fails the test.
+    static string Git(string repository, params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git") { WorkingDirectory = repository, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
+        foreach (var (name, value) in Unconfigured)
+            start.Environment[name] = value;
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
+        return output.Result.TrimEnd('\n');
+    }
+
+    // Whether git can be started on this machine at all.
+    static bool CanStart()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("git", "--version") { RedirectStandardOutput = true, UseShellExecute = false })!;
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return true;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    // The commands of the tool, each started by `env` with the variables that keep git from the configuration of the
+    // machine.
+    sealed class UnconfiguredProcesses(IProcessRunner processes) : IProcessRunner
+    {
+        public Task<ProcessResult> RunAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken) =>
+            processes.RunAsync("env", [.. Unconfigured.Select(variable => $"{variable.Name}={variable.Value}"), command, .. arguments], timeout, cancellationToken);
+
+        public IProcessRunner Inside(string folder) => new UnconfiguredProcesses(processes.Inside(folder));
+    }
+}
