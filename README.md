@@ -16,16 +16,7 @@ brew install bitpatch/tap/toobusy
 
 `brew upgrade toobusy` brings a new version.
 
-Without Homebrew, ready binaries are in the [GitHub releases](https://github.com/bitpatch/toobusy/releases/latest). On a Mac with Apple Silicon:
-
-```sh
-curl -fsSL https://github.com/bitpatch/toobusy/releases/latest/download/toobusy-macos-arm64.tar.gz | tar -xz
-sudo mkdir -p /usr/local/bin
-sudo mv toobusy /usr/local/bin/
-toobusy --version
-```
-
-Download with `curl`: the binaries are not signed, and macOS will not run a file from a browser.
+Without Homebrew, ready binaries are in the [GitHub releases](https://github.com/bitpatch/toobusy/releases/latest).
 
 `toobusy doctor` tells you what is missing. In short, you need Claude Code, GitHub CLI and Git.
 
