@@ -26,8 +26,6 @@ On another machine, put the name of its archive into the first command:
 | Linux, x64 | `toobusy-linux-x64.tar.gz` |
 | Linux, arm64 | `toobusy-linux-arm64.tar.gz` |
 
-The first release is not out yet: until then these links lead nowhere, and the way is to build from source, as said below.
-
 Only macOS is tested so far. The Linux binaries are built and start, and that is all that is known of them. They need glibc 2.34 or newer, as on Ubuntu 22.04, Debian 12 or RHEL 9, so they do not run on Alpine.
 
 Download with `curl`, as above, and not in a browser. The binaries are not signed yet, and macOS refuses to open one that came through a browser. If that happened, `xattr -d com.apple.quarantine toobusy` lets it run.
