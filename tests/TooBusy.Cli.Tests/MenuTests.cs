@@ -662,15 +662,16 @@ public sealed class MenuTests : CliAppTests
         // The run is aborted while the first new task is worked on. The menu it comes back to says which task was
         // interrupted instead of the number of tasks; Run takes that task first, and when the run is over the tasks
         // are counted.
+        var clock = new PacedClock();
         var keys = new Keys()
             .Hold(() => Shown("interrupted: #100 Rename the settings page")).Press(Keys.Enter)
             .Hold(() => Shown("Read src/Orders/Order.cs")).Type("/")
             .Hold(() => Shown("❯ stop")).Press(Keys.Down, Keys.Enter)
-            .Hold(() => Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
+            .Hold(() => clock.Hurried = Shown("interrupted: #101 Show the total of an order in its header")).Press(Keys.Enter)
             .Hold(() => Shown("❯ Run          11 tasks")).Until("❯ Exit", Keys.Up).Press(Keys.Enter);
         var context = Context(null) with
         {
-            Clock = new PacedClock(),
+            Clock = clock,
             Terminal = new TerminalDevice(Watched(keys).Read, () => (120, 30)) { KeyWaiting = () => keys.Waiting },
         };
 

@@ -22,16 +22,25 @@ public sealed class InstantClock : IClock
 }
 
 // A clock whose time passes as the run asks for it but twenty times faster than the real one: a demo is over in
-// seconds, and a key that is held back for a moment of it still finds the run where it waits for it.
+// seconds, and a key that is held back for a moment of it still finds the run where it waits for it. A run that no key
+// waits for is Hurried: it takes no time, as a whole demo at this pace may take longer on a slow machine than a hold
+// waits for it.
 public sealed class PacedClock : IClock
 {
     long ticks = InstantClock.Start.UtcTicks;
+    volatile bool hurried;
+
+    public bool Hurried
+    {
+        get => hurried;
+        set => hurried = value;
+    }
 
     public DateTimeOffset Now => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
 
     public async Task DelayAsync(TimeSpan time, CancellationToken cancellationToken)
     {
-        await Task.Delay(time / 20, cancellationToken);
+        await Task.Delay(hurried ? TimeSpan.Zero : time / 20, cancellationToken);
         Interlocked.Add(ref ticks, time.Ticks);
     }
 }
