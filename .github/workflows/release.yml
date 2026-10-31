@@ -102,4 +102,4 @@ jobs:
           cat SHA256SUMS
       - name: Tag the commit and publish the release
         if: github.ref == 'refs/heads/main'
-        run: gh release create "$TAG" archives/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+        run: gh release create "$TAG" archives/* --target "$GITHUB_SHA" --title "$TAG" --notes ""
