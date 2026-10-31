@@ -16,7 +16,13 @@ brew install bitpatch/tap/toobusy
 
 `brew upgrade toobusy` brings a new version.
 
-Without Homebrew, ready binaries are in the [GitHub releases](https://github.com/bitpatch/toobusy/releases/latest).
+Without Homebrew:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bitpatch/toobusy/main/install.sh | sh
+```
+
+It installs into `~/.local/bin`, and running it again brings a new version. `TOOBUSY_INSTALL_DIR` sets another folder, and `TOOBUSY_VERSION` a given version.
 
 `toobusy doctor` tells you what is missing. In short, you need Claude Code, GitHub CLI and Git.
 

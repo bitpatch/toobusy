@@ -40,3 +40,10 @@ jobs:
           global-json-file: global.json
       - run: dotnet publish src/TooBusy.Cli -c Release -r linux-x64 -o artifacts/native
       - run: artifacts/native/toobusy --version
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck install.sh tools/write-formula.sh

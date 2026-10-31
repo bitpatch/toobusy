@@ -143,3 +143,27 @@ jobs:
           git add Formula/toobusy.rb
           git diff --cached --quiet || git commit -m "toobusy $VERSION"
           git push
+
+  # After the release, as install.sh takes the latest one. 1.0.0 stays on the releases page, so that it has something
+  # older to replace.
+  install:
+    name: Install (${{ matrix.os }})
+    needs: [version, publish]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04]
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install an older version
+        run: |
+          TOOBUSY_VERSION=1.0.0 sh install.sh
+          test "$("$HOME/.local/bin/toobusy" --version)" = 1.0.0
+      - name: Replace it with the latest
+        run: |
+          sh install.sh
+          test "$("$HOME/.local/bin/toobusy" --version)" = "$VERSION"
