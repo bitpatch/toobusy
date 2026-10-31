@@ -1,0 +1,105 @@
+name: Release
+
+# A push to main is a merged release pull request. A run started by hand on another branch does all of it but the
+# publishing, to try this workflow without a release: gh workflow run release.yml --ref develop
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      new: ${{ steps.read.outputs.new }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: read
+        run: |
+          version=$(sed -n 's|.*<VersionPrefix>\(.*\)</VersionPrefix>.*|\1|p' Directory.Build.props)
+          if [ -z "$version" ]; then
+            echo "::error::Directory.Build.props has no VersionPrefix."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          found=$(git ls-remote --tags origin "refs/tags/v$version")
+          if [ -n "$found" ]; then
+            echo "::notice::The tag v$version exists, so there is nothing to release."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "The tag v$version does not exist yet: releasing it."
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  checks:
+    name: Checks
+    needs: version
+    if: needs.version.outputs.new == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  # Native AOT does not cross-compile between operating systems. A Linux binary asks for the glibc of the machine that
+  # builds it, so both are built on the oldest Ubuntu the runners have, for them to run on as many machines as they can.
+  binaries:
+    name: Binary (${{ matrix.asset }})
+    needs: [version, checks]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, rid: osx-arm64, asset: toobusy-macos-arm64 }
+          - { os: macos-15-intel, rid: osx-x64, asset: toobusy-macos-x64 }
+          - { os: ubuntu-22.04, rid: linux-x64, asset: toobusy-linux-x64 }
+          - { os: ubuntu-22.04-arm, rid: linux-arm64, asset: toobusy-linux-arm64 }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      RID: ${{ matrix.rid }}
+      ASSET: ${{ matrix.asset }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet publish src/TooBusy.Cli -c Release -r "$RID" -p:VersionSuffix= -o artifacts/native
+      - name: Check the version it prints
+        run: |
+          printed=$(artifacts/native/toobusy --version)
+          echo "$printed"
+          test "$printed" = "$VERSION"
+      - run: tar -czf "$ASSET.tar.gz" -C artifacts/native toobusy
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [version, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: v${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: archives
+          merge-multiple: true
+      - name: Write the checksums
+        working-directory: archives
+        run: |
+          sha256sum toobusy-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Tag the commit and publish the release
+        if: github.ref == 'refs/heads/main'
+        run: gh release create "$TAG" archives/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes

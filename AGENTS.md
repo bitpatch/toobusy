@@ -27,6 +27,8 @@ dotnet run --project src/TooBusy.Cli -- about             # how a run works, wit
 dotnet run --project src/TooBusy.Cli -- doctor            # checks everything a run needs; changes nothing
 dotnet run --project src/TooBusy.Cli -- doctor --demo     # the same over a made-up machine that has it all
 dotnet publish src/TooBusy.Cli -c Release -r osx-arm64    # native binary
+dotnet publish src/TooBusy.Cli -c Release -r osx-arm64 -p:VersionSuffix=    # the same as a release builds it, whose version has no suffix
+gh workflow run release.yml --ref develop                 # the release workflow without the publishing, with the checks and the four binaries
 tools/screenshot.py init --demo -- "until:Choose another" shot down enter until:Filter shot tab shot blink   # pictures of the screen in a new folder of artifacts/screens; the setup reads from GitHub first: wait for its question
 tools/screenshot.py run --demo -- "until:Edit src" shot type:/ shot   # a run goes on by itself: wait for what it shows
 ```
@@ -52,6 +54,7 @@ A change is ready when the build, the tests and the format check pass. A test ru
 - When an issue is taken into work, move it to `In Progress` on the board. When the work is finished, commit the result, push it to `develop` and close the issue. In a conversation with the owner, ask before committing, as described in Reporting.
 - All development happens on `develop`, the default branch. `main` is protected and holds released code only: it changes through a release pull request from `develop`. Never commit or push to `main`.
 - CI runs only for release pull requests into `main`, not for `develop`. Run the build, the tests and the format check locally before pushing.
+- A release is made by bumping `VersionPrefix` in `Directory.Build.props` on `develop`, opening the release pull request from `develop` into `main` and merging it. `.github/workflows/release.yml` then publishes the binaries to GitHub Releases, and a merge whose version already has its tag publishes nothing. docs/ARCHITECTURE.md has the details.
 - The original script that toobusy grows out of is not in this repository. Ask the owner when its behaviour matters.
 
 ## Reporting

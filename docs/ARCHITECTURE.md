@@ -207,6 +207,17 @@ The tool ships as a native binary, so every source project is built with `IsAotC
 
 A dependency is added only after checking that it publishes without AOT warnings.
 
+## Releases
+
+A release is made by bumping `VersionPrefix` in `Directory.Build.props` on `develop`, opening the release pull request from `develop` into `main` and merging it. The merge is a push to `main`, which starts `.github/workflows/release.yml`:
+
+1. `Version` reads `VersionPrefix`. When the tag `v<version>` exists, it says so and the run ends there, so that a merge without a new version publishes nothing.
+2. `Checks` calls the whole of `ci.yml`, so that a release passes what its pull request passes: the build, the tests and the format check on Linux and macOS.
+3. `Binary` publishes the Native AOT binary of `osx-arm64`, `osx-x64`, `linux-x64` and `linux-arm64`, each on a runner of that system and architecture. `-p:VersionSuffix=` takes the `dev` suffix off, and the job fails unless `toobusy --version` prints the version alone. The binary goes alone into an archive whose name has no version, as `toobusy-macos-arm64.tar.gz`, so that `https://github.com/bitpatch/toobusy/releases/latest/download/<name>` always leads to the latest one. The names are such that tools that pick an asset by system and architecture, as mise and eget, recognise them. A Linux binary asks for the glibc of the machine that builds it, so both are built on Ubuntu 22.04, the oldest the runners have, and need glibc 2.34. When the runners drop it, the next one raises that, and the README says it.
+4. `Publish` writes `SHA256SUMS` and runs `gh release create`, which makes the tag on the merged commit once all the files are up. A failure before that publishes nothing and leaves no tag, so that the run can be run again.
+
+Started by hand on another branch, the workflow does all of this but the last command: `gh workflow run release.yml --ref develop` tries it without a release, as long as the version has no tag. The binaries of macOS are not signed yet, as [#110](https://github.com/bitpatch/toobusy/issues/110) says.
+
 ## Conventions
 
 - macOS and Linux are what the tool runs on for now. Windows is not built: a command of a project runs through `sh -c`, the hook and the status line of a session are POSIX shell commands, and nothing sets the console to UTF-8. [#89](https://github.com/bitpatch/toobusy/issues/89) lists what Windows needs, for when somebody runs the tool there. A branch for a platform comes with a test that runs it, and not before; the fixes of the doctor name those of Windows, which their tests check.

@@ -8,7 +8,41 @@ Unfortunately, I work on a Mac, so I have only tested it there. If anyone helps 
 
 ## Installation
 
-There is no release yet, but it is coming soon, and then this is where it will say how to install. For now, build from source: `dotnet publish src/TooBusy.Cli -c Release -r osx-arm64`, you need the .NET 10 SDK.
+Every release on GitHub has a ready binary for macOS and Linux, and nothing else is needed to run it. Download the one for your machine and put it on the `PATH`. On a Mac with Apple Silicon:
+
+```sh
+curl -fsSL https://github.com/bitpatch/toobusy/releases/latest/download/toobusy-macos-arm64.tar.gz | tar -xz
+sudo mkdir -p /usr/local/bin
+sudo mv toobusy /usr/local/bin/
+toobusy --version
+```
+
+On another machine, put the name of its archive into the first command:
+
+| Machine | Archive |
+| --- | --- |
+| macOS, Apple Silicon | `toobusy-macos-arm64.tar.gz` |
+| macOS, Intel | `toobusy-macos-x64.tar.gz` |
+| Linux, x64 | `toobusy-linux-x64.tar.gz` |
+| Linux, arm64 | `toobusy-linux-arm64.tar.gz` |
+
+The first release is not out yet: until then these links lead nowhere, and the way is to build from source, as said below.
+
+Only macOS is tested so far. The Linux binaries are built and start, and that is all that is known of them. They need glibc 2.34 or newer, as on Ubuntu 22.04, Debian 12 or RHEL 9, so they do not run on Alpine.
+
+Download with `curl`, as above, and not in a browser. The binaries are not signed yet, and macOS refuses to open one that came through a browser. If that happened, `xattr -d com.apple.quarantine toobusy` lets it run.
+
+The file `SHA256SUMS` of a release has the checksums of its archives. To check an archive you downloaded as a file, download `SHA256SUMS` next to it and run `shasum -a 256 -c SHA256SUMS --ignore-missing` on macOS or `sha256sum -c SHA256SUMS --ignore-missing` on Linux.
+
+### Building from source
+
+You need the .NET 10 SDK. In a clone of the repository run
+
+```sh
+dotnet publish src/TooBusy.Cli -c Release -r osx-arm64
+```
+
+with `osx-x64`, `linux-x64` or `linux-arm64` for another machine. The binary lands in `src/TooBusy.Cli/bin/Release/net10.0/osx-arm64/publish/`, and such a build says it is one in development: `1.0.0.dev` and its commit.
 
 ### What you need on the machine
 
