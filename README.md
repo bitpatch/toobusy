@@ -8,7 +8,15 @@ Unfortunately, I work on a Mac, so I have only tested it there. If anyone helps 
 
 ## Installation
 
-Ready binaries for macOS and Linux are in the [GitHub releases](https://github.com/bitpatch/toobusy/releases/latest). On a Mac with Apple Silicon:
+With [Homebrew](https://brew.sh), on macOS and Linux:
+
+```sh
+brew install bitpatch/tap/toobusy
+```
+
+`brew upgrade toobusy` brings a new version.
+
+Without Homebrew, ready binaries are in the [GitHub releases](https://github.com/bitpatch/toobusy/releases/latest). On a Mac with Apple Silicon:
 
 ```sh
 curl -fsSL https://github.com/bitpatch/toobusy/releases/latest/download/toobusy-macos-arm64.tar.gz | tar -xz

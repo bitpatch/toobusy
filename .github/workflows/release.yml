@@ -100,6 +100,46 @@ jobs:
         run: |
           sha256sum toobusy-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: checksums
+          path: archives/SHA256SUMS
+          if-no-files-found: error
       - name: Tag the commit and publish the release
         if: github.ref == 'refs/heads/main'
         run: gh release create "$TAG" archives/* --target "$GITHUB_SHA" --title "$TAG" --notes ""
+
+  # A job of its own, as the tag stops a new run of a published release: after a failure, such as a token that ran out,
+  # re-running the failed jobs of the run does this one alone.
+  tap:
+    name: Tap
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: checksums
+      - name: Write the formula
+        run: |
+          tools/write-formula.sh "$VERSION" SHA256SUMS > toobusy.rb
+          cat toobusy.rb
+      - uses: actions/checkout@v7
+        if: github.ref == 'refs/heads/main'
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Push the formula to the tap
+        if: github.ref == 'refs/heads/main'
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          cp ../toobusy.rb Formula/toobusy.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/toobusy.rb
+          git diff --cached --quiet || git commit -m "toobusy $VERSION"
+          git push
